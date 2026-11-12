@@ -91,7 +91,7 @@ test('host: apply/inject contract', () => {
 })
 
 test('host: studio tools are registered once each', () => {
-  const names = [...read('index.js').matchAll(/name:\s*'(studio_[a-z_]+)'/g)].map((m) => m[1])
+  const names = [...hostText.matchAll(/name:\s*'(studio_[a-z_]+)'/g)].map((m) => m[1])
   assert.ok(names.length >= 30, `expected at least 30 studio tools, found ${names.length}`)
   assert.equal(new Set(names).size, names.length, 'duplicate studio tool name')
 })
@@ -131,7 +131,7 @@ test('host: domain layer lives in src/host and stays out of index.js', () => {
   assert.ok(index.includes("from './src/host/domain.js'"), 'index.js must import the domain layer')
   assert.ok(!/^function sanitizeRequirement\(/m.test(index), 'sanitizeRequirement must not be re-declared in index.js')
   const lines = index.split(/\r?\n/).length
-  assert.ok(lines < 3900, `index.js is still ${lines} lines; keep splitting by domain`)
+  assert.ok(lines < 2700, `index.js is still ${lines} lines; keep splitting by domain`)
 })
 
 test('host: index.js imports every domain symbol it uses', () => {

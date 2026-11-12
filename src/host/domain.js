@@ -1880,3 +1880,27 @@ export function canonicalAuthor(who, config) {
 }
 
 export const ROLE_LABELS = Object.fromEntries(ROLE_IDS.map(role => [role, DEFAULT_ROLES[role].label]))
+/** Compile the author-facing parameter spec into a registry-ready tool. */
+export function defineStudioTool(spec) {
+  const properties = {}
+  const required = []
+  for (const [key, value] of Object.entries(spec.parameters ?? {})) {
+    const { required: isRequired, ...schema } = value
+    properties[key] = schema
+    if (isRequired === true) required.push(key)
+  }
+  const parameters = { type: 'object', properties }
+  if (required.length > 0) parameters.required = required
+  return {
+    name: spec.name,
+    description: spec.description,
+    parameters,
+    output: {
+      schema: {},
+      render(_args, value) {
+        return [{ type: 'text', text: typeof value === 'string' ? value : JSON.stringify(value, null, 2) }]
+      },
+    },
+    execute: spec.execute,
+  }
+}
