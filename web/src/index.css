@@ -1378,6 +1378,9 @@ html body [data-dsh-studio][data-dsh-studio-portal] {
 [data-dsh-studio] .ds-palette-veil { position: fixed; inset: 0; z-index: 120; background: rgba(9, 9, 11, .38); display: flex; align-items: flex-start; justify-content: center; padding-top: 12vh }
 [data-dsh-studio] .ds-palette { width: min(560px, 92vw); background: var(--ds-surface, #fff); border: 1px solid var(--ds-line, #e4e4e7); border-radius: 12px; box-shadow: 0 24px 64px rgba(0, 0, 0, .28); overflow: hidden }
 [data-dsh-studio] .ds-palette-input { width: 100%; height: 44px; padding: 0 14px; border: 0; border-bottom: 1px solid var(--ds-line, #e4e4e7); background: transparent; color: inherit; font-size: 14px; outline: none }
+[data-dsh-studio] .ds-palette-flow { display: flex; align-items: center; gap: 8px; padding: 8px 14px 0; font-size: 12px; color: var(--ds-muted, #71717a) }
+[data-dsh-studio] .ds-palette-flow::before { content: ""; width: 6px; height: 6px; border-radius: 999px; background: #7c3aed }
+[data-dsh-studio] .ds-palette-flow[data-flow="expert"]::before { background: #0ea5e9 }
 [data-dsh-studio] .ds-palette-list { max-height: min(52vh, 420px); overflow: auto; padding: 6px }
 [data-dsh-studio] .ds-palette-item { display: flex; align-items: center; gap: 8px; padding: 8px 10px; border-radius: 8px; cursor: pointer; font-size: 13px }
 [data-dsh-studio] .ds-palette-item[data-active="1"] { background: color-mix(in srgb, var(--ds-accent, #18181b) 10%, transparent) }

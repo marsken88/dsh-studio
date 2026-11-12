@@ -117,6 +117,9 @@ export const ACTION_ITEMS = [
   { id: 'theme:light', label: '切换主题：明亮', hint: '浅色界面', keys: '主题 明亮 light theme 浅色' },
   { id: 'theme:dark', label: '切换主题：深色', hint: '深色界面', keys: '主题 深色 dark theme 夜间' },
   { id: 'theme:system', label: '切换主题：跟随系统', hint: '跟随宿主或操作系统的深浅色', keys: '主题 系统 system theme 自动' },
+  { id: 'card-advance', label: '把卡片推进到下一列', hint: '选一张卡 → 推进到下一状态', keys: '推进 advance 下一列 换列 移动 move card' },
+  { id: 'card-dispatch', label: '把卡片派给专家', hint: '选一张卡 → 选一位专家跑起来', keys: '派单 dispatch assign 执行 run 专家 expert card' },
+  { id: 'card-comment', label: '给卡片留言', hint: '选一张卡 → 写一句讨论', keys: '留言 comment 讨论 评论 card' },
   { id: 'refresh', label: '刷新数据', hint: '重新拉一次看板与需求', keys: '刷新 refresh 重载 同步' },
   ...SETTINGS_PANES.map((pane) => ({ id: 'settings:' + pane.id, label: '打开设置：' + pane.label, hint: '设置 → ' + pane.label, keys: '设置 settings 配置 ' + pane.label + ' ' + pane.id })),
 ]
@@ -157,29 +160,93 @@ export function filterItems(items, query, limit = 20) {
 
 const KIND_LABEL = { task: '卡片', requirement: '需求', release: '版本', expert: '专家', team: '专家团', project: '项目', skill: '技能', action: '操作' }
 
+const CARD_FLOWS = {
+  'card-advance': { step: 'card', title: '推进到下一列' },
+  'card-dispatch': { step: 'card', title: '派给专家' },
+  'card-comment': { step: 'card', title: '给卡片留言' },
+}
+
+/** 卡片在状态序列里的下一列；已经是最后一列时返回 null。 */
+export function nextStatusOf(state, taskId) {
+  const statuses = state.statuses ?? []
+  const task = (state.tasks ?? []).find((entry) => entry.id === taskId)
+  if (task === undefined) return null
+  const index = statuses.findIndex((entry) => entry.id === task.status)
+  if (index < 0 || index + 1 >= statuses.length) return null
+  return statuses[index + 1].id
+}
+
 export function createPalette({ h, React }) {
   return function Palette({ state, onPick, onClose }) {
     const [query, setQuery] = React.useState('')
     const [active, setActive] = React.useState(0)
+    const [flow, setFlow] = React.useState(null)
     const inputRef = React.useRef(null)
     const all = React.useMemo(() => paletteItems(state), [state])
-    const list = React.useMemo(() => filterItems(all, query), [all, query])
+    const cards = React.useMemo(() => searchItems(state).filter((item) => item.kind === 'task'), [state])
+    const experts = React.useMemo(() => searchItems(state).filter((item) => item.kind === 'expert'), [state])
+    const list = React.useMemo(() => {
+      if (flow === null) return filterItems(all, query)
+      if (flow.step === 'expert') return filterItems(experts, query)
+      return filterItems(cards, query)
+    }, [flow, all, cards, experts, query])
 
     React.useEffect(() => { inputRef.current?.focus() }, [])
     React.useEffect(() => { setActive(0) }, [query])
 
+    const start = (action) => {
+      setFlow({ action, step: CARD_FLOWS[action].step })
+      setQuery('')
+      setActive(0)
+    }
+
     const pick = (item) => {
       if (item === undefined) return
-      onPick(item)
+      if (flow === null) {
+        if (item.kind === 'action' && CARD_FLOWS[item.id] !== undefined) { start(item.id); return }
+        onPick(item)
+        onClose()
+        return
+      }
+      if (flow.step === 'card') {
+        if (flow.action === 'card-dispatch') {
+          setFlow({ action: flow.action, cardId: item.id, step: 'expert' })
+          setQuery('')
+          setActive(0)
+          return
+        }
+        onPick({ kind: 'run', action: flow.action, cardId: item.id })
+        onClose()
+        return
+      }
+      onPick({ kind: 'run', action: flow.action, cardId: flow.cardId, expertId: item.id })
       onClose()
     }
 
+    const back = () => {
+      if (flow === null) { onClose(); return }
+      setFlow(flow.step === 'expert' ? { action: flow.action, step: 'card' } : null)
+      setQuery('')
+      setActive(0)
+    }
+
     const onKeyDown = (event) => {
-      if (event.key === 'Escape') { event.preventDefault(); onClose(); return }
+      if (event.key === 'Escape') { event.preventDefault(); back(); return }
       if (event.key === 'ArrowDown') { event.preventDefault(); setActive((index) => Math.min(list.length - 1, index + 1)); return }
       if (event.key === 'ArrowUp') { event.preventDefault(); setActive((index) => Math.max(0, index - 1)); return }
       if (event.key === 'Enter') { event.preventDefault(); pick(list[active]) }
     }
+
+    const placeholder = flow === null
+      ? '搜索卡片 / 需求 / 版本 / 专家 / 技能，或输入「新建」「导出」「推进」（↑↓ 选择，回车执行，Esc 关闭）'
+      : flow.step === 'expert'
+        ? '选一位专家（输入过滤，Esc 返回）'
+        : '选一张卡片（输入过滤，Esc 返回）'
+
+    const banner = flow === null
+      ? null
+      : h('div', { className: 'ds-palette-flow', 'data-flow': flow.step },
+        CARD_FLOWS[flow.action].title + (flow.step === 'expert' ? ' → 选一位专家' : ' → 选一张卡片'))
 
     return h('div', { className: 'ds-palette-veil', onClick: onClose },
       h('div', {
@@ -189,10 +256,11 @@ export function createPalette({ h, React }) {
         'data-palette': '1',
         onClick: (event) => event.stopPropagation(),
       },
+        banner,
         h('input', {
           ref: inputRef,
           className: 'ds-palette-input',
-          placeholder: '搜索卡片 / 需求 / 版本，或输入「新建」「导出」「主题」（↑↓ 选择，回车执行，Esc 关闭）',
+          placeholder,
           value: query,
           onChange: (event) => setQuery(event.target.value),
           onKeyDown,
@@ -200,7 +268,8 @@ export function createPalette({ h, React }) {
         }),
         h('div', { className: 'ds-palette-list' },
           list.length === 0
-            ? h('div', { className: 'ds-hint', style: { padding: '10px 12px' } }, '没有匹配的内容')
+            ? h('div', { className: 'ds-hint', style: { padding: '10px 12px' } },
+              flow === null ? '没有匹配的内容' : flow.step === 'expert' ? '没有匹配的专家' : '没有匹配的卡片')
             : list.map((item, index) => h('div', {
               key: item.key,
               className: 'ds-palette-item',

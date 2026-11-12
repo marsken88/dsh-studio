@@ -136,20 +136,32 @@ test('palette: filterItems matches words, ranks prefixes first and stops when em
 test('palette: actions are searchable next to records', async () => {
   const { actionItems, paletteItems } = await import('../web/src/studio/palette.js')
   const actions = actionItems()
-  assert.equal(actions.length, 29)
-  assert.equal(new Set(actions.map((item) => item.id)).size, 29, 'action ids must be unique')
+  assert.equal(actions.length, 32)
+  assert.equal(new Set(actions.map((item) => item.id)).size, 32, 'action ids must be unique')
   for (const item of actions) {
     assert.equal(item.kind, 'action')
     assert.ok(item.label.length > 0 && item.search.length > 0)
   }
   const state = { tasks: [{ id: 't1', code: 'DEV-001', title: '退款对账', status: 'dev' }], requirements: [], releases: [], statuses: [{ id: 'dev', label: '开发中' }] }
   const all = paletteItems(state)
-  assert.equal(all.length, 30, '29 actions + one task')
+  assert.equal(all.length, 33, '32 actions + one task')
   assert.equal(filterItems(all, '新建需求')[0].id, 'new-requirement')
   assert.equal(filterItems(all, '导出')[0].kind, 'action')
   assert.equal(filterItems(all, '主题').length, 3)
   assert.equal(filterItems(all, 'DEV-001')[0].kind, 'task')
   assert.deepEqual(filterItems(all, '不存在的词'), [])
+})
+
+test('palette: card flows resolve the next column and stop at the last one', async () => {
+  const { nextStatusOf } = await import('../web/src/studio/palette.js')
+  const state = {
+    statuses: [{ id: 'dev', label: '开发中' }, { id: 'review', label: '待评审' }, { id: 'done', label: '已完成' }],
+    tasks: [{ id: 't-1', status: 'dev' }, { id: 't-2', status: 'done' }, { id: 't-3' }],
+  }
+  assert.equal(nextStatusOf(state, 't-1'), 'review')
+  assert.equal(nextStatusOf(state, 't-2'), null)
+  assert.equal(nextStatusOf(state, 't-3'), null)
+  assert.equal(nextStatusOf(state, 'missing'), null)
 })
 
 test('palette: skills from the library are searchable and open the right pane', async () => {
