@@ -35,6 +35,7 @@ import { configureExportRoutes, handleExportRoute } from './src/host/routes/expo
 import { configureTaskRoutes, handleTaskRoute } from './src/host/routes/tasks.js'
 import { configureRequirementRoutes, handleRequirementRoute } from './src/host/routes/requirements.js'
 import { configureReleasesRoutes, handleReleasesRoute } from './src/host/routes/releases.js'
+import { configureConnectRoutes, handleConnectRoute } from './src/host/routes/connect.js'
 import { configureInsightsRoutes, handleInsightsRoute } from './src/host/routes/insights.js'
 import { configureAdminRoutes, handleAdminRoute } from './src/host/routes/admin.js'
 import { configureSkillsRoutes, handleSkillsRoute } from './src/host/routes/skills.js'
@@ -2610,150 +2611,7 @@ function registerRoutes(webCtx, store, ctx, getDispatcher = () => undefined) {
         sendJson(res, 200, { ok: true, state: publicState(store) })
         return
       }
-      if (method === 'GET' && route === '/market') {
-        sendJson(res, 200, {
-          ok: true,
-          title: store.snapshot().config.market.title,
-          items: store.snapshot().config.market.items,
-          installed: await installedPackages(),
-        })
-        return
-      }
-      if (method === 'POST' && route === '/market/install') {
-        const body = await readJsonBody(req)
-        const item = store.snapshot().config.market.items.find(entry => entry.id === String(body.id ?? ''))
-        if (item === undefined) throw new Error('unknown market item')
-        const result = await runPluginCli(['add', item.spec])
-        sendJson(res, 200, { ok: result.ok, result, installed: await installedPackages(), restartRequired: result.ok })
-        return
-      }
-      if (method === 'POST' && route === '/market/uninstall') {
-        const body = await readJsonBody(req)
-        const item = store.snapshot().config.market.items.find(entry => entry.id === String(body.id ?? ''))
-        const requested = String(body.pkg ?? '').trim()
-        const pkg = requested.length > 0 ? requested : (item === undefined ? undefined : await resolvePackageName(item.spec))
-        if (pkg === undefined) throw new Error('unknown market item')
-        const result = await runPluginCli(['remove', pkg])
-        sendJson(res, 200, { ok: result.ok, pkg, result, installed: await installedPackages(), restartRequired: result.ok })
-        return
-      }
-      if (method === 'GET' && route === '/integrations') {
-        const config = store.snapshot().config
-        sendJson(res, 200, {
-          ok: true,
-          gitlab: {
-            ready: gitlabReady(config),
-            syncing: syncTimer !== undefined,
-            projects: (config.gitlab.projects ?? []).map(project => ({
-              id: project.id,
-              ready: projectReady(config, project),
-              lastSyncAt: project.lastSyncAt,
-              lastSyncError: project.lastSyncError,
-            })),
-          },
-          feishu: {
-            ready: (config.feishu.bots ?? []).some(bot => bot.enabled && bot.webhook.length > 0),
-            lastError: INTEGRATION.lastPushError,
-          },
-          health: healthReport(),
-        })
-        return
-      }
-      if (method === 'GET' && route === '/integrations/health') {
-        sendJson(res, 200, { ok: true, ...healthReport() })
-        return
-      }
-      if (method === 'POST' && route === '/gitlab/sync') {
-        const body = await readJsonBody(req).catch(() => ({}))
-        const summary = await gitlabSync(store, body.project === undefined ? undefined : String(body.project))
-        sendJson(res, 200, { ok: true, summary, state: publicState(store) })
-        return
-      }
-      if (method === 'POST' && route === '/repos/save') {
-        const body = await readJsonBody(req)
-        // 老前端发 {project}，新脚本发 {repo}，两个都认。
-        const incoming = body.repo ?? body.project ?? body
-        if (String(incoming.name ?? incoming.project ?? '').trim() === '') {
-          throw new Error('仓库至少要填一个名字（或者 GitLab 项目路径），否则存下来是一条空记录')
-        }
-        const existing = store.snapshot().config.gitlab.projects
-        const wantedId = cleanId(incoming.id ?? incoming.name ?? incoming.project, 'repo')
-        const saved = existing.find(item => item.id === wantedId)
-        const merged = {
-          ...incoming,
-          id: wantedId,
-          // An empty token field means "keep the one already stored".
-          token: String(incoming.token ?? '').trim() || (saved?.token ?? ''),
-        }
-        await applyConfig(store, { gitlab: { projects: upsertById(existing, merged) } })
-        // 只回公开视图：token 不能出现在响应里。
-        const state = publicState(store)
-        sendJson(res, 200, { ok: true, repos: state.config.gitlab.projects, state })
-        return
-      }
-      if (method === 'POST' && route === '/repos/delete') {
-        const body = await readJsonBody(req)
-        const id = cleanId(body.id, 'repo')
-        await applyConfig(store, { gitlab: { projects: store.snapshot().config.gitlab.projects.filter(entry => entry.id !== id) } })
-        sendJson(res, 200, { ok: true, state: publicState(store) })
-        return
-      }
-      if (method === 'POST' && route === '/repos/test') {
-        const body = await readJsonBody(req)
-        const config = store.snapshot().config
-        const project = config.gitlab.projects.find(entry => entry.id === cleanId(body.id, 'repo'))
-        if (project === undefined) throw new Error('unknown project')
-        if (!projectReady(config, project)) throw new Error('这个仓库还没填全：地址 / 项目路径 / 访问令牌')
-        const info = await gitlabRequest(config, project, '/issues?per_page=1')
-        sendJson(res, 200, { ok: true, reachable: true, sample: Array.isArray(info) ? info.length : 0 })
-        return
-      }
-      if (method === 'POST' && route === '/bots/save') {
-        const body = await readJsonBody(req)
-        const incoming = body.bot ?? body
-        const existing = store.snapshot().config.feishu.bots
-        const wantedId = cleanId(incoming.id ?? incoming.name, 'bot')
-        const saved = existing.find(item => item.id === wantedId)
-        const merged = {
-          ...incoming,
-          id: wantedId,
-          // An empty webhook field means "keep the one already stored".
-          webhook: String(incoming.webhook ?? '').trim() || (saved?.webhook ?? ''),
-        }
-        await applyConfig(store, { feishu: { bots: upsertById(existing, merged) } })
-        const state = publicState(store)
-        sendJson(res, 200, { ok: true, bots: state.config.feishu.bots, state })
-        return
-      }
-      if (method === 'POST' && route === '/bots/delete') {
-        const body = await readJsonBody(req)
-        const id = cleanId(body.id, 'bot')
-        await applyConfig(store, { feishu: { bots: store.snapshot().config.feishu.bots.filter(entry => entry.id !== id) } })
-        sendJson(res, 200, { ok: true, state: publicState(store) })
-        return
-      }
-      if (method === 'POST' && route === '/feishu/test') {
-        const body = await readJsonBody(req).catch(() => ({}))
-        const config = store.snapshot().config
-        const wanted = body.id === undefined ? '' : cleanId(body.id, 'bot')
-        const bots = (config.feishu.bots ?? []).filter(bot => wanted.length === 0 || bot.id === wanted)
-        const results = []
-        for (const bot of bots) {
-          try {
-            const result = await feishuPush(bot.webhook, '【需求&任务工作空间】这是一条测试消息，收到即说明群通知已接通。')
-            results.push({ bot: bot.id, name: bot.name, ...result })
-          } catch (error) {
-            results.push({ bot: bot.id, name: bot.name, ok: false, error: String(error?.message ?? error).slice(0, 200) })
-          }
-        }
-        sendJson(res, 200, { ok: results.some(entry => entry.ok === true), results })
-        return
-      }
-      if (method === 'POST' && route === '/reset') {
-        await store.mutate(state => { state.tasks = [] })
-        sendJson(res, 200, { ok: true, state: publicState(store) })
-        return
-      }
+      if (await handleConnectRoute({ method, route, req, res, store, url })) return
       sendJson(res, 404, { ok: false, error: `no route ${method} ${route}` })
     } catch (error) {
       sendJson(res, 400, {
@@ -4124,6 +3982,7 @@ export function apply(ctx) {
     configureDispatcher({ feishuBroadcast, INTEGRATION, bugSla, removeWorktree, ensureWorktree, serviceOf, workProjectOf, serviceConflicts })
     configureIntegrations({ newTaskId, serviceOf, getStore: () => activeStore })
     configureExportRoutes({ sendCsv, requirementProgress, sessions: SESSIONS })
+    configureConnectRoutes({ applyConfig, installedPackages, publicState, readJsonBody, resolvePackageName, runPluginCli, sendJson, upsertById, getSyncTimer: () => syncTimer })
     configureAdminRoutes({ applyConfig, checkToolAccess, operatorFromSessionId, operatorOf, publicState, readJsonBody, sendJson })
     configureSkillsRoutes({ isSkillName, readJsonBody, sendJson, skillFromMarkdown, skillFromZip, skillsRoot, getSkills: () => activeSkills })
     configureInsightsRoutes({ getDispatcher: () => activeDispatcher, sendJson, buildMetrics, buildAnalytics, workloadReport, burndownReport })
