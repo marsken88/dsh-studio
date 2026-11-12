@@ -35,6 +35,7 @@ import { configureExportRoutes, handleExportRoute } from './src/host/routes/expo
 import { configureTaskRoutes, handleTaskRoute } from './src/host/routes/tasks.js'
 import { configureRequirementRoutes, handleRequirementRoute } from './src/host/routes/requirements.js'
 import { configureReleasesRoutes, handleReleasesRoute } from './src/host/routes/releases.js'
+import { configureAgentsRoutes, handleAgentsRoute } from './src/host/routes/agents.js'
 import { configureConnectRoutes, handleConnectRoute } from './src/host/routes/connect.js'
 import { configureInsightsRoutes, handleInsightsRoute } from './src/host/routes/insights.js'
 import { configureAdminRoutes, handleAdminRoute } from './src/host/routes/admin.js'
@@ -2556,61 +2557,7 @@ function registerRoutes(webCtx, store, ctx, getDispatcher = () => undefined) {
         sendJson(res, 200, { ok: true, task, state: publicState(store) })
         return
       }
-      if (method === 'GET' && route === '/agents') {
-        const dispatcher = getDispatcher()
-        sendJson(res, 200, dispatcher === undefined
-          ? { ok: false, error: 'dispatcher not available yet' }
-          : { ok: true, ...dispatcher.status() })
-        return
-      }
-      if (method === 'GET' && route === '/agents/policy') {
-        const dispatcher = getDispatcher()
-        if (dispatcher === undefined) {
-          sendJson(res, 200, { ok: false, error: 'dispatcher not available yet' })
-          return
-        }
-        const cfg = store.snapshot().config.agents
-        const live = []
-        for (const info of dispatcher.running.values()) {
-          let current = ''
-          try {
-            const agent = dispatcher.ctx.agents.get(info.sessionId)
-            current = String(dispatcher.ctx.permissionPresets.current(agent?.session))
-          } catch (error) {
-            current = `unknown: ${error?.message ?? error}`
-          }
-          live.push({ sessionId: info.sessionId, expert: info.expert, taskId: info.taskId, preset: current })
-        }
-        sendJson(res, 200, {
-          ok: true,
-          configured: {
-            sandbox: SANDBOX_MODES.includes(String(cfg.sandbox ?? '')) ? cfg.sandbox : 'workspace-write',
-            isolation: ISOLATION_MODES.includes(String(cfg.isolation ?? '')) ? cfg.isolation : 'none',
-            worktreeRoot: String(cfg.worktreeRoot ?? ''),
-            cleanupWorktree: String(cfg.cleanupWorktree ?? 'manual'),
-          },
-          isolation: cfg.isolation ?? 'none',
-          live,
-        })
-        return
-      }
-      if (method === 'POST' && route === '/agents/run') {
-        const dispatcher = getDispatcher()
-        if (dispatcher === undefined) throw new Error('dispatcher not available yet')
-        const body = await readJsonBody(req)
-        await dispatcher.launchNow(String(body.id ?? ''), String(body.expert ?? ''))
-        sendJson(res, 200, { ok: true, state: publicState(store), agents: dispatcher.status() })
-        return
-      }
-      if (method === 'POST' && route === '/agents/stop') {
-        const dispatcher = getDispatcher()
-        if (dispatcher === undefined) throw new Error('dispatcher not available yet')
-        const body = await readJsonBody(req)
-        const id = String(body.id ?? '')
-        dispatcher.abortTask(id, body.expert === undefined ? undefined : String(body.expert))
-        sendJson(res, 200, { ok: true, state: publicState(store) })
-        return
-      }
+      if (await handleAgentsRoute({ method, route, req, res, store, url })) return
       if (await handleConnectRoute({ method, route, req, res, store, url })) return
       sendJson(res, 404, { ok: false, error: `no route ${method} ${route}` })
     } catch (error) {
@@ -3982,6 +3929,7 @@ export function apply(ctx) {
     configureDispatcher({ feishuBroadcast, INTEGRATION, bugSla, removeWorktree, ensureWorktree, serviceOf, workProjectOf, serviceConflicts })
     configureIntegrations({ newTaskId, serviceOf, getStore: () => activeStore })
     configureExportRoutes({ sendCsv, requirementProgress, sessions: SESSIONS })
+    configureAgentsRoutes({ publicState, readJsonBody, sendJson, getDispatcher: () => activeDispatcher })
     configureConnectRoutes({ applyConfig, installedPackages, publicState, readJsonBody, resolvePackageName, runPluginCli, sendJson, upsertById, getSyncTimer: () => syncTimer })
     configureAdminRoutes({ applyConfig, checkToolAccess, operatorFromSessionId, operatorOf, publicState, readJsonBody, sendJson })
     configureSkillsRoutes({ isSkillName, readJsonBody, sendJson, skillFromMarkdown, skillFromZip, skillsRoot, getSkills: () => activeSkills })
