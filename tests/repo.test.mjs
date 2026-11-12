@@ -98,13 +98,13 @@ test('host: studio tools are registered once each', () => {
 })
 
 test('client: heavy helpers live in web/src/studio and client.src.js ratchets down', () => {
-  for (const file of ['web/src/studio/markdown.js', 'web/src/studio/format.js', 'web/src/studio/labels.js', 'web/src/studio/roster.js']) {
+  for (const file of ['web/src/studio/markdown.js', 'web/src/studio/format.js', 'web/src/studio/labels.js', 'web/src/studio/roster.js', 'web/src/studio/fields.js', 'web/src/studio/shell.js']) {
     assert.ok(existsSync(path(file)), file + ' missing')
   }
   const lines = read('client.src.js').split(/\r?\n/).length
-  assert.ok(lines < 8000, 'client.src.js is ' + lines + ' lines; keep lifting helpers into web/src/studio')
+  assert.ok(lines < 7950, 'client.src.js is ' + lines + ' lines; keep lifting helpers into web/src/studio')
   const maker = read('web/scripts/make-legacy.mjs')
-  for (const spec of ['./studio/markdown.js', './studio/format.js', './studio/labels.js', './studio/roster.js']) {
+  for (const spec of ['./studio/markdown.js', './studio/format.js', './studio/labels.js', './studio/roster.js', './studio/fields.js', './studio/shell.js']) {
     assert.ok(maker.includes(spec), 'make-legacy must keep importing ' + spec)
   }
   const legacy = read('web/src/legacy.js')

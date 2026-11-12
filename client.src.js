@@ -31,6 +31,9 @@ window.__ModuleLoader__.load({
       return Tip === null ? child : h(Tip, { key: node.key, label }, child)
     }
 
+    /* 表单适配层与共享抽屉已经搬到 web/src/studio，这边只负责把 h / kit 递进去。 */
+    const { TextField, TextAreaField, ChipField, CheckField, SelectField } = createFields({ h, kit, React })
+    const SideDrawer = createSideDrawer({ h, kit })
     /* 字段标签的悬停说明：只给「不看说明容易填错」的字段加，鼠标移上去出气泡。 */
     /* Markdown 内容字段：左编辑右预览（切换式），底部写清支持哪些语法。
        需求正文 / 文档正文 / 交付物正文 / 技能正文 / 任务需求 / 功能点说明 统一走这里。 */
@@ -56,98 +59,15 @@ window.__ModuleLoader__.load({
     /* 表单控件的 shadcn 适配层。
        legacy 代码全是 h(SelectField, { className:'ds-select', value, onChange(e) }, option…)
        这类写法；有了 UIKIT 就换成 Radix 版本，没有就原样用原生控件（单文件产物）。 */
-    function optionListOf(children) {
-      const out = []
-      React.Children.forEach(children, child => {
-        if (!React.isValidElement(child)) return
-        if (child.type === 'option') {
-          out.push({ value: String(child.props.value ?? ''), label: String(React.Children.toArray(child.props.children).join('')) })
-        } else if (child.type === 'optgroup') {
-          optionListOf(child.props.children).forEach(item => out.push(item))
-        }
-      })
-      return out
-    }
 
-    function SelectField({ className, children, value, onChange, disabled, ...rest }) {
-      const Select = kit('SelectBox')
-      if (Select === null) {
-        return h('select', { className, value, onChange, disabled, ...rest }, children)
-      }
-      const raw = optionListOf(children)
-      // Radix Select 不接受空字符串作为可展示项：有空值选项时用哨兵值代替，对外仍映射成 ''。
-      const hasEmpty = raw.some(option => option.value === '')
-      const options = raw.map(option => (hasEmpty && option.value === '' ? { ...option, value: '__empty__' } : option))
-      if (options.length === 0) options.push({ value: hasEmpty ? '__empty__' : '', label: '—' })
-      const current = value === undefined || value === null ? '' : String(value)
-      return h(Select, {
-        ...rest,
-        value: hasEmpty && current === '' ? '__empty__' : current,
-        options,
-        disabled,
-        onChange: next => {
-          if (typeof onChange !== 'function') return
-          onChange({ target: { value: next === '__empty__' ? '' : next } })
-        },
-      })
-    }
 
-    function TextField({ className, ...rest }) {
-      const Input = kit('Input')
-      if (Input === null) return h('input', { className, ...rest })
-      const { style, ...props } = rest
-      const extra = String(className ?? '')
-        .split(/\s+/)
-        .filter(name => name !== '' && name !== 'ds-input')
-        .join(' ')
-      return h(Input, {
-        ...props,
-        style,
-        className: `h-9 w-full min-w-0 text-sm${extra === '' ? '' : ' ' + extra}`,
-      })
-    }
 
-    function TextAreaField({ className, ...rest }) {
-      const Textarea = kit('Textarea')
-      if (Textarea === null) return h('textarea', { className, ...rest })
-      const { style, ...props } = rest
-      const rows = Number(props.rows) > 0 ? Number(props.rows) : 4
-      const extra = String(className ?? '').split(/\s+/).filter(name => name !== '' && name !== 'ds-input' && name !== 'ds-textarea').join(' ')
-      return h(Textarea, {
-        ...props,
-        style: { minHeight: `${Math.max(96, rows * 22 + 28)}px`, ...(style ?? {}) },
-        className: `flex min-h-16 w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm leading-relaxed shadow-sm outline-none transition-[color,box-shadow] placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-50${extra === '' ? '' : ' ' + extra}`,
-      })
-    }
 
 /* 徽章。legacy 写法是 h(ChipField, { className: 'ds-chip', ...rest }, 内容)；
        有 UIKIT 就渲染成 shadcn Badge（variant 按语义映射），没有就还是 span.ds-chip。 */
-    function ChipField({ className, variant, ...rest }) {
-      const Badge = kit('Badge')
-      if (Badge === null) return h('span', { className, ...rest })
-      const into = String(className ?? '')
-      const next = variant ?? (into.indexOf('ds-chip-blocked') >= 0 || into.indexOf('ds-chip-bug') >= 0 || rest['data-blocked'] === '1' || rest['data-danger'] === '1'
-        ? 'destructive'
-        : into.indexOf('ds-chip-code') >= 0 || rest['data-svc-missing'] === '1'
-          ? 'outline'
-          : 'secondary')
-      return h(Badge, { ...rest, variant: next, className })
-    }
 
     /* 布尔开关。legacy 写法是 h(CheckField, { checked, onChange(e) })， */
     /* 换了 UIKIT 就渲染成 Radix Switch，没有就还是原生 checkbox。 */
-    function CheckField({ className, checked, onChange, disabled, ...rest }) {
-      const Switch = kit('SwitchBox')
-      if (Switch === null) {
-        return h('input', { className, type: 'checkbox', checked: checked === true, disabled, onChange, ...rest })
-      }
-      return h(Switch, {
-        bare: true,
-        checked: checked === true,
-        disabled: disabled === true,
-        onChange: next => { if (typeof onChange === 'function') onChange({ target: { checked: next === true } }) },
-      })
-    }
 
     /* 进度条：有 UIKIT 用 Radix Progress，没有就回落原来的自绘条。 */
     function ProgressField({ value, tone }) {
@@ -3006,29 +2926,6 @@ html[data-dsh-theme="light"] [class*="rightbarCol"] { background: #fafafa !impor
     }
 
     /** Shared right-side editor drawer: fixed head, scrollable form, fixed action bar. */
-    function SideDrawer({ title, hint, onClose, footer, children }) {
-      const Sheet = kit('SheetDrawer')
-      if (Sheet !== null) {
-        return h(Sheet, { title, hint, onClose, footer }, children)
-      }
-      return h('div', {
-        className: 'ds-side-wrap',
-        onKeyDown: e => { if (e.key === 'Escape') onClose() },
-      },
-        h('div', { className: 'ds-side-mask', onClick: onClose }),
-        h('div', { className: 'ds-side', role: 'dialog', 'aria-modal': 'true' },
-          h('div', { className: 'ds-side-head' },
-            h('div', {},
-              h('div', { className: 'ds-side-title' }, title),
-              hint === undefined || hint === null ? null : h('div', { className: 'ds-hint' }, hint),
-            ),
-            h('button', { className: 'ds-btn', onClick: onClose }, '关闭'),
-          ),
-          h('div', { className: 'ds-side-body' }, children),
-          footer === undefined || footer === null ? null : h('div', { className: 'ds-side-foot' }, footer),
-        ),
-      )
-    }
 
     function ExpertsPanel({ config, onChanged }) {
       const experts = config.experts ?? []

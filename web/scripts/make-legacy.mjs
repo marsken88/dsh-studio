@@ -81,6 +81,8 @@ const imports = [
   "import { fmtTime, fmtDate } from './studio/format.js'",
   'import { ' + labelNames.join(', ') + " } from './studio/labels.js'",
   "import { buildRoster, filterRoster, ownerLabel, memberLabel, toDateInput, fromDateInput } from './studio/roster.js'",
+  "import { createFields } from './studio/fields.js'",
+  "import { createSideDrawer } from './studio/shell.js'",
 ].join('\n') + '\n\n'
 writeFileSync(target, banner + imports + text)
 console.log(`make-legacy: wrote ${target} (${text.length} chars)`)

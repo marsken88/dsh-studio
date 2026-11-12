@@ -9,7 +9,7 @@
 | `index.js` | 宿主半边：`apply(ctx)`、39 个 `studio_*` 工具、`/studio-api/*` 路由、SQLite 存储、派单引擎、门禁 | ✅ 直接改 |
 | `src/host/*.js` | 宿主层模块：`domain.js`（板列/数据形状/`sanitize*`/默认配置，纯函数）、`dispatcher.js`（派单引擎）、`executor.js`（用例执行、代码事实核对、健康检查）、`store.js`（`StudioStore`/`SecretStore`：SQLite 台账 + 快照 + 登录会话）、`integrations.js`（GitLab / 飞书 / 平台健康）、`routes/*.js`（按前缀拆出的 HTTP 处理：`exports.js` 导出 CSV、`auth.js` 统一登录、`tasks.js` 卡片/专家/列、`requirements.js` 需求/文档/公开提单、`releases.js` 版本/灰度/部署、`insights.js` 指标与工作台、`skills.js` 技能库读写上传、`admin.js` 配置/权限成员/审计/快照、`connect.js` 市场/集成健康/GitLab/仓库/飞书、`agents.js` 派单运行态与起停、`coding.js` 执行记录/失败重试/worktree/项目配置、`tools.js` 39 个 `studio_*` 工具） | ✅ 直接改，新逻辑优先放这里 |
 | `client.src.js` | 浏览器半边的手写源码（通过 `window.__ModuleLoader__` 注册面板） | ✅ 直接改（前端逻辑） |
-| `web/src/**` | shadcn/Radix 组件、样式、`legacy.js` 桥；`web/src/studio/*.js` 是从 `client.src.js` 抬出来的纯模块（`markdown.js` 渲染器、`format.js` 日期格式、`labels.js` 标签表、`roster.js` 负责人与候选人），由 `make-legacy` 生成的 `legacy.js` 顶部统一 import | ✅ 直接改（样式与组件） |
+| `web/src/**` | shadcn/Radix 组件、样式、`legacy.js` 桥；`web/src/studio/*.js` 是从 `client.src.js` 抬出来的纯模块（`markdown.js` 渲染器、`format.js` 日期格式、`labels.js` 标签表、`roster.js` 负责人与候选人、`fields.js` 表单适配层、`shell.js` 共享抽屉），由 `make-legacy` 生成的 `legacy.js` 顶部统一 import | ✅ 直接改（样式与组件） |
 | `dist/client.js` | `pnpm build` 的产物（单文件 IIFE，注意在仓库根 `dist/`，不是 `web/dist/`） | ❌ 生成物 |
 | `client.js`（包根） | 上面产物自动同步过来的副本，dsh 真正加载的那个 | ❌ 生成物 |
 | `cordis.patch.yml` | bundle patch，把本包挂进 profile | ✅ |
