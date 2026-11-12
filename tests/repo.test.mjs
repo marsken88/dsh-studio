@@ -112,6 +112,34 @@ test('client: heavy helpers live in web/src/studio and client.src.js ratchets do
     assert.ok(legacy.includes(spec), 'generated legacy module lost ' + spec)
   }
 })
+test('client: modules under web/src/studio do not call helpers left behind in client.src.js', () => {
+  const strip = (code) => code
+    .replace(/\/\*[\s\S]*?\*\//g, ' ')
+    .replace(/\/\/[^\n]*/g, ' ')
+    .replace(/\u0060(?:\\[\s\S]|[^\u0060\\])*\u0060/g, ' ')
+    .replace(/'(?:\\[\s\S]|[^'\\])*'/g, ' ')
+    .replace(/"(?:\\[\s\S]|[^"\\])*"/g, ' ')
+  const client = strip(read('client.src.js'))
+  const declared = new Set([...client.matchAll(/^\s*function ([A-Za-z_$][\w$]*)\(/gm)].map((m) => m[1]))
+  const modules = readdirSync(path('web/src/studio')).filter((name) => name.endsWith('.js'))
+  const offenders = new Set()
+  for (const name of modules) {
+    const code = strip(read('web/src/studio/' + name))
+    const local = new Set([
+      ...[...code.matchAll(/function ([A-Za-z_$][\w$]*)\(/g)].map((m) => m[1]),
+      ...[...code.matchAll(/const ([A-Za-z_$][\w$]*) =/g)].map((m) => m[1]),
+      ...[...code.matchAll(/import \{([^}]*)\}/g)].flatMap((m) => m[1].split(',').map((part) => part.trim().split(/\s+as\s+/).pop())),
+      ...[...code.matchAll(/export function create\w+\(\{([^}]*)\}\)/g)].flatMap((m) => m[1].split(',').map((part) => part.trim())),
+      'createFields', 'createSideDrawer', 'createMarkdown',
+    ])
+    for (const match of code.matchAll(/(?<![\w$.#])([A-Za-z_$][\w$]*)\s*\(/g)) {
+      const called = match[1]
+      if (declared.has(called) && !local.has(called)) offenders.add(name + ' calls ' + called)
+    }
+  }
+  assert.deepEqual([...offenders], [], 'moved module calls a helper that still lives in client.src.js')
+})
+
 test('ui: build-time guard rejects hsl(var( and unscoped portals', () => {
   const out = execFileSync(process.execPath, ['web/scripts/guard.mjs', '--pre'], { cwd: ROOT, encoding: 'utf8' })
   assert.match(out, /ui guard \(pre\)/)
