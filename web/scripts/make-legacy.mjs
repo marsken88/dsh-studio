@@ -88,6 +88,10 @@ const imports = [
   "import { createMentionPicker } from './studio/mentions.js'",
   "import { createDrawer } from './studio/drawer.js'",
   "import { parseSteps } from './studio/cases.js'",
+  "import { provideClient } from './studio/context.js'",
+  "import { createEditor } from './studio/editor.js'",
+  "import { ExpertsPanel, TeamsPanel, TestingPanel, EscalatePanel, EnvironmentsPanel } from './studio/panels/people.js'",
+  "import { LdapPanel, CostsPanel, BusinessPanel } from './studio/panels/platform.js'",
 ].join('\n') + '\n\n'
 writeFileSync(target, banner + imports + text)
 console.log(`make-legacy: wrote ${target} (${text.length} chars)`)

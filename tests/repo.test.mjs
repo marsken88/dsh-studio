@@ -102,7 +102,7 @@ test('client: heavy helpers live in web/src/studio and client.src.js ratchets do
     assert.ok(existsSync(path(file)), file + ' missing')
   }
   const lines = read('client.src.js').split(/\r?\n/).length
-  assert.ok(lines < 6300, 'client.src.js is ' + lines + ' lines; keep lifting helpers into web/src/studio')
+  assert.ok(lines < 5200, 'client.src.js is ' + lines + ' lines; keep lifting helpers into web/src/studio')
   const maker = read('web/scripts/make-legacy.mjs')
   for (const spec of ['./studio/markdown.js', './studio/format.js', './studio/labels.js', './studio/roster.js', './studio/fields.js', './studio/shell.js', './studio/card.js', './studio/board.js']) {
     assert.ok(maker.includes(spec), 'make-legacy must keep importing ' + spec)
@@ -121,16 +121,22 @@ test('client: modules under web/src/studio do not call helpers left behind in cl
     .replace(/"(?:\\[\s\S]|[^"\\])*"/g, ' ')
   const client = strip(read('client.src.js'))
   const declared = new Set([...client.matchAll(/^\s*function ([A-Za-z_$][\w$]*)\(/gm)].map((m) => m[1]))
-  const modules = readdirSync(path('web/src/studio')).filter((name) => name.endsWith('.js'))
+  const walk = (dir) =>
+    readdirSync(path(dir), { withFileTypes: true }).flatMap((entry) =>
+      entry.isDirectory()
+        ? walk(dir + '/' + entry.name)
+        : entry.name.endsWith('.js') ? [dir + '/' + entry.name] : [])
+  const modules = walk('web/src/studio')
   const offenders = new Set()
   for (const name of modules) {
-    const code = strip(read('web/src/studio/' + name))
+    const code = strip(read(name))
     const local = new Set([
       ...[...code.matchAll(/function ([A-Za-z_$][\w$]*)\(/g)].map((m) => m[1]),
       ...[...code.matchAll(/const ([A-Za-z_$][\w$]*) =/g)].map((m) => m[1]),
       ...[...code.matchAll(/import \{([^}]*)\}/g)].flatMap((m) => m[1].split(',').map((part) => part.trim().split(/\s+as\s+/).pop())),
       ...[...code.matchAll(/export function create\w+\(\{([^}]*)\}\)/g)].flatMap((m) => m[1].split(',').map((part) => part.trim())),
       ...[...code.matchAll(/export function create\w+\(([^){]*)\)/g)].flatMap((m) => m[1].split(',').map((part) => part.trim()).filter((part) => part !== '')),
+      ...[...code.matchAll(/const \{([^}]*)\} = client\(\)/g)].flatMap((m) => m[1].split(',').map((part) => part.trim()).filter((part) => part !== '')),
       'createFields', 'createSideDrawer', 'createMarkdown',
     ])
     for (const match of code.matchAll(/(?<![\w$.#])([A-Za-z_$][\w$]*)\s*\(/g)) {
@@ -144,12 +150,18 @@ test('client: modules under web/src/studio do not call helpers left behind in cl
 test('client: every studio export used by client.src.js is imported back by make-legacy', () => {
   const client = read('client.src.js')
   const maker = read('web/scripts/make-legacy.mjs')
-  const modules = readdirSync(path('web/src/studio')).filter((name) => name.endsWith('.js'))
+  const walk = (dir) =>
+    readdirSync(path(dir), { withFileTypes: true }).flatMap((entry) =>
+      entry.isDirectory()
+        ? walk(dir + '/' + entry.name)
+        : entry.name.endsWith('.js') ? [dir + '/' + entry.name] : [])
+  const modules = walk('web/src/studio')
   const missing = []
   for (const name of modules) {
-    const code = read('web/src/studio/' + name)
+    const code = read(name)
+    const relative = name.replace('web/src/studio/', '')
     const exports = [...code.matchAll(/export (?:async )?(?:function|const) ([A-Za-z_$][\w$]*)/g)].map((m) => m[1])
-    const line = maker.split(/\r?\n/).find((entry) => entry.includes("./studio/" + name)) ?? ''
+    const line = maker.split(/\r?\n/).find((entry) => entry.includes("./studio/" + relative)) ?? ''
     for (const symbol of exports) {
       const used = new RegExp('(?<![\\w$.#])' + symbol + '\\s*\\(').test(client)
       if (used && !line.includes(symbol)) missing.push(name + ' exports ' + symbol + ' but make-legacy does not import it')
@@ -171,10 +183,15 @@ test('client: studio modules only use names they declare, import or receive', ()
     ...[...client.matchAll(/^\s*(?:async )?function ([A-Za-z_$][\w$]*)\(/gm)].map((m) => m[1]),
     ...[...client.matchAll(/^\s*(?:const|let) ([A-Za-z_$][\w$]*) =/gm)].map((m) => m[1]),
   ])
-  const modules = readdirSync(path('web/src/studio')).filter((name) => name.endsWith('.js'))
+  const walk = (dir) =>
+    readdirSync(path(dir), { withFileTypes: true }).flatMap((entry) =>
+      entry.isDirectory()
+        ? walk(dir + '/' + entry.name)
+        : entry.name.endsWith('.js') ? [dir + '/' + entry.name] : [])
+  const modules = walk('web/src/studio')
   const exportOwner = new Map()
   for (const name of modules) {
-    const code = stripCode(read('web/src/studio/' + name))
+    const code = stripCode(read(name))
     for (const match of code.matchAll(/export (?:async )?(?:function|const) ([A-Za-z_$][\w$]*)/g)) {
       exportOwner.set(match[1], name)
     }
@@ -187,12 +204,14 @@ test('client: studio modules only use names they declare, import or receive', ()
   const known = new Set([...clientNames, ...exportOwner.keys(), ...provided])
   const offenders = new Set()
   for (const name of modules) {
-    const code = stripCode(read('web/src/studio/' + name))
+    const rawCode = read(name).replace(/^\s*\/\/.*$/gm, ' ')
+    const code = stripCode(rawCode)
     const own = new Set([
-      ...[...code.matchAll(/(?:function|const|let|var) ([A-Za-z_$][\w$]*)/g)].map((m) => m[1]),
-      ...[...code.matchAll(/import \{([^}]*)\}/g)].flatMap((m) => m[1].split(',').map((part) => part.trim().split(/\s+as\s+/).pop())),
-      ...[...code.matchAll(/export function create\w+\(\{([^}]*)\}\)/g)].flatMap((m) => m[1].split(',').map((part) => part.trim())),
-      ...[...code.matchAll(/export function create\w+\(([^){]*)\)/g)].flatMap((m) => m[1].split(',').map((part) => part.trim()).filter((part) => part !== '')),
+      ...[...rawCode.matchAll(/(?:function|const|let|var) ([A-Za-z_$][\w$]*)/g)].map((m) => m[1]),
+      ...[...rawCode.matchAll(/import \{([^}]*)\}/g)].flatMap((m) => m[1].split(',').map((part) => part.trim().split(/\s+as\s+/).pop())),
+      ...[...rawCode.matchAll(/export function create\w+\(\{([^}]*)\}\)/g)].flatMap((m) => m[1].split(',').map((part) => part.trim())),
+      ...[...rawCode.matchAll(/export function create\w+\(([^){]*)\)/g)].flatMap((m) => m[1].split(',').map((part) => part.trim()).filter((part) => part !== '')),
+      ...[...rawCode.matchAll(/const \{([^}]*)\} = client\(\)/g)].flatMap((m) => m[1].split(',').map((part) => part.trim()).filter((part) => part !== '')),
     ])
     const check = (used) => {
       if (!known.has(used) || own.has(used)) return
