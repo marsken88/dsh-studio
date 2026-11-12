@@ -7,9 +7,11 @@
 
 ## 部署
 
+仓库：https://github.com/marsken88/dsh-studio（`main` 分支，含可直接安装的构建产物 `client.js`，clone 下来就能装，不用先构建）。
+
 ```bash
-# 1) 代码上传到宿主机
-scp -r dsh-studio lyf@<host>:/home/lyf/dsh-studio
+# 1) 拉到宿主机
+git clone https://github.com/marsken88/dsh-studio.git /home/lyf/dsh-studio
 
 # 2) 装进目标 profile（会写 profile 的 package.json + bundles，走 pnpm link）
 dsh plugin --profile web add link:/home/lyf/dsh-studio
@@ -915,19 +917,28 @@ tsconfig 路径别名、Radix 依赖）。这个插件是宿主里的单文件 b
 | `web/src/components/login-gate.jsx` | 第一个真正替换的界面：登录卡片（Card + Tabs + Input + Button） |
 | `web/src/bridge.jsx` | 宿主 React ↔ 自带 React 的类组件桥 |
 | `web/src/main.jsx` | 入口：注入 Tailwind CSS、注册 `window.__ModuleLoader__.load` |
-| `web/scripts/make-legacy.mjs` | 把 `dsh-studio/client.js` 转成 `web/src/legacy.js`（去掉 loader 包装，导出 `createStudio(React, h)`） |
+| `web/scripts/make-legacy.mjs` | 把 `dsh-studio/client.src.js`（手写源码）转成 `web/src/legacy.js`（去掉 loader 包装，导出 `createStudio(React, h)`） |
+| `web/scripts/sync-client.mjs` | 构建后把 `dist/client.js` 复制回包根的 `client.js`，保证「仓库里的 `client.js` = 线上实际加载的那份」 |
 
 ### 构建与部署
 
 ```bash
 cd dsh-studio/web
 pnpm install          # pnpm 10 默认拦 esbuild 的构建脚本，首次可能提示 approve-builds
-pnpm build            # 产物 dsh-studio/dist/client.js（单文件 IIFE）
+pnpm build            # make-legacy → vite build → sync-client，一次跑完
 ```
 
-部署仍然只有两步：把 `dist/client.js` 传成 `/tmp/client.js`，跑 `bash /tmp/deploy-all.sh`。
+三个文件的关系：
 
-`client.js`（无构建产物）继续保留：`StudioPage` 接受可选 `loginGate` prop，构建版传 shadcn 登录卡，无构建版用内置的那张。
+| 文件 | 是什么 | 谁读它 |
+| --- | --- | --- |
+| `client.src.js` | 手写的单文件源码（约 520 KB，前端逻辑全量实现） | 构建第一步 `make-legacy.mjs` 读它生成 `web/src/legacy.js` |
+| `web/dist/client.js` | Vite 产物：单文件 IIFE，React 与 CSS 都打进（约 712 KB） | 部署时上传的源文件 |
+| `client.js`（包根） | 构建产物的副本，由 `sync-client.mjs` 写出 | DSH 按 `package.json` 的 `./client` 导出加载它 |
+
+所以：**只改前端逻辑 → 改 `client.src.js`；改样式/组件 → 改 `web/src/**`**；两边都要在 `web/` 里跑一次 `pnpm build`，根目录 `client.js` 会自动同步，然后提交。
+
+部署只有两步：把 `dist/client.js` 传成 `/tmp/client.js`，跑 `bash /tmp/deploy-all.sh`（`index.js` 有改动需重启 `dsh-web.service`；只换前端不用重启）。
 
 ### 已验证
 

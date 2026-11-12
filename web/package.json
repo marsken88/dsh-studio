@@ -4,7 +4,7 @@
   "version": "0.1.0",
   "type": "module",
   "scripts": {
-    "build": "node scripts/make-legacy.mjs && vite build",
+    "build": "node scripts/make-legacy.mjs && vite build && node scripts/sync-client.mjs",
     "dev": "vite build --watch"
   },
   "dependencies": {

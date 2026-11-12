@@ -1,6 +1,7 @@
-// Rebuilds src/legacy.js from ../client.js.
+// Rebuilds src/legacy.js from ../client.src.js (the hand-written source; the
+// shipped ./client.js at the package root is the Vite bundle).
 //
-// client.js is the shipped single-file artifact: it registers itself through
+// client.src.js is the single-file source artifact: it registers itself through
 // window.__ModuleLoader__ and borrows the host React. Inside the bundled build we
 // need the same ~7000 lines as a plain module factory instead, so this script
 // swaps the loader wrapper for `export function createStudio(React, h)` and hands
@@ -10,7 +11,7 @@ import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const here = dirname(fileURLToPath(import.meta.url))
-const source = resolve(here, '../../client.js')
+const source = resolve(here, '../../client.src.js')
 const target = resolve(here, '../src/legacy.js')
 
 let text = readFileSync(source, 'utf8')
