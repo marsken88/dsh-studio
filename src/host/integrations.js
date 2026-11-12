@@ -414,11 +414,20 @@ export async function gitlabSync(store, projectId) {
 }
 
 /** Post one text message through one Feishu custom-bot webhook. */
+/** 通知正文：字符串直接用，对象取 text/content。以前两种写法混用，导致群里收到「[object Object]」。 */
+export function feishuText(body) {
+  if (typeof body === 'string') return body.slice(0, 4000)
+  const value = body !== null && typeof body === 'object' ? body.text ?? body.content ?? '' : ''
+  return String(value).slice(0, 4000)
+}
+
 export async function feishuPush(webhook, body) {
   if (typeof webhook !== 'string' || webhook.length === 0) {
     markHealth('feishu', 'skip')
     return { ok: false, skipped: true }
   }
+  const text = feishuText(body)
+  if (text.trim() === '') return { ok: false, skipped: true, error: '通知正文是空的' }
   let lastError = null
   // 群里掉一条消息没人会发现，所以发两次；仍失败才算真的失败。
   for (let attempt = 0; attempt < 2; attempt += 1) {
@@ -426,7 +435,7 @@ export async function feishuPush(webhook, body) {
       const response = await fetch(webhook, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ msg_type: 'text', content: { text: body } }),
+        body: JSON.stringify({ msg_type: 'text', content: { text } }),
       })
       const payload = (await response.text()).slice(0, 300)
       if (!response.ok) throw new Error(`飞书 ${response.status}: ${payload}`)

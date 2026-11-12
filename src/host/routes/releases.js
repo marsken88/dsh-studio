@@ -2,6 +2,7 @@ import {
   RELEASE_STATUSES,
   sanitizeRelease,
 } from '../domain.js'
+import { feishuBroadcast } from '../integrations.js'
 const INJECTED = ["publicState","readJsonBody","releaseDeploys","releaseGate","releaseNotes","releaseRequirements","releaseRuleViolations","sendJson"]
 let host = {
   publicState: () => {},
@@ -188,6 +189,7 @@ export async function handleReleasesRoute({ method, route, req, res, store, url 
     const id = String(body.id ?? '')
     const by = String(body.by ?? '人').slice(0, 120)
     let release = null
+    let forcedNote = ''
     await store.mutate(state => {
       const found = state.releases.find(item => item.id === id)
       if (found === undefined) throw new Error('版本不存在')
@@ -214,6 +216,13 @@ export async function handleReleasesRoute({ method, route, req, res, store, url 
       found.updatedAt = Date.now()
       release = { ...found }
     })
+    if (release !== null) {
+      const count = (release.taskIds ?? []).length
+      feishuBroadcast(
+        store.snapshot().config,
+        `【版本发布】${release.name} ${release.tagName} · ${count} 张卡${forcedNote === '' ? '' : `\n强制发布（${forcedNote}）`}`,
+      ).catch(() => undefined)
+    }
     host.sendJson(res, 200, { ok: true, release, state: host.publicState(store) })
     return true
   }

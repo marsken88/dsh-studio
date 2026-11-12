@@ -1425,6 +1425,11 @@ async function autoBugFromCase(store, task, item, by) {
     item.expected === '' ? '' : `期望结果：${item.expected}`,
     item.note === '' ? '' : `实际结果：${item.note}`,
   ].filter(line => line !== '').join('\n'), '系统', 'agent')
+  // 自动开出来的缺陷要有人看见：群里推一条，别让它躺在待开发列里没人领。
+  feishuBroadcast(
+    store.snapshot().config,
+    `【新缺陷】${bug.code || bug.id} ${bug.title}\n来源用例：${item.title}\n从「${task.code === '' ? task.id : task.code} ${task.title}」自动开出，去「待开发」看一眼。`,
+  ).catch(() => undefined)
   return { bug, created: true }
 }
 

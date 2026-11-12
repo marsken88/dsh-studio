@@ -459,9 +459,10 @@ export class Dispatcher {
         found.escalatedAt = now
         found.history = [...(found.history ?? []), { at: now, status: found.status, by: '系统', note: `SLA 超时 ${overdueHours} 小时，已升级提醒` }]
       })
-      await host.feishuBroadcast(this.store.snapshot().config, {
-        text: `【SLA 超时】${task.code || task.id} ${task.title}\n严重度 ${String(sla.severity).toUpperCase()}，超时约 ${overdueHours} 小时`,
-      }).catch(() => undefined)
+      await host.feishuBroadcast(
+        this.store.snapshot().config,
+        `【SLA 超时】${task.code || task.id} ${task.title}\n严重度 ${String(sla.severity).toUpperCase()}，超时约 ${overdueHours} 小时`,
+      ).catch(() => undefined)
       this.note(`SLA 超时升级 ${task.code || task.id}`)
     }
   }
