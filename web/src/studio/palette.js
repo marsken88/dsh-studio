@@ -3,6 +3,7 @@
    can be unit-tested without React; the component is a thin shell over them. */
 
 import { fmtTime } from './format.js'
+import { ROLE_LABEL } from './labels.js'
 
 const clip = (text, max) => (text.length > max ? text.slice(0, max - 1) + '…' : text)
 
@@ -39,10 +40,60 @@ export function searchItems(state) {
       search: [release.name, release.tagName, release.status].filter(Boolean).join(' ').toLowerCase(),
     })
   }
+
+  for (const expert of state.config?.experts ?? []) {
+    items.push({
+      key: 'expert:' + expert.id,
+      kind: 'expert',
+      id: expert.id,
+      label: `${expert.emoji ?? ''} ${expert.name}`.trim(),
+      hint: ['专家', ROLE_LABEL[expert.role] ?? expert.role ?? '', expert.domain ?? ''].filter(Boolean).join(' · '),
+      search: [expert.name, expert.id, expert.domain, expert.description, ROLE_LABEL[expert.role]].filter(Boolean).join(' ').toLowerCase(),
+    })
+  }
+  for (const team of state.config?.teams ?? []) {
+    items.push({
+      key: 'team:' + team.id,
+      kind: 'team',
+      id: team.id,
+      label: `👥 ${team.name}`.trim(),
+      hint: ['专家团', (team.members ?? []).length + ' 位成员'].join(' · '),
+      search: [team.name, team.id, team.description, ...(team.members ?? []).map((member) => member.name ?? member.id)].filter(Boolean).join(' ').toLowerCase(),
+    })
+  }
+  for (const project of state.config?.projects ?? []) {
+    items.push({
+      key: 'project:' + project.id,
+      kind: 'project',
+      id: project.id,
+      label: project.name,
+      hint: ['项目', (project.services ?? []).length + ' 个服务', (project.iterations ?? []).length + ' 个迭代'].filter(Boolean).join(' · '),
+      search: [project.name, project.id, project.description, ...(project.services ?? []).map((service) => service.name ?? service.repoPath)].filter(Boolean).join(' ').toLowerCase(),
+    })
+  }
   return items
 }
 
 /** Things you can *do*, as opposed to records you can jump to. */
+const SETTINGS_PANES = [
+  { id: 'projects', label: '项目与迭代' },
+  { id: 'experts', label: '专家' },
+  { id: 'teams', label: '专家团' },
+  { id: 'skills', label: '技能库' },
+  { id: 'columns', label: '列的负责人' },
+  { id: 'gitlab', label: '代码仓库' },
+  { id: 'feishu', label: '飞书机器人' },
+  { id: 'health', label: '集成健康' },
+  { id: 'agents', label: '自动派单' },
+  { id: 'testing', label: '测试执行' },
+  { id: 'costs', label: '成本与预算' },
+  { id: 'environments', label: '部署环境' },
+  { id: 'board', label: '看板外观' },
+  { id: 'ldap', label: '统一登录' },
+  { id: 'access', label: '权限与审计' },
+  { id: 'storage', label: '数据与备份' },
+]
+
 export const ACTION_ITEMS = [
   { id: 'new-requirement', label: '新建需求', hint: '需求 → 功能点 → 拆成卡', keys: '新建 需求 new requirement 提需求' },
   { id: 'new-task', label: '新建任务', hint: '直接在看板上建一张卡', keys: '新建 任务 卡片 new task 建卡' },
@@ -57,6 +108,7 @@ export const ACTION_ITEMS = [
   { id: 'theme:dark', label: '切换主题：深色', hint: '深色界面', keys: '主题 深色 dark theme 夜间' },
   { id: 'theme:system', label: '切换主题：跟随系统', hint: '跟随宿主或操作系统的深浅色', keys: '主题 系统 system theme 自动' },
   { id: 'refresh', label: '刷新数据', hint: '重新拉一次看板与需求', keys: '刷新 refresh 重载 同步' },
+  ...SETTINGS_PANES.map((pane) => ({ id: 'settings:' + pane.id, label: '打开设置：' + pane.label, hint: '设置 → ' + pane.label, keys: '设置 settings 配置 ' + pane.label + ' ' + pane.id })),
 ]
 
 export function actionItems() {
@@ -93,7 +145,7 @@ export function filterItems(items, query, limit = 20) {
   return scored.slice(0, limit).map((entry) => entry.item)
 }
 
-const KIND_LABEL = { task: '卡片', requirement: '需求', release: '版本', action: '操作' }
+const KIND_LABEL = { task: '卡片', requirement: '需求', release: '版本', expert: '专家', team: '专家团', project: '项目', action: '操作' }
 
 export function createPalette({ h, React }) {
   return function Palette({ state, onPick, onClose }) {

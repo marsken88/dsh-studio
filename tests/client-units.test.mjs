@@ -136,18 +136,45 @@ test('palette: filterItems matches words, ranks prefixes first and stops when em
 test('palette: actions are searchable next to records', async () => {
   const { actionItems, paletteItems } = await import('../web/src/studio/palette.js')
   const actions = actionItems()
-  assert.equal(actions.length, 13)
-  assert.equal(new Set(actions.map((item) => item.id)).size, 13, 'action ids must be unique')
+  assert.equal(actions.length, 29)
+  assert.equal(new Set(actions.map((item) => item.id)).size, 29, 'action ids must be unique')
   for (const item of actions) {
     assert.equal(item.kind, 'action')
     assert.ok(item.label.length > 0 && item.search.length > 0)
   }
   const state = { tasks: [{ id: 't1', code: 'DEV-001', title: '退款对账', status: 'dev' }], requirements: [], releases: [], statuses: [{ id: 'dev', label: '开发中' }] }
   const all = paletteItems(state)
-  assert.equal(all.length, 14, 'actions + one task')
+  assert.equal(all.length, 30, '29 actions + one task')
   assert.equal(filterItems(all, '新建需求')[0].id, 'new-requirement')
   assert.equal(filterItems(all, '导出')[0].kind, 'action')
   assert.equal(filterItems(all, '主题').length, 3)
   assert.equal(filterItems(all, 'DEV-001')[0].kind, 'task')
   assert.deepEqual(filterItems(all, '不存在的词'), [])
+})
+
+test('palette: experts, teams and projects are searchable too', async () => {
+  const { searchItems, paletteItems, filterItems } = await import('../web/src/studio/palette.js')
+  const state = {
+    tasks: [], requirements: [], releases: [], statuses: [],
+    config: {
+      experts: [
+        { id: 'architect', name: '架构师', emoji: '🏛️', role: 'architect', domain: '支付' },
+        { id: 'expert-1', name: '支付产品经理', emoji: '💳', role: 'product', domain: '支付' },
+      ],
+      teams: [{ id: 'team-1', name: '支付方案组', members: [{ id: 'architect', name: '架构师' }] }],
+      projects: [{ id: 'proj-1', name: '支付中心', services: [{ name: 'payment-api' }], iterations: [{ id: 'it-1' }] }],
+    },
+  }
+  const records = searchItems(state)
+  assert.deepEqual(records.map((item) => item.kind), ['expert', 'expert', 'team', 'project'])
+  assert.equal(records[0].hint, '专家 · 架构 · 支付')
+  assert.equal(records[1].label, '💳 支付产品经理')
+  assert.equal(records[2].label, '👥 支付方案组')
+  assert.equal(records[3].hint, '项目 · 1 个服务 · 1 个迭代')
+  const all = paletteItems(state)
+  assert.equal(filterItems(all, '支付产品')[0].kind, 'expert')
+  assert.equal(filterItems(all, '支付中心')[0].kind, 'project')
+  assert.equal(filterItems(all, 'payment-api')[0].kind, 'project')
+  assert.equal(filterItems(all, '打开设置')[0].id, 'settings:projects')
+  assert.equal(filterItems(all, '技能库').some((item) => item.id === 'settings:skills'), true)
 })

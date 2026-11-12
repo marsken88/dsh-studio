@@ -2399,6 +2399,9 @@ function installKeyboardActivation() {
                 if (item.kind === 'task') { setOpenId(item.id); return }
                 if (item.kind === 'requirement') { setTab('requirements'); setFocusReq({ id: item.id, at: Date.now() }); return }
                 if (item.kind === 'release') { setTab('releases'); return }
+                if (item.kind === 'expert') { setTab('settings'); setSettingsSection('experts'); return }
+                if (item.kind === 'team') { setTab('settings'); setSettingsSection('teams'); return }
+                if (item.kind === 'project') { setTab('projects'); return }
                 if (item.kind !== 'action') return
                 if (item.id === 'new-requirement') { setTab('requirements'); setNewReq(n => n + 1); return }
                 if (item.id === 'new-task') { setTab('board'); setCreating(true); return }
@@ -2406,7 +2409,8 @@ function installKeyboardActivation() {
                 if (item.id === 'export:tasks') { window.open('/studio-api/export/tasks.csv', '_blank'); return }
                 if (item.id === 'export:requirements') { window.open('/studio-api/export/requirements.csv', '_blank'); return }
                 if (item.id.startsWith('theme:')) { setTheme(setThemeName(item.id.slice(6))); return }
-                if (item.id === 'refresh') { void reload() }
+                if (item.id === 'refresh') { void reload(); return }
+                if (item.id.startsWith('settings:')) { setTab('settings'); setSettingsSection(item.id.slice(9)) }
               },
             })
           : null,
