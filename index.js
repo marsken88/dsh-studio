@@ -30,6 +30,7 @@ export const inject = ['tools', 'systemPrompt']
 import { ACCESS_ROLE_LABEL, ACCESS_ROLES, ADMIN_ROUTES, ARTIFACT_KINDS, ARTIFACT_STATUS, CASE_HTTP_METHODS, CASE_PRIORITIES, CASE_RESULTS, CASE_TYPE_LABEL, CASE_TYPES, cleanId, CODE_PREFIX, CODING_FILE_CHANGES, CODING_REVIEW_STATUS, codingSummary, COLUMN_STRATEGIES, DEFAULT_ROLES, defaultColumns, defaultConfig, defaultDeployEnvs, defaultTemplates, DEPLOY_ENV_KINDS, FALLBACK_AGENT_MODEL, hashLocalPassword, INTAKE_HTML, ISOLATION_MODES, LEGACY_BLOCKED_STATUS, LEVEL_RANK, LOCAL_DEFAULT_PASSWORD, mergeCoding, mergeConfig, mergeSection, MINE_HTML, nextRequirementCode, nextTaskCode, normalizePatch, normalizeStrategy, PRIORITIES, ROLE_LABELS, canonicalAuthor, RELEASE_STATUSES, RELEASE_STATUS_LABEL, REQ_DOC_KIND_LABEL, REQ_DOC_KINDS, REQ_DOC_STATUS, REQ_REVIEW_LABEL, REQ_REVIEW_STATUS, REQ_STATUS_LABEL, REQ_STATUSES, ROLE_IDS, ROLE_LEVEL, SANDBOX_MODES, sanitizeAcceptanceItem, sanitizeAccess, sanitizeAllowHosts, sanitizeArtifact, sanitizeArtifacts, sanitizeBaseline, sanitizeBots, sanitizeBugSource, sanitizeCase, sanitizeCaseHttp, sanitizeCaseRun, sanitizeCases, sanitizeChangedFile, sanitizeChangedFiles, sanitizeChecklist, sanitizeChecklistItem, sanitizeCoding, sanitizeColumns, sanitizeCommit, sanitizeCommits, sanitizeCosts, sanitizeDeployEnvs, sanitizeEnvs, sanitizeExperts, sanitizeIterations, sanitizeLdap, sanitizeLocalAuth, sanitizeProjects, sanitizeReqDoc, sanitizeReqDocs, sanitizeRelease, sanitizeRequirement, sanitizeRequirementChange, sanitizeRequirementHistory, sanitizeRequirementPoint, sanitizeRequirementPoints, sanitizeRequirementPool, sanitizeRequirementQuestions, sanitizeRequirementReview, sanitizeRequirements, sanitizeServices, sanitizeSla, sanitizeTeams, sanitizeTemplates, sanitizeTesting, sanitizeTestRun, sanitizeTestRuns, sanitizeUsers, sanitizeWorkProjects, seedExperts, SEVERITIES, STATUS_HTML, STATUS_IDS, STATUS_SET, STATUSES, TASK_TYPES, text, verifyLocalPassword, worktreeRoot } from './src/host/domain.js'
 import { Dispatcher, RUN_LOG, claimDispatchLock, clearAgentFailure, configureDispatcher, noteAgentFailure, parseMentions, runSummary } from './src/host/dispatcher.js'
 import { buildDashboard, codingVerifyLine, commentTask, configureExecutor, ensureReqFolder, larkCliReady, invalidateLarkProbe, larkProbeCache, mutateReqDoc, pullFeishuDoc, requirementGate, requirementMatrix, requirementProgress, requirementRollup, runCommand, runSuite, runTaskCases, saveRequirement, syncArtifact, syncRequirementArtifacts, taskExitGate, updateTask, verifyCodingRecord } from './src/host/executor.js'
+import { configureExportRoutes, handleExportRoute } from './src/host/routes/exports.js'
 import { INTEGRATION, markHealth, escalateHealth, healthReport, projectReady, gitlabReady, gitlabRequest, gitlabSync, feishuPush, feishuBroadcast, broadcastChange, configureIntegrations } from './src/host/integrations.js'
 import { SecretStore, StudioStore } from './src/host/store.js'
 
@@ -2995,116 +2996,7 @@ function registerRoutes(webCtx, store, ctx, getDispatcher = () => undefined) {
         sendJson(res, 200, { ok: true, concurrency: result.concurrency, tasks: result.tasks, state: result.state })
         return
       }
-      if (method === 'GET' && route === '/export/tasks.csv') {
-        const snapshot = store.snapshot()
-        const rows = [['编号', '标题', '类型', '状态', '负责人', '需求', '项目', '迭代', '版本', '阻塞', '截止', '用例通过', '用例总数', '交付物', '更新时间']]
-        for (const task of snapshot.tasks) {
-          const requirement = snapshot.requirements.find(item => item.id === task.requirementId)
-          const project = snapshot.config.projects.find(item => item.id === task.project)
-          const iteration = project?.iterations.find(item => item.id === task.iteration)
-          const release = snapshot.releases.find(item => item.id === task.releaseId)
-          const cases = task.cases ?? []
-          rows.push([
-            task.code || task.id,
-            task.title,
-            task.type,
-            STATUSES.find(item => item.id === task.status)?.label ?? task.status,
-            task.owner ?? '',
-            requirement === undefined ? '' : `${requirement.code} ${requirement.title}`.trim(),
-            project?.name ?? '',
-            iteration?.name ?? '',
-            release?.version ?? '',
-            task.blocked === null || task.blocked === undefined ? '' : `是：${String(task.blocked.reason ?? '').slice(0, 60)}`,
-            task.dueAt > 0 ? new Date(task.dueAt).toISOString().slice(0, 10) : '',
-            cases.filter(item => item.result === 'pass').length,
-            cases.length,
-            (task.artifacts ?? []).length,
-            new Date(task.updatedAt).toISOString().slice(0, 19).replace('T', ' '),
-          ])
-        }
-        sendCsv(res, rows, 'tasks.csv')
-        return
-      }
-      if (method === 'GET' && route === '/export/requirements.csv') {
-        const snapshot = store.snapshot()
-        const rows = [['需求编号', '标题', '状态', '负责人', '项目', '功能点', '已覆盖', '卡数', '已完成', '用例通过', '用例总数', '交付物', '签字', '更新时间']]
-        for (const requirement of snapshot.requirements) {
-          const progress = requirementProgress(snapshot, requirement)
-          rows.push([
-            requirement.code,
-            requirement.title,
-            REQ_STATUS_LABEL[requirement.status] ?? requirement.status,
-            requirement.owner ?? '',
-            snapshot.config.projects.find(item => item.id === requirement.project)?.name ?? '',
-            progress.gate.stats.points,
-            progress.gate.stats.coveredPoints,
-            progress.cards.total,
-            progress.cards.done,
-            progress.gate.stats.pass,
-            progress.gate.stats.cases,
-            progress.gate.stats.artifacts,
-            requirement.signoff === null ? '' : `${requirement.signoff.by} ${new Date(requirement.signoff.at).toISOString().slice(0, 10)}`,
-            new Date(requirement.updatedAt).toISOString().slice(0, 19).replace('T', ' '),
-          ])
-        }
-        sendCsv(res, rows, 'requirements.csv')
-        return
-      }
-      if (method === 'GET' && route === '/audit/export.csv') {
-        const snapshot = store.snapshot()
-        const cfg = snapshot.config
-        if (cfg?.ldap?.enabled === true && cfg?.ldap?.requireLogin === true) {
-          const token = String(url.searchParams.get('token') ?? '')
-          const session = token === '' ? null : SESSIONS.get(token)
-          if (session === null || (Number(session.expiresAt) || 0) <= Date.now()) {
-            sendJson(res, 401, { ok: false, error: '导出审计日志要先登录' })
-            return
-          }
-        }
-        const by = String(url.searchParams.get('by') ?? '').trim()
-        const keyword = String(url.searchParams.get('q') ?? '').trim().toLowerCase()
-        const onlyFailed = url.searchParams.get('failed') === '1'
-        const list = (snapshot.audit ?? []).filter(item => (by === '' || item.by === by)
-          && (onlyFailed === false || item.ok === false)
-          && (keyword === '' || `${item.route} ${item.by} ${item.summary}`.toLowerCase().includes(keyword)))
-        const csvRows = [['时间', '操作人', '动作', '详情', '结果']]
-        for (const item of list.slice(0, 5000)) {
-          csvRows.push([
-            new Date(item.at).toISOString().slice(0, 19).replace('T', ' '),
-            item.by,
-            item.route,
-            item.summary,
-            item.ok ? '成功' : `失败 ${item.status}`,
-          ])
-        }
-        sendCsv(res, csvRows, `audit-${new Date().toISOString().slice(0, 10)}.csv`)
-        return
-      }
-      if (method === 'GET' && route === '/export/dispatch.csv') {
-        const snapshot = store.snapshot()
-        const cfg = snapshot.config
-        if (cfg?.ldap?.enabled === true && cfg?.ldap?.requireLogin === true) {
-          const token = String(url.searchParams.get('token') ?? '')
-          const session = token === '' ? null : SESSIONS.get(token)
-          if (session === null || (Number(session.expiresAt) || 0) <= Date.now()) {
-            sendJson(res, 401, { ok: false, error: '导出派单日志要先登录' })
-            return
-          }
-        }
-        const keyword = String(url.searchParams.get('q') ?? '').trim().toLowerCase()
-        const onlyFailed = url.searchParams.get('failed') === '1'
-        const list = (snapshot.agents?.log ?? []).filter(entry => {
-          const line = String(entry?.line ?? '')
-          if (onlyFailed && !/失败|错误|异常|拦|拒绝/.test(line)) return false
-          return keyword === '' || line.toLowerCase().includes(keyword)
-        })
-        const csvRows = [['时间', '内容']]
-        for (const entry of list.slice(0, 2000)) {
-          csvRows.push([new Date(Number(entry.at) || 0).toISOString().slice(0, 19).replace('T', ' '), String(entry.line ?? '')])
-        }
-        sendCsv(res, csvRows, `dispatch-${new Date().toISOString().slice(0, 10)}.csv`)
-        return
-      }
+      if (handleExportRoute({ method, route, url, res, store, sendJson })) return
       if (method === 'POST' && route === '/task/coding') {
         const body = await readJsonBody(req)
         const id = String(body.id ?? '')
@@ -5605,6 +5497,7 @@ export function apply(ctx) {
   ctx.inject(['agents', 'sessionController', 'workspaceRegistry', 'permissionPresets', 'agentDefaultModel'], dispatcherCtx => {
     configureDispatcher({ feishuBroadcast, INTEGRATION, bugSla, removeWorktree, ensureWorktree, serviceOf, workProjectOf, serviceConflicts })
     configureIntegrations({ newTaskId, serviceOf, getStore: () => activeStore })
+    configureExportRoutes({ sendCsv, requirementProgress, sessions: SESSIONS })
     dispatcher = new Dispatcher(dispatcherCtx, store)
     activeDispatcher = dispatcher
     dispatcher.start()

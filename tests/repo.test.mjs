@@ -102,6 +102,15 @@ test('host: no model is hardcoded to a channel-less default', () => {
   assert.ok(hostText.includes('FALLBACK_AGENT_MODEL'), 'FALLBACK_AGENT_MODEL guard is missing')
 })
 
+test('host: export routes live in a module and are wired', () => {
+  const index = readFileSync('index.js', 'utf8')
+  const mod = readFileSync('src/host/routes/exports.js', 'utf8')
+  assert.ok(index.includes("from './src/host/routes/exports.js'"), 'index.js imports the export routes module')
+  assert.ok(index.includes('configureExportRoutes({'), 'index.js injects sendCsv/requirementProgress/sessions')
+  assert.ok(!index.includes("route === '/export/tasks.csv'"), 'the CSV handlers moved out of index.js')
+  assert.ok(mod.includes('export function handleExportRoute('), 'module exposes the handler')
+})
+
 test('host: domain layer lives in src/host and stays out of index.js', () => {
   assert.ok(existsSync(path('src/host/domain.js')), 'src/host/domain.js missing')
   const domain = read('src/host/domain.js')
@@ -111,7 +120,7 @@ test('host: domain layer lives in src/host and stays out of index.js', () => {
   assert.ok(index.includes("from './src/host/domain.js'"), 'index.js must import the domain layer')
   assert.ok(!/^function sanitizeRequirement\(/m.test(index), 'sanitizeRequirement must not be re-declared in index.js')
   const lines = index.split(/\r?\n/).length
-  assert.ok(lines < 5800, `index.js is still ${lines} lines; keep splitting by domain`)
+  assert.ok(lines < 5600, `index.js is still ${lines} lines; keep splitting by domain`)
 })
 
 test('host: index.js imports every domain symbol it uses', () => {
