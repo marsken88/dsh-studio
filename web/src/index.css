@@ -1,0 +1,1375 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* shadcn/ui design tokens, scoped to the Studio subtree so the host UI is untouched. */
+:where([data-dsh-studio]) {
+  --background: #fafafa;
+  --foreground: #18181b;
+  --card: #ffffff;
+  --card-foreground: #18181b;
+  --popover: #ffffff;
+  --popover-foreground: #18181b;
+  --primary: #18181b;
+  --primary-foreground: #fafafa;
+  --secondary: #f4f4f5;
+  --secondary-foreground: #18181b;
+  --muted: #f4f4f5;
+  --muted-foreground: #71717a;
+  --accent: #f4f4f5;
+  --accent-foreground: #18181b;
+  --destructive: #dc2828;
+  --destructive-foreground: #fafafa;
+  --border: #e4e4e7;
+  --input: #e4e4e7;
+  --ring: #a1a1aa;
+  --radius: 0.625rem;
+}
+
+:where([data-dsh-studio][data-theme="dark"]) {
+  --background: #0a0a0b;
+  --foreground: #fafafa;
+  --card: #111113;
+  --card-foreground: #fafafa;
+  --popover: #111113;
+  --popover-foreground: #fafafa;
+  --primary: #fafafa;
+  --primary-foreground: #18181b;
+  --secondary: #27272a;
+  --secondary-foreground: #fafafa;
+  --muted: #202022;
+  --muted-foreground: #a1a1aa;
+  --accent: #27272a;
+  --accent-foreground: #fafafa;
+  --destructive: #a62626;
+  --destructive-foreground: #fafafa;
+  --border: #2a2a2d;
+  --input: #2a2a2d;
+  --ring: #6d6d78;
+}
+
+/* Radix overlays are portalled to <body>, so they need the tokens as well. */
+:where([data-dsh-studio-portal]) {
+  --background: #fafafa;
+  --foreground: #18181b;
+  --card: #ffffff;
+  --card-foreground: #18181b;
+  --popover: #ffffff;
+  --popover-foreground: #18181b;
+  --primary: #18181b;
+  --primary-foreground: #fafafa;
+  --secondary: #f4f4f5;
+  --secondary-foreground: #18181b;
+  --muted: #f4f4f5;
+  --muted-foreground: #71717a;
+  --accent: #f4f4f5;
+  --accent-foreground: #18181b;
+  --destructive: #dc2828;
+  --destructive-foreground: #fafafa;
+  --border: #e4e4e7;
+  --input: #e4e4e7;
+  --ring: #a1a1aa;
+  --radius: 0.625rem;
+}
+
+:where([data-dsh-studio-portal][data-theme="dark"]) {
+  --background: #0a0a0b;
+  --foreground: #fafafa;
+  --card: #111113;
+  --card-foreground: #fafafa;
+  --popover: #111113;
+  --popover-foreground: #fafafa;
+  --primary: #fafafa;
+  --primary-foreground: #18181b;
+  --secondary: #27272a;
+  --secondary-foreground: #fafafa;
+  --muted: #202022;
+  --muted-foreground: #a1a1aa;
+  --accent: #27272a;
+  --accent-foreground: #fafafa;
+  --destructive: #a62626;
+  --destructive-foreground: #fafafa;
+  --border: #2a2a2d;
+  --input: #2a2a2d;
+  --ring: #6d6d78;
+}
+
+/* Preflight is off (it would restyle the host page), so nothing resets
+   box-sizing. Without this reset an Input with width:100% *plus* padding and a
+   border is wider than its card — the classic "input sticks out" bug. */
+:where([data-dsh-studio], [data-dsh-studio] *, [data-dsh-studio-portal], [data-dsh-studio-portal] *) {
+  box-sizing: border-box;
+}
+
+/* Preflight is off (it would restyle the host page), so form controls still carry
+   the browser's UA chrome: <button> keeps its 3D border and system font, <input>
+   keeps an inset border. That is why the mode switch looked like two native
+   buttons instead of shadcn tabs. Neutralise it inside the Studio subtree only —
+   Tailwind utilities (0,1,0) still win over these :where() rules (0,0,1). */
+:where([data-dsh-studio], [data-dsh-studio-portal]) :where(button:not([class*="rounded-"]), input:not([class*="rounded-"]), textarea:not([class*="rounded-"]), select:not([class*="rounded-"])):not(.border):not(.border-0) {
+  font: inherit;
+  letter-spacing: inherit;
+  color: inherit;
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  margin: 0;
+  padding: 0;
+  box-shadow: none;
+  appearance: none;
+}
+
+/* The login gate renders as the slot root itself, so it has to grow the way the
+   legacy .ds-login-wrap did while still carrying the theme scope. */
+[data-dsh-studio].dsh-studio-fill {
+  flex: 1 1 auto;
+  width: 100%;
+  min-height: 100%;
+  display: flex;
+  flex-direction: column;
+  background: var(--background);
+  color: var(--foreground);
+}
+
+:where([data-dsh-studio]) .shadcn-scope {
+  color: var(--foreground);
+  font-family: inherit;
+}
+
+/* ---------------------------------------------------------------- polish --- */
+/* Legacy .ds-* components predate the shadcn layer: their own paddings, borders
+   and font sizes now fight the new tokens. Normalise them here so every screen
+   (dashboard, board, requirement, settings) shares one visual language. */
+
+[data-dsh-studio] .ds-panel,
+[data-dsh-studio] .ds-card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: 0 1px 2px 0 color-mix(in srgb, var(--foreground) 4%, transparent);
+  overflow: hidden;
+}
+
+[data-dsh-studio] .ds-panel-head,
+[data-dsh-studio] .ds-card-head {
+  padding: 10px 14px !important;
+  border-bottom: 1px solid color-mix(in srgb, var(--border) 70%, transparent);
+  font-size: 12.5px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+}
+
+[data-dsh-studio] .ds-panel-body,
+[data-dsh-studio] .ds-card-body {
+  padding: 12px 14px !important;
+}
+
+[data-dsh-studio] .ds-panel-body > :first-child,
+[data-dsh-studio] .ds-card-body > :first-child {
+  margin-top: 0;
+}
+
+[data-dsh-studio] .ds-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  height: 36px;
+  padding: 0 14px;
+  border-radius: calc(var(--radius) - 2px);
+  border: 1px solid var(--input);
+  background: var(--card);
+  color: var(--foreground);
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 1;
+  white-space: nowrap;
+  cursor: pointer;
+  box-shadow: 0 1px 1px 0 color-mix(in srgb, var(--foreground) 3%, transparent);
+  transition: background-color 120ms ease, border-color 120ms ease, color 120ms ease;
+}
+
+[data-dsh-studio] .ds-btn:hover {
+  background: var(--muted);
+}
+
+[data-dsh-studio] .ds-btn-primary {
+  background: var(--primary);
+  border-color: var(--primary);
+  color: var(--primary-foreground);
+}
+
+[data-dsh-studio] .ds-btn-primary:hover {
+  background: color-mix(in srgb, var(--primary) 90%, transparent);
+  border-color: color-mix(in srgb, var(--primary) 90%, transparent);
+}
+
+[data-dsh-studio] .ds-btn-ghost {
+  border-color: transparent;
+  background: transparent;
+  box-shadow: none;
+}
+
+[data-dsh-studio] .ds-btn-ghost:hover {
+  background: var(--muted);
+}
+
+[data-dsh-studio] .ds-btn[disabled] {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+[data-dsh-studio] .ds-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 20px;
+  padding: 0 8px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--muted);
+  color: var(--muted-foreground);
+  font-size: 11.5px;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+[data-dsh-studio] .ds-chip[data-on="1"] {
+  border-color: color-mix(in srgb, var(--primary) 28%, transparent);
+  background: color-mix(in srgb, var(--primary) 10%, transparent);
+  color: var(--foreground);
+}
+
+[data-dsh-studio] .ds-chip[data-blocked="1"] {
+  border-color: color-mix(in srgb, var(--destructive) 35%, transparent);
+  background: color-mix(in srgb, var(--destructive) 10%, transparent);
+  color: var(--destructive);
+}
+
+[data-dsh-studio] .ds-table {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  font-size: 12.5px;
+}
+
+[data-dsh-studio] .ds-table th {
+  padding: 8px 10px;
+  text-align: left;
+  font-weight: 500;
+  font-size: 11.5px;
+  color: var(--muted-foreground);
+  border-bottom: 1px solid var(--border);
+  background: color-mix(in srgb, var(--muted) 50%, transparent);
+}
+
+[data-dsh-studio] .ds-table td {
+  padding: 8px 10px;
+  border-bottom: 1px solid color-mix(in srgb, var(--border) 70%, transparent);
+  vertical-align: top;
+}
+
+[data-dsh-studio] .ds-table tbody tr:hover td {
+  background: color-mix(in srgb, var(--muted) 45%, transparent);
+}
+
+[data-dsh-studio] .ds-dw-tabs {
+  display: inline-flex;
+  gap: 2px;
+  padding: 3px;
+  border: 1px solid var(--border);
+  border-radius: calc(var(--radius) - 2px);
+  background: var(--muted);
+}
+
+[data-dsh-studio] .ds-dw-tab {
+  height: 26px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: calc(var(--radius) - 4px);
+  background: transparent;
+  color: var(--muted-foreground);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+[data-dsh-studio] .ds-dw-tab[data-on="1"] {
+  background: var(--card);
+  color: var(--foreground);
+  font-weight: 600;
+  box-shadow: 0 1px 2px 0 color-mix(in srgb, var(--foreground) 6%, transparent);
+}
+
+[data-dsh-studio] .ds-hint,
+[data-dsh-studio] .ds-muted {
+  color: var(--muted-foreground);
+  font-size: 11.5px;
+}
+
+[data-dsh-studio] .ds-icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 7px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--muted-foreground);
+  cursor: pointer;
+}
+
+[data-dsh-studio] .ds-icon-btn:hover {
+  background: var(--muted);
+  color: var(--foreground);
+}
+
+/* ------------------------------------------------------------ board cards --- */
+/* shadcn Card anatomy: rounded container, 1px border, card background, small
+   shadow on rest and a slightly stronger one on hover; title 13/600, muted meta
+   row, chips at 18px. Keeps the legacy .ds-card class so no call sites change. */
+
+[data-dsh-studio] .ds-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 11px 9px;
+  border: 1px solid var(--border);
+  border-radius: calc(var(--radius) - 1px);
+  background: var(--card);
+  box-shadow: 0 1px 2px 0 color-mix(in srgb, var(--foreground) 5%, transparent);
+  cursor: pointer;
+  transition: box-shadow 140ms ease, border-color 140ms ease, transform 140ms ease;
+}
+
+[data-dsh-studio] .ds-card:hover {
+  border-color: var(--input);
+  box-shadow: 0 4px 10px -4px color-mix(in srgb, var(--foreground) 18%, transparent), 0 1px 2px 0 color-mix(in srgb, var(--foreground) 6%, transparent);
+}
+
+[data-dsh-studio] .ds-card[data-urgent="1"] {
+  border-left: 3px solid var(--destructive);
+  padding-left: 9px;
+}
+
+[data-dsh-studio] .ds-card[data-blocked="1"] {
+  border-color: color-mix(in srgb, var(--destructive) 45%, transparent);
+  background: linear-gradient(0deg, color-mix(in srgb, var(--destructive) 4%, transparent), color-mix(in srgb, var(--destructive) 4%, transparent)), var(--card);
+}
+
+[data-dsh-studio] .ds-card[data-running="1"]::after {
+  content: "";
+  position: absolute;
+  top: 9px;
+  right: 9px;
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--primary);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--primary) 16%, transparent);
+}
+
+[data-dsh-studio] .ds-card-title {
+  font-size: 12.8px;
+  font-weight: 600;
+  line-height: 1.45;
+  letter-spacing: 0.005em;
+  color: var(--foreground);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+[data-dsh-studio] .ds-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  line-height: 1;
+  color: var(--muted-foreground);
+}
+
+[data-dsh-studio] .ds-meta .ds-chip {
+  height: 18px;
+  padding: 0 6px;
+  font-size: 10.5px;
+  border-radius: 6px;
+}
+
+[data-dsh-studio] .ds-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  flex: none;
+}
+
+[data-dsh-studio] .ds-col {
+  border: 1px solid color-mix(in srgb, var(--border) 80%, transparent);
+  border-radius: var(--radius);
+  background: color-mix(in srgb, var(--muted) 55%, transparent);
+  padding: 8px;
+  gap: 8px;
+}
+
+[data-dsh-studio] .ds-col-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 2px 6px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--foreground);
+}
+
+[data-dsh-studio] .ds-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--card);
+  color: var(--muted-foreground);
+  font-size: 10.5px;
+  font-weight: 500;
+}
+
+/* ------------------------------------------------------- board toolbar --- */
+/* The board filter bar is a plain block in the legacy CSS; Radix triggers are
+   width:100%, so every select claimed a full row. Make the bar a wrapping flex
+   row and let the inline width from the call sites decide each control's size. */
+
+[data-dsh-studio] .ds-board-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 12px 20px 10px;
+  border-bottom: 1px solid var(--border);
+}
+
+[data-dsh-studio] .ds-board-bar > * {
+  flex: 0 0 auto;
+}
+
+[data-dsh-studio] .ds-board-bar .ds-input {
+  height: 32px;
+}
+
+[data-dsh-studio] .ds-search {
+  flex: 0 0 auto;
+}
+
+/* Column header: 11px muted text was almost unreadable on the muted column. */
+[data-dsh-studio] .ds-col-head {
+  color: var(--foreground);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+}
+
+[data-dsh-studio] .ds-col-head .ds-count {
+  color: var(--muted-foreground);
+  font-weight: 500;
+}
+
+/* ------------------------------------------------- list rows & density --- */
+/* Row action buttons ("编辑 / 删除") were rendered as ghost buttons with no
+   resting affordance, so they read as plain text next to the row content. */
+[data-dsh-studio] .ds-listrow .ds-btn {
+  height: 32px;
+  padding: 0 10px;
+  font-size: 11.5px;
+  border-radius: calc(var(--radius) - 4px);
+}
+
+[data-dsh-studio] .ds-listrow .ds-btn-ghost {
+  color: var(--muted-foreground);
+  border: 1px solid transparent;
+}
+
+[data-dsh-studio] .ds-listrow .ds-btn-ghost:hover {
+  color: var(--foreground);
+  background: var(--muted);
+  border-color: var(--border);
+}
+
+[data-dsh-studio] .ds-listrow .ds-btn-ghost[data-danger='1'],
+[data-dsh-studio] .ds-dw-foot .ds-btn-ghost[data-danger='1'] {
+  color: var(--destructive);
+}
+
+[data-dsh-studio] .ds-listrow .ds-btn-ghost[data-danger='1']:hover {
+  color: var(--destructive);
+  background: color-mix(in srgb, var(--destructive) 10%, transparent);
+  border-color: color-mix(in srgb, var(--destructive) 30%, transparent);
+}
+
+/* Keep the rows breathing: 12px content with 14px vertical padding. */
+[data-dsh-studio] .ds-listrow {
+  padding: 11px 14px;
+}
+
+[data-dsh-studio] .ds-audit-row {
+  padding: 7px 14px;
+  font-size: 11.5px;
+}
+
+/* ------------------------------------------------------ spark on mobile --- */
+@media (max-width: 900px) {
+  [data-dsh-studio] .ds-spark-day {
+    font-size: 9px;
+    letter-spacing: -0.02em;
+  }
+}
+
+@media (max-width: 760px) {
+  /* The 14-day spark is unreadable at phone width: keep the bars, drop every
+     other label (the JS already blanks odd days, this covers older renders). */
+  [data-dsh-studio] .ds-spark-day:nth-child(even) {
+    visibility: hidden;
+  }
+}
+﻿
+/* 燃尽：折线 + 面积（2026-11-10） */
+[data-dsh-studio] .ds-burn { display: block; padding-top: 4px; }
+[data-dsh-studio] .ds-burn-svg { display: block; width: 100%; height: 84px; }
+[data-dsh-studio] .ds-burn-area { fill: color-mix(in srgb, var(--ds-accent) 14%, transparent); }
+[data-dsh-studio] .ds-burn-line { fill: none; stroke: var(--ds-accent); stroke-width: 1.6; }
+[data-dsh-studio] .ds-burn-dot { fill: var(--ds-accent); }
+[data-dsh-studio] .ds-burn-axis { display: flex; justify-content: space-between; margin-top: 4px; font-size: 10.5px; color: var(--muted-foreground); }
+﻿
+/* 卡片详情页签：给 Radix TabsList 补上轨道外观（2026-11-10） */
+
+/* 看板卡片的状态点：运行中=绿、阻塞=红（2026-11-10） */
+[data-dsh-studio] .ds-card[data-running="1"]::after {
+  background: hsl(152 62% 38%);
+  box-shadow: 0 0 0 3px hsl(152 62% 38% / 0.18);
+}
+[data-dsh-studio][data-theme="dark"] .ds-card[data-running="1"]::after {
+  background: hsl(152 60% 56%);
+  box-shadow: 0 0 0 3px hsl(152 60% 56% / 0.22);
+}
+[data-dsh-studio] .ds-card[data-blocked="1"]::after {
+  content: "";
+  position: absolute;
+  top: 9px;
+  right: 9px;
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--destructive);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--destructive) 16%, transparent);
+}
+[data-dsh-studio] .ds-card[data-running="1"][data-blocked="1"]::after {
+  background: var(--destructive);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--destructive) 16%, transparent);
+}[data-dsh-studio] .ds-composer { display:flex; flex-direction:column; gap:6px; padding:8px 10px; border:1px solid var(--border); border-radius:calc(var(--radius) - 2px); background:var(--card); box-shadow:var(--ds-shadow); transition:border-color .15s, box-shadow .15s; }
+[data-dsh-studio] .ds-composer:focus-within { border-color:color-mix(in srgb, currentColor 26%, transparent); box-shadow:0 0 0 3px color-mix(in srgb, currentColor 9%, transparent); }
+[data-dsh-studio] .ds-composer .ds-textarea { border:0 !important; box-shadow:none !important; background:transparent !important; padding:2px 0; resize:vertical; }
+[data-dsh-studio] .ds-composer-bar { display:flex; align-items:center; gap:8px; border-top:1px solid color-mix(in srgb, currentColor 10%, transparent); padding-top:6px; }
+[data-dsh-studio] .ds-composer-bar .ds-hint { margin-right:auto; }
+[data-dsh-studio] .ds-composer-count { font-size:11px; color:var(--muted-foreground); font-variant-numeric:tabular-nums; white-space:nowrap; }
+[data-dsh-studio] .ds-toasts { position:fixed; right:16px; bottom:16px; z-index:120; display:flex; flex-direction:column; gap:8px; align-items:flex-end; pointer-events:none; }
+[data-dsh-studio] .ds-toast { pointer-events:auto; display:flex; align-items:flex-start; gap:8px; max-width:340px; padding:9px 11px; border:1px solid var(--border); border-radius:calc(var(--radius) - 2px); background:var(--card); box-shadow:0 8px 24px -12px rgba(0,0,0,.35), 0 1px 2px rgba(0,0,0,.08); font-size:12px; animation:ds-toast-in .18s ease-out; }
+[data-dsh-studio] .ds-toast[data-tone="error"] { border-color:color-mix(in srgb, #dc2626 40%, var(--border)); }
+[data-dsh-studio] .ds-toast-icon { display:inline-flex; align-items:center; justify-content:center; width:16px; height:16px; margin-top:1px; border-radius:50%; background:#16a34a; color:#fff; font-size:10px; font-weight:700; flex:0 0 auto; }
+[data-dsh-studio] .ds-toast[data-tone="error"] .ds-toast-icon { background:#dc2626; }
+[data-dsh-studio] .ds-toast[data-tone="info"] .ds-toast-icon { background:var(--ds-accent); }
+[data-dsh-studio] .ds-toast-text { flex:1 1 auto; line-height:1.5; word-break:break-word; }
+[data-dsh-studio] .ds-toast-close { border:0; background:transparent; color:color-mix(in srgb, currentColor 55%, transparent); cursor:pointer; font-size:14px; line-height:1; padding:0 2px; }
+[data-dsh-studio] .ds-toast-close:hover { color:currentColor; }
+@keyframes ds-toast-in { from { opacity:0; transform:translateY(6px); } to { opacity:1; transform:none; } }
+[data-dsh-studio] .ds-ok, [data-dsh-studio] .ds-err { display:inline-flex; align-items:center; gap:5px; padding:3px 8px; border-radius:999px; font-size:11.5px; line-height:1.35; border:1px solid transparent; }
+[data-dsh-studio] .ds-ok { color:#15803d; background:color-mix(in srgb, #16a34a 10%, transparent); border-color:color-mix(in srgb, #16a34a 26%, transparent); }
+[data-dsh-studio] .ds-ok::before { content:'✓'; font-weight:700; }
+[data-dsh-studio] .ds-err { color:#b91c1c; background:color-mix(in srgb, #dc2626 10%, transparent); border-color:color-mix(in srgb, #dc2626 26%, transparent); }
+[data-dsh-studio] .ds-err::before { content:'!'; font-weight:700; }
+[data-dsh-studio][data-theme="dark"] .ds-ok { color:#6ee7a8; background:color-mix(in srgb, #16a34a 22%, transparent); border-color:color-mix(in srgb, #4ade80 34%, transparent); }
+[data-dsh-studio][data-theme="dark"] .ds-err { color:#fca5a5; background:color-mix(in srgb, #dc2626 24%, transparent); border-color:color-mix(in srgb, #f87171 34%, transparent); }
+[data-dsh-studio] .ds-action-bar { display:flex; align-items:center; justify-content:space-between; gap:10px; flex-wrap:wrap; margin-top:12px; padding-top:10px; border-top:1px solid color-mix(in srgb, currentColor 10%, transparent); }
+[data-dsh-studio] .ds-action-bar-left, [data-dsh-studio] .ds-action-bar-right { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+[data-dsh-studio] .ds-action-bar-right { margin-left:auto; }
+[data-dsh-studio] .ds-btn[data-force="1"] { color:#b45309; border-color:color-mix(in srgb, #f59e0b 40%, transparent); }
+[data-dsh-studio] .ds-btn[data-force="1"]:hover:not([disabled]) { background:color-mix(in srgb, #f59e0b 12%, transparent); }
+[data-dsh-studio][data-theme="dark"] .ds-btn[data-force="1"] { color:#fbbf24; border-color:color-mix(in srgb, #f59e0b 45%, transparent); }
+[data-dsh-studio] .ds-req-actions { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+[data-dsh-studio] .ds-req-actions .ds-select { width:auto; min-width:96px; }
+[data-dsh-studio] .ds-btn-ghost[data-danger="1"] { color:#b91c1c; border-color:color-mix(in srgb, #dc2626 26%, transparent); }
+[data-dsh-studio] .ds-btn-ghost[data-danger="1"]:hover:not([disabled]) { background:color-mix(in srgb, #dc2626 10%, transparent); }
+[data-dsh-studio][data-theme="dark"] .ds-btn-ghost[data-danger="1"] { color:#fca5a5; border-color:color-mix(in srgb, #f87171 30%, transparent); }
+[data-dsh-studio] .ds-btn[data-warn="1"] { color:#b45309; border-color:color-mix(in srgb, #d97706 30%, transparent); }
+[data-dsh-studio] .ds-btn[data-warn="1"]:hover:not([disabled]) { background:color-mix(in srgb, #d97706 10%, transparent); }
+[data-dsh-studio][data-theme="dark"] .ds-btn[data-warn="1"] { color:#fbbf24; border-color:color-mix(in srgb, #f59e0b 32%, transparent); }
+[data-dsh-studio] .ds-listrow-actions { display:flex; flex-wrap:wrap; align-items:center; gap:8px; }
+
+/* 主/次/危险按钮的最终裁定（2026-11-10）：用 .ds-btn.<variant> 提高特异性，
+   压过 legacy 与自己前几层里所有等价声明，保证「一屏一个主操作」真的看得见。 */
+[data-dsh-studio] .ds-btn.ds-btn-primary {
+  background: var(--primary);
+  border-color: var(--primary);
+  color: var(--primary-foreground);
+}
+[data-dsh-studio] .ds-btn.ds-btn-primary:hover:not([disabled]) {
+  background: color-mix(in srgb, var(--primary) 90%, transparent);
+  border-color: color-mix(in srgb, var(--primary) 90%, transparent);
+}
+[data-dsh-studio] .ds-btn.ds-btn-primary[disabled] {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+[data-dsh-studio] .ds-btn.ds-btn-ghost {
+  background: transparent;
+  border-color: transparent;
+  box-shadow: none;
+  color: var(--muted-foreground);
+}
+[data-dsh-studio] .ds-btn.ds-btn-ghost:hover:not([disabled]) {
+  background: var(--muted);
+  border-color: var(--border);
+  color: var(--foreground);
+}
+[data-dsh-studio] .ds-btn[data-danger="1"] { color: #b91c1c; }
+[data-dsh-studio] .ds-btn.ds-btn-ghost[data-danger="1"]:hover:not([disabled]) {
+  background: color-mix(in srgb, #dc2626 10%, transparent);
+  border-color: color-mix(in srgb, #dc2626 26%, transparent);
+  color: #b91c1c;
+}
+[data-dsh-studio][data-theme="dark"] .ds-btn[data-danger="1"] { color: #fca5a5; }
+[data-dsh-studio] .ds-btn[data-warn="1"] { color: #b45309; border-color: color-mix(in srgb, #d97706 30%, transparent); }
+[data-dsh-studio] .ds-btn[data-warn="1"]:hover:not([disabled]) { background: color-mix(in srgb, #d97706 10%, transparent); }
+[data-dsh-studio][data-theme="dark"] .ds-btn[data-warn="1"] { color: #fbbf24; border-color: color-mix(in srgb, #f59e0b 32%, transparent); }
+
+/* 主/次/危险按钮用实色，不依赖 CSS 变量（2026-11-10） */
+[data-dsh-studio] .ds-btn.ds-btn-primary { background: #18181b; border-color: #18181b; color: #fafafa; }
+[data-dsh-studio] .ds-btn.ds-btn-primary:hover:not([disabled]) { background: #27272a; border-color: #27272a; }
+[data-dsh-studio][data-theme="dark"] .ds-btn.ds-btn-primary { background: #fafafa; border-color: #fafafa; color: #09090b; }
+[data-dsh-studio] .ds-btn.ds-btn-primary[disabled] { opacity: .45; }
+[data-dsh-studio] .ds-btn.ds-btn-ghost { background: transparent; border-color: transparent; color: #71717a; box-shadow: none; }
+[data-dsh-studio] .ds-btn.ds-btn-ghost:hover:not([disabled]) { background: #f4f4f5; border-color: #e4e4e7; color: #18181b; }
+[data-dsh-studio][data-theme="dark"] .ds-btn.ds-btn-ghost { color: #a1a1aa; }
+[data-dsh-studio][data-theme="dark"] .ds-btn.ds-btn-ghost:hover:not([disabled]) { background: #27272a; border-color: #3f3f46; color: #fafafa; }
+
+/* 深色下的旧表面变量（2026-11-10）：legacy CSS 把 --ds-surface 定成了字面白色，
+   暗色主题下抽屉/面板因此仍是白底，这里统一改回深色表面色。 */
+[data-dsh-studio][data-theme="dark"] {
+  --ds-bg: #0e1014;
+  --ds-surface: #181b22;
+  --ds-surface-2: #1e222a;
+  --ds-line: #2c323d;
+  --ds-line-soft: color-mix(in srgb, #2c323d 60%, transparent);
+  --ds-line-soft2: color-mix(in srgb, #2c323d 40%, transparent);
+  color: #e6e8ee;
+  background: #0e1014;
+}
+[data-dsh-studio][data-theme="dark"] .ds-drawer,
+[data-dsh-studio][data-theme="dark"] .ds-side,
+[data-dsh-studio][data-theme="dark"] .ds-modal,
+[data-dsh-studio][data-theme="dark"] .ds-panel,
+[data-dsh-studio][data-theme="dark"] .ds-card,
+[data-dsh-studio][data-theme="dark"] .ds-dw-col,
+[data-dsh-studio][data-theme="dark"] .ds-code-box {
+  background: var(--ds-surface);
+  border-color: var(--ds-line);
+  color: #e6e8ee;
+}
+
+/* 空状态（2026-11-10）：统一成虚线框 + 淡底 + 居中说明，替代原本 40% 透明度的弱提示 */
+[data-dsh-studio] .ds-empty {
+  opacity: 1;
+  color: var(--muted-foreground);
+  border: 1px dashed var(--border);
+  background: color-mix(in srgb, var(--muted) 38%, transparent);
+  border-radius: calc(var(--radius) - 2px);
+  padding: 18px 12px;
+  font-size: 12px;
+  line-height: 1.65;
+  text-align: center;
+}
+[data-dsh-studio] .ds-empty .ds-empty-title {
+  display: block;
+  margin-bottom: 3px;
+  color: var(--foreground);
+  font-weight: 600;
+  font-size: 12.5px;
+}
+
+/* 市场页与项目页的卡片一致性（2026-11-10）：与看板卡片、面板同一套圆角/描边/投影 */
+[data-dsh-studio] .ds-market-grid,
+[data-dsh-studio] .ds-proj-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 12px;
+}
+[data-dsh-studio] .ds-market-card,
+[data-dsh-studio] .ds-proj-card {
+  background: var(--ds-surface);
+  border: 1px solid var(--border);
+  border-radius: calc(var(--radius) - 1px);
+  box-shadow: var(--ds-shadow);
+  padding: 12px 13px;
+  transition: box-shadow .16s ease, border-color .16s ease, transform .16s ease;
+}
+[data-dsh-studio] .ds-market-card:hover,
+[data-dsh-studio] .ds-proj-card:hover {
+  border-color: color-mix(in srgb, var(--border) 55%, var(--foreground));
+  box-shadow: 0 6px 16px -10px rgba(15, 23, 42, .45);
+}
+[data-dsh-studio] .ds-mc-head,
+[data-dsh-studio] .ds-proj-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+[data-dsh-studio] .ds-mc-name,
+[data-dsh-studio] .ds-proj-name {
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: -.005em;
+}
+[data-dsh-studio] .ds-proj-stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 12px;
+  margin: 8px 0 6px;
+  font-size: 11.5px;
+  color: var(--muted-foreground);
+}
+[data-dsh-studio] .ds-proj-bar {
+  height: 6px;
+  border-radius: 999px;
+  background: var(--muted);
+  overflow: hidden;
+  margin-bottom: 6px;
+}
+[data-dsh-studio] .ds-market-grid + .ds-hint,
+[data-dsh-studio] .ds-proj-grid + .ds-hint {
+  margin-top: 10px;
+}
+
+/* 项目页 / 市场页的容器：外层 .ds-body 若参与父级网格会把卡片挤成窄列，
+   这里显式让这两个页面回到整行块级布局（:has 在 Chrome 105+ 可用）。 */
+[data-dsh-studio] .ds-body:has(> .ds-proj-grid),
+[data-dsh-studio] .ds-body:has(> .ds-market-grid) {
+  display: block;
+  width: 100%;
+  min-width: 0;
+}
+[data-dsh-studio] .ds-proj-grid,
+[data-dsh-studio] .ds-market-grid {
+  width: 100%;
+  grid-auto-flow: row;
+}
+
+/* 再兜一层：项目/市场页里 .ds-body 的直接子 div 若是内容宽度，会把栅格压窄 */
+[data-dsh-studio] .ds-body:has(.ds-proj-grid) > div,
+[data-dsh-studio] .ds-body:has(.ds-market-grid) > div {
+  display: block;
+  width: 100%;
+  min-width: 0;
+}
+[data-dsh-studio] .ds-proj-grid {
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  min-width: 100%;
+}
+
+/* 项目卡在宽屏上两列更平衡（一列 1200px 会显得很空） */
+[data-dsh-studio] .ds-proj-grid {
+  grid-template-columns: repeat(auto-fill, minmax(420px, 1fr));
+}
+@media (max-width: 900px) {
+  [data-dsh-studio] .ds-proj-grid { grid-template-columns: 1fr; }
+}
+
+/* 效能页的条形：计数为 0 时画虚线基线，避免空轨道被误读成满格；
+   非零但很小时给 2px 最小宽度，肉眼能看见 */
+[data-dsh-studio] .ds-an-track { position: relative; }
+[data-dsh-studio] .ds-an-track[data-empty="1"] {
+  background: transparent;
+  border-top: 1px dashed var(--border);
+  height: 6px;
+}
+[data-dsh-studio] .ds-an-track[data-empty="1"] .ds-an-fill { display: none; }
+[data-dsh-studio] .ds-an-fill { min-width: 2px; }
+
+/* 派单运行状态里的日志行（2026-11-10） */
+[data-dsh-studio] .ds-log {
+  margin-top: 8px;
+  border-top: 1px dashed var(--border);
+  padding-top: 8px;
+  display: grid;
+  gap: 4px;
+  max-height: 168px;
+  overflow: auto;
+}
+[data-dsh-studio] .ds-log-line {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--muted-foreground);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+
+/* 深色下把小字号的「彩色语义」提亮一档：它们在白底上足够，落到 #181b22 上会糊。 */
+[data-dsh-studio][data-theme="dark"] .ds-chip[data-on="1"],
+[data-dsh-studio][data-theme="dark"] .ds-audit-status,
+[data-dsh-studio][data-theme="dark"] .ds-chip-case[data-r="pass"],
+[data-dsh-studio][data-theme="dark"] .ds-chip[data-role="dev"],
+[data-dsh-studio][data-theme="dark"] .ds-chip[data-kind="design"] { color: #6ee7a8; }
+[data-dsh-studio][data-theme="dark"] .ds-chip[data-role="product"],
+[data-dsh-studio][data-theme="dark"] .ds-chip[data-kind="mr"] { color: #9ec1ff; }
+[data-dsh-studio][data-theme="dark"] .ds-chip[data-role="architect"],
+[data-dsh-studio][data-theme="dark"] .ds-chip[data-req="1"] { color: #c4b5fd; }
+[data-dsh-studio][data-theme="dark"] .ds-chip[data-role="qa"],
+[data-dsh-studio][data-theme="dark"] .ds-chip[data-kind="cases"],
+[data-dsh-studio][data-theme="dark"] .ds-chip[data-sla="due_soon"] { color: #fbbf24; }
+[data-dsh-studio][data-theme="dark"] .ds-card-warn,
+[data-dsh-studio][data-theme="dark"] .ds-case-fail,
+[data-dsh-studio][data-theme="dark"] .ds-proj-stats b[data-warn="1"],
+[data-dsh-studio][data-theme="dark"] .ds-an-kv b[data-warn="1"],
+[data-dsh-studio][data-theme="dark"] .ds-kpi[data-warn="1"] .ds-kpi-value { color: #ff9a9d; }
+[data-dsh-studio][data-theme="dark"] .ds-card[data-blocked="1"] { background: color-mix(in srgb, #e5484d 10%, var(--ds-surface)); }
+[data-dsh-studio][data-theme="dark"] .ds-audit-row[data-ok="0"],
+[data-dsh-studio][data-theme="dark"] .ds-art-row[data-result="fail"] { background: color-mix(in srgb, #e5484d 12%, transparent); }
+
+
+/* 深色下页签：轨道与选中项在 #181b22/#1e222a 上几乎同色，选中态看不出来。
+   这里给「轨道压暗、选中提亮 + 内描边」一组显式值，明暗两侧都不依赖尾类的相近色。 */
+[data-dsh-studio][data-theme="dark"] .ds-meta { color: #a8afba; }
+[data-dsh-studio][data-theme="dark"] .ds-hint { color: #9aa1ad; }
+
+/* ------------------------------------------------ board scrolling --- */
+/* 8 columns × 282px ≈ 2256px：任何笔记本宽度都放不下，看板本来就要横向滚动。
+   把这件事做“看得见”：列对齐吸附、滚动条跟主题、卡片绝不溢出列外。 */
+[data-dsh-studio] .ds-board {
+  scroll-snap-type: x proximity;
+  scrollbar-width: thin;
+  scrollbar-color: var(--border) transparent;
+}
+[data-dsh-studio] .ds-board:focus-visible { outline: 2px solid color-mix(in srgb, var(--ring) 55%, transparent); outline-offset: -2px; }
+[data-dsh-studio] .ds-board::-webkit-scrollbar { height: 10px; }
+[data-dsh-studio] .ds-board::-webkit-scrollbar-track { background: transparent; }
+[data-dsh-studio] .ds-board::-webkit-scrollbar-thumb {
+  background: var(--border); border-radius: 8px; border: 2px solid transparent; background-clip: content-box;
+}
+[data-dsh-studio][data-theme="dark"] .ds-board::-webkit-scrollbar-thumb { background: #3a404b; background-clip: content-box; }
+[data-dsh-studio] .ds-col { scroll-snap-align: start; min-width: 0; }
+[data-dsh-studio] .ds-col-body { overflow-x: hidden; }
+[data-dsh-studio] .ds-card { min-width: 0; max-width: 100%; }
+[data-dsh-studio] .ds-card-title { overflow-wrap: anywhere; }
+[data-dsh-studio] .ds-meta { flex-wrap: wrap; row-gap: 4px; }
+
+/* 列必须“看得出来是列”：之前用 muted 55% 透明叠在白色上几乎和背景同色，
+   卡片像是浮在白纸上。改成实色底 + 明确描边，头部略提亮。 */
+[data-dsh-studio] .ds-col {
+  background: var(--muted);
+  border-color: var(--border);
+}
+[data-dsh-studio] .ds-col-head {
+  background: var(--card);
+  border-bottom: 1px solid var(--border);
+  border-radius: calc(var(--radius) + 1px) calc(var(--radius) + 1px) 0 0;
+}
+[data-dsh-studio] .ds-col-owner { color: var(--muted-foreground); }
+[data-dsh-studio][data-theme="dark"] .ds-col {
+  background: #14171d;
+  border-color: #262a33;
+}
+[data-dsh-studio][data-theme="dark"] .ds-col-head {
+  background: #1a1e25;
+  border-bottom-color: #262a33;
+  color: #e6e8ee;
+}
+
+/* --------------------------------------------------- form rows/fields --- */
+/* legacy 只写了 `.ds-row{min-width:0}` / `.ds-field{min-width:0}`，没有 display：
+   97 处 ds-row、151 处 ds-field 全都退化成块级堆叠，行内 style 的 gap/alignItems
+   和 child 的 flex 全都失效——专家编辑里标签、下拉、提示互相压住就是这个原因。 */
+[data-dsh-studio] .ds-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  min-width: 0;
+}
+[data-dsh-studio] .ds-field {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  min-width: 0;
+}
+[data-dsh-studio] .ds-row > .ds-field {
+  flex: 1 1 220px;
+}
+[data-dsh-studio] .ds-field > .ds-label { margin-bottom: 1px; }
+[data-dsh-studio] .ds-field > .ds-hint { margin-left: 0; }
+[data-dsh-studio] .ds-field > .ds-hint + .ds-hint { margin-top: -2px; }
+
+/* Markdown 内容字段：工具行 + 预览 */
+[data-dsh-studio] .ds-md-field { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+[data-dsh-studio] .ds-md-bar { display: flex; align-items: center; gap: 8px; justify-content: space-between; }
+[data-dsh-studio] .ds-md-bar .ds-hint { margin-left: 0; opacity: .62; }
+[data-dsh-studio] .ds-md-preview {
+  border: 1px solid var(--border);
+  border-radius: calc(var(--radius) - 2px);
+  background: var(--card);
+  padding: 10px 12px;
+  min-height: 84px;
+}
+
+/* 直接阅读：交付物/文档正文展开区 */
+[data-dsh-studio] .ds-art-wrap,
+[data-dsh-studio] .ds-doc-wrap { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+[data-dsh-studio] .ds-reader {
+  margin: 0 0 8px;
+  max-height: 360px;
+  overflow: auto;
+  font-size: 12.5px;
+}
+[data-dsh-studio] .ds-reader .ds-md { margin: 0; }
+
+/* 顶部导航的 Tabs 轨道：浅色下 --muted 与页面底几乎同色，看不出是 Tabs，这里给一层可见轨道 */
+
+/* 选中态必须一眼可见：浅色实心深底 + 白字，深色实心浅底 + 深字（!important 压过 Tailwind 的 data-[state] 类） */
+
+/* 顶部导航/抽屉页签的选中态兜底：不依赖 data-state，用 aria-selected 再兜一层 */
+
+/* 统一全站“选中/开启”观感：分段按钮、开关型 chip、页签选中，一律实心高对比 */
+[data-dsh-studio] .ds-seg-btn[data-on="1"],
+[data-dsh-studio] .ds-chip[data-on="1"],
+[data-dsh-studio] .ds-btn[data-on="1"] {
+  background: #18181b !important;
+  color: #fafafa !important;
+  border-color: #18181b !important;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.18) !important;
+}
+[data-dsh-studio][data-theme="dark"] .ds-seg-btn[data-on="1"],
+[data-dsh-studio][data-theme="dark"] .ds-chip[data-on="1"],
+[data-dsh-studio][data-theme="dark"] .ds-btn[data-on="1"] {
+  background: #fafafa !important;
+  color: #09090b !important;
+  border-color: #fafafa !important;
+}
+/* 悬停时仍要保持“已选中”的实心感，不要退回淡底 */
+[data-dsh-studio] .ds-seg-btn[data-on="1"]:hover,
+[data-dsh-studio] .ds-chip[data-on="1"]:hover {
+  background: #27272a !important;
+  color: #fafafa !important;
+}
+[data-dsh-studio][data-theme="dark"] .ds-seg-btn[data-on="1"]:hover,
+[data-dsh-studio][data-theme="dark"] .ds-chip[data-on="1"]:hover {
+  background: #e4e4e7 !important;
+  color: #09090b !important;
+}
+
+/* 卡片详情上半部分：把操作区压紧成“一条一条”，不再四排按钮各占一行 */
+[data-dsh-studio] .ds-drawer .ds-sec > .ds-row,
+[data-dsh-studio] .ds-drawer .ds-sec .ds-row {
+  gap: 6px;
+  margin-top: 8px;
+}
+[data-dsh-studio] .ds-drawer .ds-sec .ds-btn {
+  height: 28px;
+  padding: 0 10px;
+  font-size: 12px;
+  border-radius: 8px;
+}
+[data-dsh-studio] .ds-drawer .ds-sec > .ds-hint,
+[data-dsh-studio] .ds-drawer .ds-sec .ds-hint {
+  display: block;
+  margin: 4px 0 0;
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--muted-foreground);
+}
+/* 段与段之间给一条分隔，滚动时能看出“这是另一件事” */
+[data-dsh-studio] .ds-drawer .ds-sec {
+  padding: 12px 0;
+  border-bottom: 1px dashed var(--border);
+}
+[data-dsh-studio] .ds-drawer .ds-sec:last-of-type {
+  border-bottom: 0;
+}
+/* 操作按钮的“已选中/禁用”别和正文抢注意力 */
+[data-dsh-studio] .ds-drawer .ds-sec .ds-btn[disabled] {
+  opacity: 0.45;
+}
+
+/* 卡片详情：页签不要贴着标题，给头部与页签之间留出呼吸 */
+[data-dsh-studio] .ds-drawer > *:first-child {
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--border);
+}
+[data-dsh-studio] .ds-drawer [data-state="active"],
+[data-dsh-studio] .ds-drawer [aria-selected="true"] {
+  margin-top: 0;
+}
+[data-dsh-studio] .ds-drawer .ds-dw-body,
+[data-dsh-studio] .ds-drawer .ds-dw-cols {
+  padding-top: 6px;
+}
+
+/* 泳道优化：列色条 / 吸顶列头 / 更宽的列与更松的间距 / 空列提示 */
+[data-dsh-studio] .ds-col {
+  position: relative;
+  min-width: 300px;
+  border-radius: calc(var(--radius) - 1px);
+  overflow: hidden;
+}
+[data-dsh-studio] .ds-col::before {
+  content: '';
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: 3px;
+  background: var(--col-accent, var(--border));
+  z-index: 3;
+}
+
+[data-dsh-studio] .ds-col-head {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  padding-top: 9px;
+  backdrop-filter: blur(2px);
+}
+
+[data-dsh-studio] .ds-col-body {
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+[data-dsh-studio] .ds-col-body:empty::after {
+  content: '还没有卡，拖一张过来';
+  display: block;
+  padding: 14px 10px;
+  border: 1px dashed var(--border);
+  border-radius: 8px;
+  font-size: 11.5px;
+  color: var(--muted-foreground);
+  text-align: center;
+}
+
+/* 列色条按状态（而不是按列的位置） */
+[data-dsh-studio] .ds-col[data-col] { --col-accent: var(--border); }
+[data-dsh-studio] .ds-col[data-col="clarify"]   { --col-accent: #a1a1aa; }
+[data-dsh-studio] .ds-col[data-col="design"]    { --col-accent: #8b5cf6; }
+[data-dsh-studio] .ds-col[data-col="dev_ready"] { --col-accent: #3b82f6; }
+[data-dsh-studio] .ds-col[data-col="dev"]       { --col-accent: #06b6d4; }
+[data-dsh-studio] .ds-col[data-col="review"]    { --col-accent: #eab308; }
+[data-dsh-studio] .ds-col[data-col="test"]      { --col-accent: #f97316; }
+[data-dsh-studio] .ds-col[data-col="accept"]    { --col-accent: #10b981; }
+[data-dsh-studio] .ds-col[data-col="done"]      { --col-accent: #52525b; }
+
+/* 抽屉：状态推进与操作区排布（2026-11-10） */
+[data-dsh-studio] .ds-drawer .ds-listrow-actions, [data-dsh-studio] .ds-side .ds-listrow-actions { display:flex; flex-wrap:wrap; gap:8px; align-items:center }
+[data-dsh-studio] .ds-drawer .ds-listrow-actions > .ds-select { min-width:190px }
+[data-dsh-studio] .ds-drawer .ds-sec-head { margin-bottom:8px }
+[data-dsh-studio] .ds-drawer .ds-sec-head .ds-hint { font-size:11px }
+[data-dsh-studio] .ds-drawer .ds-sec + .ds-sec { margin-top:2px }
+
+/* 准出检查里的签字区：单独成块，和清单分开（2026-11-10） */
+[data-dsh-studio] .ds-gate-sign { display:flex; flex-wrap:wrap; gap:8px; align-items:center; justify-content:space-between; margin-top:10px; padding-top:10px; border-top:1px dashed var(--border); font-size:11.5px; color:var(--foreground) }
+[data-dsh-studio] .ds-gate-sign > span { min-width:0; overflow-wrap:anywhere }
+[data-dsh-studio] .ds-gate .ds-row { margin-top:10px; padding-top:10px; border-top:1px dashed var(--border) }
+[data-dsh-studio] .ds-gate .ds-row .ds-btn { white-space:nowrap }
+
+/* 卡片上的「负责人」标签：限宽 + 省略号，完整信息放 title（2026-11-10） */
+[data-dsh-studio] .ds-meta .ds-chip[data-role] { max-width: 104px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: inline-block; line-height: 18px }
+[data-dsh-studio] .ds-meta .ds-chip[data-open="1"] { border-style: dashed; color: #8b5cf6 }
+[data-dsh-studio][data-theme="dark"] .ds-meta .ds-chip[data-open="1"] { color: #c4b5fd }
+[data-dsh-studio] .ds-drawer .ds-chip[data-role] { max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap }
+
+/* 看板卡片：负责人当成「卡片右下角的经办人」来排（2026-11-10） */
+[data-dsh-studio] .ds-meta { display:flex; flex-wrap:wrap; align-items:center; gap:5px; row-gap:4px }
+[data-dsh-studio] .ds-meta .ds-chip[data-role] {
+  margin-left: auto; order: 99;
+  max-width: 120px; height: 20px; line-height: 18px; padding: 0 8px;
+  border-radius: 999px; border-color: transparent;
+  background: color-mix(in srgb, currentColor 12%, transparent);
+  font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis
+}
+[data-dsh-studio] .ds-meta .ds-chip[data-role]:hover { background: color-mix(in srgb, currentColor 18%, transparent) }
+[data-dsh-studio] .ds-meta .ds-chip[data-role][data-open="1"] {
+  margin-left: auto; background: transparent; border: 1px dashed currentColor; opacity: .85
+}
+[data-dsh-studio][data-theme="dark"] .ds-meta .ds-chip[data-role] { background: color-mix(in srgb, currentColor 18%, transparent) }
+
+/* 看板：列定宽 + 卡片内信息不重叠（2026-11-10） */
+[data-dsh-studio] .ds-board { gap: 12px; padding: 12px 16px 16px; align-items: flex-start }
+[data-dsh-studio] .ds-col { flex: 0 0 288px; width: 288px; min-width: 288px; max-width: 288px }
+[data-dsh-studio] .ds-col-body { display: flex; flex-direction: column; gap: 8px; padding: 8px; overflow-x: hidden }
+[data-dsh-studio] .ds-card { width: 100%; min-width: 0 }
+[data-dsh-studio] .ds-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 5px }
+[data-dsh-studio] .ds-meta .ds-chip { height: 18px; line-height: 16px; font-size: 10.5px; padding: 0 6px }
+[data-dsh-studio] .ds-card-foot {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 2px 6px;
+  font-size: 10px; color: var(--muted-foreground); margin-top: 2px
+}
+[data-dsh-studio] .ds-card-foot > span:last-child { margin-left: auto }
+[data-dsh-studio] .ds-card-title { font-size: 12.5px; line-height: 1.45 }
+@media (max-width: 900px) {
+  [data-dsh-studio] .ds-col { flex: 0 0 86vw; width: 86vw; min-width: 86vw; max-width: 86vw }
+}
+
+/* 看板列头：名称 + 计数一行，负责人一行（2026-11-10） */
+[data-dsh-studio] .ds-col { border-radius: calc(var(--radius) - 2px); overflow: hidden }
+[data-dsh-studio] .ds-col-head {
+  display: flex; flex-direction: column; gap: 4px; padding: 9px 10px 8px;
+  background: var(--card); border-bottom: 1px solid var(--border);
+  position: sticky; top: 0; z-index: 2
+}
+[data-dsh-studio] .ds-col-title { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-width: 0 }
+[data-dsh-studio] .ds-col-name { font-size: 12.5px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis }
+[data-dsh-studio] .ds-col-owner { display: flex; align-items: center; gap: 6px; min-width: 0; font-size: 10.5px; color: var(--muted-foreground) }
+[data-dsh-studio] .ds-col-owner-name {
+  display: inline-flex; align-items: center; max-width: 160px; padding: 1px 7px; border-radius: 999px;
+  background: color-mix(in srgb, currentColor 10%, transparent); color: var(--foreground);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis
+}
+[data-dsh-studio] .ds-col-owner[data-empty="1"] .ds-col-owner-name { background: transparent; border: 1px dashed var(--border); color: var(--muted-foreground) }
+[data-dsh-studio][data-theme="dark"] .ds-col-head { background: #1a1e25 }
+[data-dsh-studio] .ds-col-body { padding-top: 8px }
+
+/* 列头左对齐修正（上面的 .ds-col-head 曾被居中） */
+[data-dsh-studio] .ds-col-head { align-items: stretch; text-align: left }
+[data-dsh-studio] .ds-col-title { width: 100%; align-items: center }
+[data-dsh-studio] .ds-col-name { flex: 1 1 auto; text-align: left }
+[data-dsh-studio] .ds-col-owner { width: 100%; justify-content: flex-start }
+
+/* 列头对齐：用更高特异性 + !important 压过旧规则 */
+[data-dsh-studio] .ds-board .ds-col .ds-col-head { align-items: stretch !important; text-align: left !important }
+[data-dsh-studio] .ds-board .ds-col .ds-col-title { display: flex !important; width: 100% !important; align-items: center !important; justify-content: space-between !important }
+[data-dsh-studio] .ds-board .ds-col .ds-col-owner { display: flex !important; width: 100% !important; justify-content: flex-start !important; gap: 6px !important }
+
+/* 列是纵向 flex：头部必须撑满列宽（此前被居中成窄条） */
+[data-dsh-studio] .ds-board .ds-col { display: flex !important; flex-direction: column !important; align-items: stretch !important }
+[data-dsh-studio] .ds-board .ds-col .ds-col-head { width: 100% !important; box-sizing: border-box !important }
+[data-dsh-studio] .ds-board .ds-col .ds-col-body { width: 100% !important; box-sizing: border-box !important }
+
+/* 工作区不再撑高宿主页面：滚动发生在 .ds-body 内部（2026-11-10） */
+[data-dsh-studio] { height: 100% !important; min-height: 0 !important; max-height: 100% !important; overflow: hidden !important }
+[data-dsh-studio] > .ds-head { flex: 0 0 auto }
+[data-dsh-studio] > .ds-body { flex: 1 1 auto !important; min-height: 0 !important; overflow: auto !important }
+[data-dsh-studio] .ds-req-page, [data-dsh-studio] .ds-board, [data-dsh-studio] .ds-pane-stack { min-height: 0 }
+
+/* 工作区改成真正的一屏布局：head 固定 + body 内部滚动（2026-11-10 修正） */
+html body [data-dsh-studio] {
+  display: flex !important; flex-direction: column !important;
+  height: 100vh !important; max-height: 100vh !important; min-height: 0 !important;
+  overflow: hidden !important
+}
+html body [data-dsh-studio] > .ds-body {
+  flex: 1 1 auto !important; min-height: 0 !important;
+  overflow-y: auto !important; overflow-x: hidden !important
+}
+html body [data-dsh-studio] > .ds-body > * { min-height: 0 !important }
+html body [data-dsh-studio] .ds-empty, html body [data-dsh-studio] .ds-hint { max-width: 100% }
+
+/* 门户容器不能参与布局：它同时带 [data-dsh-studio]，会被上面的 100vh 规则撑成一屏空白
+   （需求/版本页滚到底的一整屏空白就是这个 900px 的空节点）。 */
+html body [data-dsh-studio]:not([data-dsh-studio-portal]) {
+  height: 100vh !important; max-height: 100vh !important;
+  display: flex !important; flex-direction: column !important; overflow: hidden !important
+}
+html body [data-dsh-studio][data-dsh-studio-portal] {
+  position: fixed !important; inset: 0 !important;
+  width: 0 !important; height: 0 !important; min-height: 0 !important;
+  overflow: visible !important; margin: 0 !important; padding: 0 !important
+}
+
+/* 禁用态输入框：改成浅灰底 + 去掉浏览器默认淡化，看起来像只读字段而不是丢失了边框 */
+[data-dsh-studio] input:disabled, [data-dsh-studio-portal] input:disabled {
+  background: var(--muted) !important; opacity: 1 !important; cursor: not-allowed
+}
+[data-dsh-studio] .ds-field > .ds-label { white-space: nowrap; overflow: hidden; text-overflow: ellipsis }
+/* 效能页：同一行的面板等高、标题与说明分两行，避免标题被说明挤成 "团队负载0 位在跑" */
+[data-dsh-studio] .ds-an-grid { align-items: stretch }
+[data-dsh-studio] .ds-an-grid > * { min-width: 0 }
+[data-dsh-studio] .ds-an-grid > .ds-panel { height: 100% }
+[data-dsh-studio] .ds-an-grid > .ds-panel > .ds-panel-body { flex: 1 1 auto; min-height: 0 }
+[data-dsh-studio] .ds-an-grid .ds-panel-head { flex-direction: column; align-items: flex-start; gap: 3px }
+[data-dsh-studio] .ds-an-grid .ds-panel-head .ds-hint { margin-left: 0 }
+[data-dsh-studio] .ds-an-grid .ds-panel-title {
+  max-width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis
+}
+[data-dsh-studio] .ds-an-grid .ds-an-foot { margin-top: auto }
+/* 设置页统一（2026-11-10）：面板成栈、内边距一致、输入控件在设置里也看得见边框 */
+[data-dsh-studio] .ds-pane-stack { display: flex; flex-direction: column; gap: 12px }
+[data-dsh-studio] .ds-pane-stack > .ds-panel { margin: 0 }
+[data-dsh-studio] .ds-pane-stack > .ds-panel > .ds-panel-head { padding: 10px 14px; border-bottom: 1px solid var(--border) }
+[data-dsh-studio] .ds-pane-stack > .ds-panel > .ds-panel-body { padding: 12px 14px }
+[data-dsh-studio] .ds-pane input:not([type="checkbox"]):not([type="radio"]):not([type="file"]),
+[data-dsh-studio] .ds-pane textarea,
+[data-dsh-studio-portal] input:not([type="checkbox"]):not([type="radio"]):not([type="file"]),
+[data-dsh-studio-portal] textarea {
+  border: 1px solid var(--border) !important; border-radius: 6px !important; background: var(--card) !important
+}
+[data-dsh-studio] .ds-pane input:focus, [data-dsh-studio] .ds-pane textarea:focus,
+[data-dsh-studio-portal] input:focus, [data-dsh-studio-portal] textarea:focus {
+  outline: none !important; border-color: var(--ring) !important; box-shadow: 0 0 0 3px color-mix(in srgb, var(--ring) 28%, transparent) !important
+}
+[data-dsh-studio] .ds-pane .ds-field > .ds-label { font-size: 11.5px; color: var(--muted-foreground) }
+[data-dsh-studio] .ds-pane .ds-sec-head { margin-bottom: 6px }
+/* 顶部页签：逐个都有内边距与最小宽度，不再挤成一排文字 */
+/* 主题三档（Radix ToggleGroup）：同样给足内边距与最小宽度，避免挤成一行文字 */
+/* 设置页：侧导航条目被 UA 复位压成 20px 高，补回内边距 */
+[data-dsh-studio] .ds-nav-item {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  min-height: 32px !important; padding: 6px 10px !important; border-radius: 7px;
+  font-size: 12.5px; line-height: 1.3; width: 100%; text-align: left
+}
+[data-dsh-studio] .ds-nav-item + .ds-nav-item { margin-top: 2px }
+
+/* 设置页列表行：提示词/技能预览只占一行，超出省略，动作按钮不被挤压 */
+[data-dsh-studio] .ds-listrow { display: flex; align-items: center; gap: 12px; padding: 10px 14px }
+[data-dsh-studio] .ds-listrow-main { display: flex; flex-direction: column; gap: 3px; min-width: 0; flex: 1 1 auto }
+[data-dsh-studio] .ds-listrow-main > div { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis }
+[data-dsh-studio] .ds-listrow-main [data-prompt="1"] { color: var(--muted-foreground); font-size: 11.5px }
+[data-dsh-studio] .ds-listrow-actions { flex: 0 0 auto; display: flex; align-items: center; gap: 6px }
+/* 勾选开关：用 flex 自动外边距代替 translate，避免滑块跑到轨道外 */
+[data-dsh-studio] [role="switch"] { display: inline-flex !important; align-items: center; padding: 2px !important; box-sizing: border-box }
+[data-dsh-studio] [role="switch"] > span {
+  transform: none !important; margin: 0 !important; flex: 0 0 auto !important;
+  width: 16px !important; height: 16px !important; border-radius: 9999px
+}
+[data-dsh-studio] [role="switch"][data-state="unchecked"] > span { margin-right: auto !important }
+[data-dsh-studio] [role="switch"][data-state="checked"] > span { margin-left: auto !important }
+
+/* 页签：未选中项保持透明，文字用 60% 前景色（组件类已给出尺寸/圆角，这里只兜底色） */
+[data-dsh-studio] [role="tablist"] > [role="tab"]:not([data-state="active"]) {
+  background: transparent !important;
+  color: color-mix(in srgb, var(--foreground) 60%, transparent) !important;
+  box-shadow: none !important;
+}
+[data-dsh-studio] [role="tablist"] > [role="tab"]:not([data-state="active"]):hover {
+  color: var(--foreground) !important;
+}
+
+/* 页签轨道在浅色下几乎与页面同色（#f4f4f5 vs #fafafa），补一层可见的边界与选中浮起 */
+[data-dsh-studio] [role="tablist"],
+[data-dsh-studio-portal] [role="tablist"] {
+  background: color-mix(in srgb, var(--foreground) 6%, var(--background));
+  border: 1px solid color-mix(in srgb, var(--foreground) 10%, var(--background));
+  border-radius: 9px;
+  padding: 3px;
+  gap: 3px;
+}
+[data-dsh-studio] [role="tablist"] > [role="tab"][data-state="active"],
+[data-dsh-studio-portal] [role="tablist"] > [role="tab"][data-state="active"] {
+  background: var(--card) !important;
+  color: var(--foreground) !important;
+  border: 1px solid color-mix(in srgb, var(--foreground) 12%, var(--card)) !important;
+  box-shadow: 0 1px 2px color-mix(in srgb, var(--foreground) 12%, transparent) !important;
+}
+[data-dsh-studio][data-theme="dark"] [role="tablist"],
+[data-dsh-studio-portal][data-theme="dark"] [role="tablist"] {
+  background: #16181d;
+  border-color: #2a2e36;
+}
+[data-dsh-studio][data-theme="dark"] [role="tablist"] > [role="tab"][data-state="active"],
+[data-dsh-studio-portal][data-theme="dark"] [role="tablist"] > [role="tab"][data-state="active"] {
+  background: #2b3038 !important;
+  color: #fff !important;
+  border-color: #3d434e !important;
+}
+
+[data-dsh-studio] .ds-count[data-over="1"] {
+  background: color-mix(in srgb, #e5484d 14%, var(--card));
+  border-color: color-mix(in srgb, #e5484d 45%, var(--border));
+  color: #b42318;
+}
+[data-dsh-studio][data-theme="dark"] .ds-count[data-over="1"] { color: #ff9a9d; }
+
+/* 列负责人选择器：不要被列的 overflow 裁掉，列表可滚 */
+[data-dsh-studio] .ds-colpick { position: relative; z-index: 30; margin-top: 6px; }
+[data-dsh-studio] .ds-colpick-list { max-height: 220px; overflow-y: auto; border: 1px solid var(--border);
+  border-radius: 8px; background: var(--card); box-shadow: var(--ds-shadow); padding: 4px; }
+[data-dsh-studio] .ds-colpick .ds-mention-item { display: flex; gap: 8px; align-items: center; width: 100%;
+  padding: 6px 8px; border-radius: 6px; background: transparent; border: 0; text-align: left; cursor: pointer; font-size: 12.5px; }
+[data-dsh-studio] .ds-colpick .ds-mention-item:hover { background: var(--muted); }
+
+/* 需求页：列表/详情两栏收敛，杜绝横向溢出（2026-11-11） */
+[data-dsh-studio] .ds-req-grid { grid-template-columns: 300px minmax(0, 1fr) !important; gap: 14px !important; align-items: start; min-width: 0; }
+[data-dsh-studio] .ds-req-grid > * { min-width: 0; max-width: 100%; }
+[data-dsh-studio] .ds-req-list { max-height: calc(100vh - 220px); overflow-y: auto; overflow-x: hidden; padding-right: 2px; }
+[data-dsh-studio] .ds-req-list-head { flex-wrap: wrap; row-gap: 6px; }
+[data-dsh-studio] .ds-req-list-head > .ds-btn { flex: 0 0 auto; margin-left: 0 !important; }
+[data-dsh-studio] .ds-req-item { overflow: hidden; }
+[data-dsh-studio] .ds-req-item-title { white-space: normal; overflow-wrap: anywhere; }
+[data-dsh-studio] .ds-req-item-meta { row-gap: 4px; }
+[data-dsh-studio] .ds-req-headline { flex-wrap: wrap; min-width: 0; }
+[data-dsh-studio] .ds-req-headline > * { min-width: 0; }
+[data-dsh-studio] .ds-req-actions { display: flex; flex-wrap: wrap; gap: 8px; justify-content: flex-end; }
+[data-dsh-studio] .ds-body { overflow-x: hidden; min-width: 0; }
+[data-dsh-studio] .ds-pane-stack, [data-dsh-studio] .ds-panel, [data-dsh-studio] .ds-panel-body { min-width: 0; max-width: 100%; }
+[data-dsh-studio] .ds-panel-head { flex-wrap: wrap; row-gap: 4px; }
+[data-dsh-studio] .ds-kv { min-width: 0; }
+[data-dsh-studio] .ds-kv dd { overflow-wrap: anywhere; }
+@media (max-width: 1100px) { [data-dsh-studio] .ds-req-grid { grid-template-columns: minmax(0, 1fr) !important; } }
+
+/* 业务提单条带与内嵌表单：条带横排换行；提单/查进度改成浮层，避免挤在窄列里 */
+[data-dsh-studio] .ds-biz-strip{display:flex;flex-wrap:wrap;align-items:center;gap:8px;padding:8px 10px;border:1px solid var(--border);border-radius:8px;background:var(--muted);margin-bottom:8px}
+[data-dsh-studio] .ds-biz-rows{display:flex;flex-direction:column;gap:4px;width:100%;margin-top:2px}
+[data-dsh-studio] .ds-biz-row{display:flex;align-items:center;gap:8px;min-width:0;padding:4px 6px;border-radius:6px;background:var(--card);border:1px solid var(--border)}
+[data-dsh-studio] .ds-biz-row > span{min-width:0}
+[data-dsh-studio] .ds-biz-row .ds-btn{height:26px;padding:0 8px;font-size:11.5px}
+[data-dsh-studio] .ds-intake-form{position:fixed;right:24px;top:92px;width:min(460px,92vw);z-index:70;display:grid!important;gap:8px;padding:14px;border:1px solid var(--border);border-radius:10px;background:var(--card);box-shadow:0 12px 32px -12px rgba(0,0,0,.45)}
+[data-dsh-studio] .ds-intake-form .ds-row{display:flex;gap:8px}
+[data-dsh-studio] .ds-intake-form .ds-field{min-width:0;flex:1 1 0}
+[data-dsh-studio] .ds-intake-form textarea{min-height:64px}
+
+/* 业务提单：从需求列表的窄列里抽出来，改成顶部浮条，不再占列宽 */
+[data-dsh-studio] .ds-biz-strip{position:fixed;left:50%;top:88px;transform:translateX(-50%);width:min(760px,94vw);z-index:65;display:flex;flex-wrap:wrap;align-items:center;gap:8px;padding:8px 10px;border:1px solid var(--border);border-radius:10px;background:var(--card);box-shadow:0 14px 36px -16px rgba(0,0,0,.5)}
+[data-dsh-studio] .ds-biz-strip .ds-biz-rows{max-height:132px;overflow-y:auto}
+[data-dsh-studio] .ds-req-list > .ds-biz-strip{display:flex}
+
+/* 业务提单独立页签：原条带从需求页移除 */
+[data-dsh-studio] .ds-biz-strip{display:none!important}
+[data-dsh-studio] .ds-biz-result{padding:6px 10px;border:1px solid var(--border);border-radius:7px;background:var(--muted);font-size:12px;margin-top:6px}
+
+/* 业务提单页签：说明文字不要 nowrap，避免溢出压到相邻元素 */
+[data-dsh-studio] .ds-hint{white-space:normal}
+
+/* 需求页：列表固定左栏 + 详情自适应右栏 */
+@media (min-width:1100px){
+  [data-dsh-studio] .ds-body > div:has(> .ds-req-list){display:flex;gap:12px;align-items:flex-start;min-height:0}
+  [data-dsh-studio] .ds-req-list{flex:0 0 340px;max-width:340px;max-height:calc(100vh - 210px);overflow-y:auto}
+  [data-dsh-studio] .ds-body > div:has(> .ds-req-list) > div:not(.ds-req-list){flex:1 1 auto;min-width:0;max-height:calc(100vh - 210px);overflow-y:auto}
+}
+
+/* 业务提单：右侧抽屉形态，内部单列 */
+[data-dsh-studio] #ds-intake-overlay{display:flex;flex-direction:column}
+[data-dsh-studio] #ds-intake-overlay .ds-body{overflow:visible}
+[data-dsh-studio] #ds-intake-overlay .ds-body > div{grid-template-columns:minmax(0,1fr)!important;padding:0 14px 20px!important}
+[data-dsh-studio] #ds-intake-overlay > div:first-child{padding:10px 14px;border-bottom:1px solid var(--border);background:var(--card);position:sticky;top:0;z-index:2}
+
+/* 业务提单抽屉：加宽、字段满宽、加遮罩 */
+[data-dsh-studio] #ds-intake-overlay{width:min(640px,96vw)!important;z-index:95!important}
+[data-dsh-studio] #ds-intake-overlay::before{content:'';position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(9,9,11,.38);z-index:-1}
+[data-dsh-studio] #ds-intake-overlay .ds-field{flex:1 1 100%!important;min-width:0}
+[data-dsh-studio] #ds-intake-overlay .ds-body > div > div{min-width:0}
+
+/* 需求页：动作条独占整行，避免在 flex 行里占出一列空白 */
+@media (min-width:1100px){
+  [data-dsh-studio] .ds-body > div:has(> .ds-req-list){flex-wrap:wrap;align-items:flex-start}
+  [data-dsh-studio] .ds-intake-launch{flex:0 0 100%;width:100%;padding:0 0 8px}
+}
+
+/* 业务提单抽屉：按模式只显示对应面板 */
+[data-dsh-studio] [data-mode="form"] [data-panel="status"]{display:none!important}
+[data-dsh-studio] [data-mode="status"] [data-panel="form"]{display:none!important}
+[data-dsh-studio] [data-mode="status"] [data-panel="list"]{display:none!important}
+
+/* 拖拽反馈 */
+[data-dsh-studio] .ds-card[data-dragging="1"] { opacity: .55; transform: rotate(-.5deg) }
+[data-dsh-studio] .ds-col[data-drag-over="1"] { outline: 2px dashed var(--ds-accent); outline-offset: -3px; background: color-mix(in srgb, var(--ds-accent) 8%, var(--muted)) }

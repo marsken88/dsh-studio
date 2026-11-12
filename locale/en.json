@@ -1,0 +1,11 @@
+{
+  "meta": {
+    "title": "Studio",
+    "description": "Product / architect / developer / QA multi-agent collaboration with a live work board; GitLab and Feishu connections are configured in the GUI."
+  },
+  "shared": {
+    "entry": {
+      "label": "Studio"
+    }
+  }
+}

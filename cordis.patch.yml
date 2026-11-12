@@ -1,0 +1,9 @@
+# dsh-studio bundle patch.
+#
+# One row, mounted by package name: the host half (exports ".") runs in the
+# DSH host process (settings store, work ledger, studio_* agent tools,
+# /studio-api routes), and the `dsh.client` declaration in package.json makes
+# the browser half (exports "./client") load in the web GUI as a sidebar panel.
+- insert:
+    - id: dsh-studio
+      name: dsh-studio

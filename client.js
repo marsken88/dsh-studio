@@ -1,0 +1,8196 @@
+/**
+ * dsh-studio — browser half.
+ *
+ * Registers the Studio panel (sidebar row + central page) through the official
+ * slot service: the host owns visibility, navigation and the row chrome; this
+ * module only supplies the glyph and the page body.
+ *
+ * Plain ESM class-free artifact: the ModuleLoader hands us React from the page's
+ * own module table, so no bundler and no second React copy are involved.
+ */
+window.__ModuleLoader__.load({
+  id: 'dsh-studio',
+  factory(require) {
+    const React = require('react')
+    const h = React.createElement
+    const PANEL_ID = 'studio'
+    const API = '/studio-api'
+
+    // shadcn/ui 基础组件（由打包后的 main.jsx 注入）；单文件版本里保持 null，
+    // 所有用到它的地方都带 legacy 兜底，所以两种产物行为一致。
+    let UIKIT = null
+    function useUIKit(next) { UIKIT = next ?? null }
+    function kit(name) { return UIKIT === null ? null : (UIKIT[name] ?? null) }
+
+    /* 关键按钮的悬停说明：有 UIKIT 用 Radix Tooltip，同时保留原生 title 兜底。 */
+    function tipOf(label, node) {
+      if (node === null || node === undefined) return node
+      const props = node.props ?? {}
+      const child = props.title !== undefined ? node : h(node.type, { ...props, title: label })
+      const Tip = kit('Tip')
+      return Tip === null ? child : h(Tip, { key: node.key, label }, child)
+    }
+
+    /* 字段标签的悬停说明：只给「不看说明容易填错」的字段加，鼠标移上去出气泡。 */
+    /* Markdown 内容字段：左编辑右预览（切换式），底部写清支持哪些语法。
+       需求正文 / 文档正文 / 交付物正文 / 技能正文 / 任务需求 / 功能点说明 统一走这里。 */
+    function MdField({ rows = 6, value, onChange, placeholder, className, ...rest }) {
+      const [preview, setPreview] = React.useState(false)
+      const text = String(value ?? '')
+      return h('div', { className: 'ds-md-field' },
+        h('div', { className: 'ds-md-bar' },
+          h('span', { className: 'ds-hint' }, '支持 Markdown：标题 / 列表 / 粗体 / 代码块 / 表格'),
+          h('button', { className: 'ds-btn ds-btn-ghost', type: 'button', onClick: () => setPreview(!preview) }, preview ? '回到编辑' : '预览渲染'),
+        ),
+        preview
+          ? h('div', { className: 'ds-md-preview ds-req-desc ds-md' }, text.trim() === '' ? h('span', { className: 'ds-hint' }, '还没写内容。') : renderMarkdown(text))
+          : h(TextAreaField, { className: className ?? 'ds-textarea', rows, value, onChange, placeholder, ...rest }),
+      )
+    }
+
+    function tipLabel(text, hint) {
+      const node = h('div', { className: 'ds-label', style: { cursor: 'help' } }, text)
+      return hint === undefined || hint === null || hint === '' ? node : tipOf(hint, node)
+    }
+
+    /* 表单控件的 shadcn 适配层。
+       legacy 代码全是 h(SelectField, { className:'ds-select', value, onChange(e) }, option…)
+       这类写法；有了 UIKIT 就换成 Radix 版本，没有就原样用原生控件（单文件产物）。 */
+    function optionListOf(children) {
+      const out = []
+      React.Children.forEach(children, child => {
+        if (!React.isValidElement(child)) return
+        if (child.type === 'option') {
+          out.push({ value: String(child.props.value ?? ''), label: String(React.Children.toArray(child.props.children).join('')) })
+        } else if (child.type === 'optgroup') {
+          optionListOf(child.props.children).forEach(item => out.push(item))
+        }
+      })
+      return out
+    }
+
+    function SelectField({ className, children, value, onChange, disabled, ...rest }) {
+      const Select = kit('SelectBox')
+      if (Select === null) {
+        return h('select', { className, value, onChange, disabled, ...rest }, children)
+      }
+      const raw = optionListOf(children)
+      // Radix Select 不接受空字符串作为可展示项：有空值选项时用哨兵值代替，对外仍映射成 ''。
+      const hasEmpty = raw.some(option => option.value === '')
+      const options = raw.map(option => (hasEmpty && option.value === '' ? { ...option, value: '__empty__' } : option))
+      if (options.length === 0) options.push({ value: hasEmpty ? '__empty__' : '', label: '—' })
+      const current = value === undefined || value === null ? '' : String(value)
+      return h(Select, {
+        ...rest,
+        value: hasEmpty && current === '' ? '__empty__' : current,
+        options,
+        disabled,
+        onChange: next => {
+          if (typeof onChange !== 'function') return
+          onChange({ target: { value: next === '__empty__' ? '' : next } })
+        },
+      })
+    }
+
+    function TextField({ className, ...rest }) {
+      const Input = kit('Input')
+      if (Input === null) return h('input', { className, ...rest })
+      const { style, ...props } = rest
+      const extra = String(className ?? '')
+        .split(/\s+/)
+        .filter(name => name !== '' && name !== 'ds-input')
+        .join(' ')
+      return h(Input, {
+        ...props,
+        style,
+        className: `h-9 w-full min-w-0 text-sm${extra === '' ? '' : ' ' + extra}`,
+      })
+    }
+
+    function TextAreaField({ className, ...rest }) {
+      const Textarea = kit('Textarea')
+      if (Textarea === null) return h('textarea', { className, ...rest })
+      const { style, ...props } = rest
+      const rows = Number(props.rows) > 0 ? Number(props.rows) : 4
+      const extra = String(className ?? '').split(/\s+/).filter(name => name !== '' && name !== 'ds-input' && name !== 'ds-textarea').join(' ')
+      return h(Textarea, {
+        ...props,
+        style: { minHeight: `${Math.max(96, rows * 22 + 28)}px`, ...(style ?? {}) },
+        className: `flex min-h-16 w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm leading-relaxed shadow-sm outline-none transition-[color,box-shadow] placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-50${extra === '' ? '' : ' ' + extra}`,
+      })
+    }
+
+/* 徽章。legacy 写法是 h(ChipField, { className: 'ds-chip', ...rest }, 内容)；
+       有 UIKIT 就渲染成 shadcn Badge（variant 按语义映射），没有就还是 span.ds-chip。 */
+    function ChipField({ className, variant, ...rest }) {
+      const Badge = kit('Badge')
+      if (Badge === null) return h('span', { className, ...rest })
+      const into = String(className ?? '')
+      const next = variant ?? (into.indexOf('ds-chip-blocked') >= 0 || into.indexOf('ds-chip-bug') >= 0 || rest['data-blocked'] === '1' || rest['data-danger'] === '1'
+        ? 'destructive'
+        : into.indexOf('ds-chip-code') >= 0 || rest['data-svc-missing'] === '1'
+          ? 'outline'
+          : 'secondary')
+      return h(Badge, { ...rest, variant: next, className })
+    }
+
+    /* 布尔开关。legacy 写法是 h(CheckField, { checked, onChange(e) })， */
+    /* 换了 UIKIT 就渲染成 Radix Switch，没有就还是原生 checkbox。 */
+    function CheckField({ className, checked, onChange, disabled, ...rest }) {
+      const Switch = kit('SwitchBox')
+      if (Switch === null) {
+        return h('input', { className, type: 'checkbox', checked: checked === true, disabled, onChange, ...rest })
+      }
+      return h(Switch, {
+        bare: true,
+        checked: checked === true,
+        disabled: disabled === true,
+        onChange: next => { if (typeof onChange === 'function') onChange({ target: { checked: next === true } }) },
+      })
+    }
+
+    /* 进度条：有 UIKIT 用 Radix Progress，没有就回落原来的自绘条。 */
+    function ProgressField({ value, tone }) {
+      const Bar = kit('ProgressBar')
+      const pctValue = Math.max(0, Math.min(100, Number(value) || 0))
+      if (Bar !== null) return h(Bar, { value: pctValue, tone })
+      const color = tone === 'over' ? '#e5484d' : tone === 'warn' ? '#d97706' : undefined
+      return h('div', { className: 'ds-an-track' }, h('div', { className: 'ds-an-fill', style: { width: `${pctValue}%`, background: color } }))
+    }
+
+    /* 确认 / 输入：不用浏览器原生 confirm/prompt，改成页面里的 shadcn 弹窗。
+       没有 UIKIT（单文件产物）时退回原生实现，调用方行为一致。 */
+    let DIALOG_STATE = null
+    let DIALOG_LISTENER = null
+
+    function dialogEmit(next) {
+      DIALOG_STATE = next
+      if (typeof DIALOG_LISTENER === 'function') DIALOG_LISTENER(next)
+    }
+
+    function confirmDialog(message, options) {
+      const opts = options ?? {}
+      const Box = kit('DialogBox')
+      if (Box === null) return Promise.resolve(window.confirm(String(message)))
+      return new Promise(resolve => {
+        dialogEmit({
+          kind: 'confirm',
+          title: opts.title ?? '确认操作',
+          message: String(message ?? ''),
+          danger: opts.danger === true,
+          okText: opts.okText ?? '确定',
+          cancelText: opts.cancelText ?? '取消',
+          resolve,
+        })
+      })
+    }
+
+    function promptDialog(message, options) {
+      const opts = options ?? {}
+      const Box = kit('DialogBox')
+      if (Box === null) return Promise.resolve(window.prompt(String(message), opts.defaultValue ?? ''))
+      return new Promise(resolve => {
+        dialogEmit({
+          kind: 'prompt',
+          title: opts.title ?? '需要填写',
+          message: String(message ?? ''),
+          value: String(opts.defaultValue ?? ''),
+          placeholder: opts.placeholder ?? '',
+          okText: opts.okText ?? '确定',
+          cancelText: '取消',
+          resolve,
+        })
+      })
+    }
+
+    /* 弹窗宿主：订阅 DIALOG_STATE，渲染成 shadcn Dialog。 */
+    function DialogHost() {
+      const [request, setRequest] = React.useState(null)
+      const [text, setText] = React.useState('')
+      React.useEffect(() => {
+        const listen = next => {
+          setRequest(next)
+          setText(next !== null && next.kind === 'prompt' ? next.value : '')
+        }
+        DIALOG_LISTENER = listen
+        if (DIALOG_STATE !== null) listen(DIALOG_STATE)
+        return () => { if (DIALOG_LISTENER === listen) DIALOG_LISTENER = null }
+      }, [])
+      const Box = kit('DialogBox')
+      if (request === null || Box === null) return null
+      const finish = result => {
+        const done = request.resolve
+        setRequest(null)
+        DIALOG_STATE = null
+        done(result)
+      }
+      return h(Box, {
+        open: true,
+        title: request.title,
+        message: request.message,
+        danger: request.danger === true,
+        okText: request.okText,
+        cancelText: request.cancelText,
+        input: request.kind === 'prompt',
+        value: text,
+        placeholder: request.placeholder,
+        onChange: next => setText(next),
+        onOk: () => finish(request.kind === 'prompt' ? text.trim() : true),
+        onCancel: () => finish(request.kind === 'prompt' ? null : false),
+      })
+    }
+
+    // --------------------------------------------------------------- 轻提示
+    // 保存/同步这类动作结果原本只写在各面板自己的小字里，面板一滚就看不见了。
+    // 这里加一个右下角堆叠的轻提示：3.2 秒自动消失，点 × 可提前关。
+    let TOAST_SEQ = 0
+    let TOAST_ITEMS = []
+    let TOAST_LISTENERS = []
+    // 同一动作可能一瞬间连发两条（重复绑定、onBlur 与 onClick 各触发一次），600ms 内同文案吞掉。
+    let TOAST_LAST = { text: '', at: 0 }
+    function toastEmit() {
+      const items = TOAST_ITEMS.slice()
+      for (const listen of TOAST_LISTENERS.slice()) listen(items)
+    }
+    function toast(text, tone = 'success', ttl = 3200) {
+      const message = String(text ?? '').trim()
+      if (message === '') return null
+      const now = Date.now()
+      if (TOAST_LAST.text === message && now - TOAST_LAST.at < 600) return null
+      TOAST_LAST = { text: message, at: now }
+      const id = ++TOAST_SEQ
+      TOAST_ITEMS = TOAST_ITEMS.concat([{ id, text: message, tone }])
+      toastEmit()
+      window.setTimeout(() => { dismissToast(id) }, ttl)
+      return id
+    }
+    function dismissToast(id) {
+      const next = TOAST_ITEMS.filter(item => item.id !== id)
+      if (next.length === TOAST_ITEMS.length) return
+      TOAST_ITEMS = next
+      toastEmit()
+    }
+    const TOAST_ICON = { success: '✓', error: '!', info: 'i' }
+    /* 轻提示宿主：挂在 StudioPage 根部，跟 DialogHost 一样只订阅不持有业务状态。 */
+    function ToastHost() {
+      const [items, setItems] = React.useState(() => TOAST_ITEMS.slice())
+      React.useEffect(() => {
+        TOAST_LISTENERS.push(setItems)
+        return () => { TOAST_LISTENERS = TOAST_LISTENERS.filter(entry => entry !== setItems) }
+      }, [])
+      if (items.length === 0) return null
+      return h('div', { className: 'ds-toasts', role: 'status', 'aria-live': 'polite' },
+        items.map(item => h('div', { key: item.id, className: 'ds-toast', 'data-tone': item.tone },
+          h('span', { className: 'ds-toast-icon', 'aria-hidden': 'true' }, TOAST_ICON[item.tone] ?? 'i'),
+          h('span', { className: 'ds-toast-text' }, item.text),
+          h('button', {
+            type: 'button', className: 'ds-toast-close', 'aria-label': '关闭提示',
+            onClick: () => dismissToast(item.id),
+          }, '×'),
+        )),
+      )
+    }
+
+    // --------------------------------------------------------------- 我是谁
+    // 单机时代每个人共用一张 cookie，靠这个名字区分别人。写操作都会带在请求头里。
+    const USER_KEY = 'dsh-studio:user'
+
+    function currentUser() {
+      try {
+        const value = window.localStorage.getItem(USER_KEY)
+        if (typeof value === 'string' && value.trim() !== '') return value.trim().slice(0, 40)
+      } catch { /* 隐私模式 */ }
+      return '人'
+    }
+
+    function setUserName(next) {
+      const name = String(next ?? '').trim().slice(0, 40) || '人'
+      try { window.localStorage.setItem(USER_KEY, name) } catch { /* 隐私模式 */ }
+      return name
+    }
+
+    // --------------------------------------------------------------- 显示模式
+    // 明亮 / 黑暗 / 跟随系统。这套配色本来就是从 currentColor 派生的（线、底、卡片都是
+    // color-mix(currentColor N%, transparent)），所以只要在根元素上定住 color 与 background，
+    // 再把 --ds-surface、--ds-accent 换掉，整块面板就会跟着换肤，不用逐条改样式。
+    const THEME_KEY = 'dsh-studio:theme'
+    const THEMES = [['light', '☀ 明亮'], ['dark', '☾ 黑暗'], ['system', '跟随系统']]
+
+    function systemDarkQuery() {
+      return typeof window.matchMedia === 'function' ? window.matchMedia('(prefers-color-scheme: dark)') : null
+    }
+
+    // 「跟随系统」实际跟的是「宿主界面」：面板长在宿主页面里，宿主自己是深色、我们跟操作系统就会出现
+    // 一面白一面黑的接缝。宿主没给出明确信号（背景透明/取不到）时再退回操作系统的 prefers-color-scheme。
+    function hostScheme() {
+      try {
+        const color = window.getComputedStyle(document.body).backgroundColor
+        const matched = /rgba?\(([^)]+)\)/.exec(String(color ?? ''))
+        if (matched === null) return null
+        const parts = matched[1].split(',').map(value => Number(value.trim()))
+        const [r, g, b, a] = parts
+        if (![r, g, b].every(value => Number.isFinite(value))) return null
+        if (Number.isFinite(a) && a < 0.2) return null
+        return (0.2126 * r + 0.7152 * g + 0.0722 * b) < 128 ? 'dark' : 'light'
+      } catch {
+        return null
+      }
+    }
+
+    function currentTheme() {
+      try {
+        const value = window.localStorage.getItem(THEME_KEY)
+        if (value === 'light' || value === 'dark' || value === 'system') return value
+      } catch { /* 隐私模式 */ }
+      return 'system'
+    }
+
+    function setThemeName(next) {
+      const value = next === 'light' || next === 'dark' ? next : 'system'
+      try { window.localStorage.setItem(THEME_KEY, value) } catch { /* 隐私模式 */ }
+      return value
+    }
+
+    // --------------------------------------------------------------- 登录态
+    // 统一登录（LDAP）开启后，服务端会给一个会话 token；放在 localStorage 里，
+    // 每次请求带 x-studio-session。名字也一并记下来，用于「我是谁」和审计。
+    const SESSION_KEY = 'dsh-studio:session'
+    const AUTH_USER_KEY = 'dsh-studio:auth-user'
+
+    function sessionToken() {
+      try {
+        const value = window.localStorage.getItem(SESSION_KEY)
+        if (typeof value === 'string' && value.trim() !== '') return value.trim()
+      } catch { /* 隐私模式 */ }
+      return ''
+    }
+
+    function setSessionToken(next) {
+      try {
+        if (next === '' || next === null || next === undefined) window.localStorage.removeItem(SESSION_KEY)
+        else window.localStorage.setItem(SESSION_KEY, String(next))
+      } catch { /* 隐私模式 */ }
+    }
+
+    function authUser() {
+      try {
+        const raw = window.localStorage.getItem(AUTH_USER_KEY)
+        if (typeof raw === 'string' && raw !== '') {
+          const parsed = JSON.parse(raw)
+          if (parsed !== null && typeof parsed === 'object') return parsed
+        }
+      } catch { /* 隐私模式 */ }
+      return null
+    }
+
+    function setAuthUser(next) {
+      try {
+        if (next === null || next === undefined) window.localStorage.removeItem(AUTH_USER_KEY)
+        else window.localStorage.setItem(AUTH_USER_KEY, JSON.stringify(next))
+      } catch { /* 隐私模式 */ }
+      return next ?? null
+    }
+
+    // ------------------------------------------------------------------ api
+
+    async function api(path, body) {
+      const headers = { 'x-studio-user': encodeURIComponent(currentUser()) }
+      const token = sessionToken()
+      if (token !== '') headers['x-studio-session'] = token
+      if (body !== undefined) headers['content-type'] = 'application/json'
+      const init = body === undefined
+        ? { method: 'GET', headers }
+        : { method: 'POST', headers, body: JSON.stringify(body) }
+      const response = await fetch(API + path, init)
+      let payload = {}
+      try { payload = await response.json() } catch { /* non-JSON error page */ }
+      if (!response.ok || payload.ok === false) {
+        throw new Error(payload.error ?? `请求失败（HTTP ${response.status}）`)
+      }
+      return payload
+    }
+
+    // ---------------------------------------------------------------- style
+
+    const GLOBAL_THEME_CSS = `
+html[data-dsh-theme="dark"] body { background: #0e1014 !important; color: #e6e8ee }
+html[data-dsh-theme="dark"] [class*="frame"],
+html[data-dsh-theme="dark"] [class*="centerCol"],
+html[data-dsh-theme="dark"] [class*="mainPanel"] { background: #0e1014 !important; color: #e6e8ee }
+html[data-dsh-theme="dark"] [class*="sidebarCol"],
+html[data-dsh-theme="dark"] [class*="rightbarCol"] { background: #0a0b0f !important; color: #d7dae0 !important; border-color: #22262e !important }
+html[data-dsh-theme="dark"] [class*="sidebarCol"] a,
+html[data-dsh-theme="dark"] [class*="sidebarCol"] button,
+html[data-dsh-theme="dark"] [class*="sidebarCol"] span,
+html[data-dsh-theme="dark"] [class*="sidebarCol"] div { color: inherit }
+html[data-dsh-theme="dark"] [class*="handle"] { background: #22262e !important }
+html[data-dsh-theme="light"] body { background: #ffffff !important; color: #1f2328 }
+html[data-dsh-theme="light"] [class*="sidebarCol"],
+html[data-dsh-theme="light"] [class*="rightbarCol"] { background: #fafafa !important; color: #1f2328 !important; border-color: #e4e4e7 !important }
+`
+    const CSS = `
+[data-dsh-studio] { display:flex; flex-direction:column; height:100%; min-height:0; color:currentColor;
+  --ds-line: color-mix(in srgb, currentColor 18%, transparent);
+  --ds-line-soft: color-mix(in srgb, currentColor 9%, transparent);
+  --ds-soft: color-mix(in srgb, currentColor 5%, transparent);
+  --ds-soft2: color-mix(in srgb, currentColor 10%, transparent);
+  --ds-bg: #ffffff;
+  --ds-surface: #ffffff;
+  --ds-surface-2: #ffffff;
+  --ds-card: var(--ds-surface);
+  --ds-shadow: none;
+  --ds-accent: #2f6feb;
+  font: 13px/1.55 ui-sans-serif, system-ui, -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif; }
+/* 三档显示模式：只换根元素的 color / background 与一组表面色，其余靠 color-mix 自动派生。
+   color-scheme 必须一起改，否则 <select>/<input>/滚动条仍按操作系统的深浅色画。
+   表面层次：--ds-bg（页面底）< --ds-surface-2（列/次级块）< --ds-surface（面板/卡片）。 */
+[data-dsh-studio][data-theme="light"] {
+  color-scheme:light; color:#1f2328; background:var(--ds-bg); --ds-accent:#2f6feb;
+  --ds-bg:#eef1f5; --ds-surface:#ffffff; --ds-surface-2:#f6f8fb; --ds-card:#ffffff;
+  --ds-line:#dbe1ea; --ds-line-soft:#e9edf3;
+  --ds-shadow:0 1px 2px #0f172a0f;
+}
+[data-dsh-studio][data-theme="dark"] {
+  color-scheme:dark; color:#e6e8ee; background:var(--ds-bg); --ds-accent:#7ba2ff;
+  --ds-bg:#0e1014; --ds-surface:#181b22; --ds-surface-2:#1e222a; --ds-card:#181b22;
+  --ds-line:#2c323d; --ds-line-soft:#232830;
+  --ds-shadow:0 1px 2px #00000040;
+}
+[data-dsh-studio][data-theme="light"] .ds-chip[data-review="changes_requested"] { color:#b3282c; }
+[data-dsh-studio][data-theme="dark"] .ds-chip[data-review="changes_requested"] { color:#ff9a9d; }
+/* 深色下把几处「深色语义色」换成浅色版本：它们在白底上是 4.6:1，到了 #14161b 上只有 2.5–3.9:1，
+   11–12px 的小字会糊。只改前景色，底色与边框仍由各规则自己算。 */
+[data-dsh-studio][data-theme="dark"] .ds-blocked-line,
+[data-dsh-studio][data-theme="dark"] .ds-blocked-box,
+[data-dsh-studio][data-theme="dark"] .ds-chip-bug,
+[data-dsh-studio][data-theme="dark"] .ds-chip-bug[data-sev="p1"],
+[data-dsh-studio][data-theme="dark"] .ds-error,
+[data-dsh-studio][data-theme="dark"] .ds-gate-item[data-kind="block"] { color:#ff9a9d; }
+[data-dsh-studio][data-theme="dark"] .ds-chip-bug[data-sev="p0"] { color:#fff; }
+[data-dsh-studio][data-theme="dark"] .ds-chip[data-review="approved"],
+[data-dsh-studio][data-theme="dark"] .ds-chip[data-sla="ok"],
+[data-dsh-studio][data-theme="dark"] .ds-ok { color:#6fdca4; }
+[data-dsh-studio][data-theme="dark"] .ds-chip[data-sla="due_soon"],
+[data-dsh-studio][data-theme="dark"] .ds-gate-item[data-kind="warn"] { color:#f0b552; }
+[data-dsh-studio][data-theme="dark"] .ds-skilldesc { color:color-mix(in srgb, currentColor 62%, transparent); }
+/* 键盘焦点：所有可聚焦元素统一用主题色描边（原来是浏览器默认蓝，深色下很跳）。 */
+[data-dsh-studio] :focus-visible { outline:2px solid var(--ds-accent); outline-offset:2px; border-radius:4px; }
+[data-dsh-studio] * { box-sizing:border-box; }
+.ds-head { flex:none; border-bottom:1px solid var(--ds-line); padding:12px 18px 0;
+  background:var(--ds-surface); box-shadow:var(--ds-shadow); }
+.ds-head-top { display:flex; align-items:flex-start; gap:14px; padding-bottom:10px; }
+.ds-brand { display:flex; align-items:center; gap:10px; min-width:0; }
+.ds-brand-mark { width:26px; height:26px; border-radius:8px; flex:none; display:flex; align-items:center; justify-content:center;
+  background:color-mix(in srgb, var(--ds-accent) 14%, transparent); color:var(--ds-accent); font-size:13px; }
+.ds-head-actions { margin-left:auto; display:flex; align-items:center; gap:8px; flex:none; }
+.ds-head-tabs { display:flex; align-items:center; flex-wrap:wrap; row-gap:6px; gap:10px; padding-bottom:9px; }
+.ds-title { font-size:15px; font-weight:650; letter-spacing:.01em; }
+.ds-sub { font-size:11.5px; opacity:.55; }
+.ds-tabs { display:inline-flex; gap:2px; padding:3px; border-radius:9px; background:var(--ds-soft); border:1px solid var(--ds-line);
+  max-width:100%; overflow-x:auto; scrollbar-width:none; }
+.ds-tabs::-webkit-scrollbar { height:0; }
+.ds-seg { display:inline-flex; gap:2px; padding:3px; border-radius:9px; background:var(--ds-soft); border:1px solid var(--ds-line); }
+.ds-seg-btn { border:0; background:transparent; color:inherit; font:inherit; font-size:11.5px; padding:4px 9px; border-radius:6px;
+  cursor:pointer; opacity:.7; white-space:nowrap; }
+.ds-seg-btn:hover { opacity:1; background:var(--ds-soft2); }
+.ds-seg-btn[data-on="1"] { opacity:1; font-weight:600; background:color-mix(in srgb, currentColor 14%, transparent); }
+.ds-tab { border:0; background:transparent; color:inherit; font:inherit; font-size:12.5px; padding:4px 15px; border-radius:7px;
+  cursor:pointer; opacity:.62; white-space:nowrap; flex:0 0 auto; }
+.ds-tab:hover { opacity:.95; background:var(--ds-soft2); }
+.ds-tab[data-on="1"] { opacity:1; background:var(--ds-surface); font-weight:600; box-shadow:0 1px 3px #00000026; }
+.ds-grow { flex:1; }
+.ds-btn { border:1px solid var(--ds-line); background:var(--ds-soft); color:inherit; font:inherit; padding:5px 12px; border-radius:7px; cursor:pointer; }
+.ds-btn:hover { background:var(--ds-soft2); }
+.ds-btn[disabled] { opacity:.45; cursor:default; }
+.ds-btn-primary { background:var(--ds-accent); border-color:var(--ds-accent); color:#fff; }
+.ds-btn-primary:hover { filter:brightness(1.08); background:var(--ds-accent); }
+.ds-board-bar { display:flex; gap:8px; align-items:center; padding:9px 16px; flex-wrap:wrap; flex:none;
+  border-bottom:1px solid var(--ds-line); }
+.ds-board-bar .ds-input, .ds-board-bar .ds-select { height:28px; padding:0 8px; }
+.ds-search { position:relative; display:inline-flex; }
+.ds-search .ds-input { padding-left:24px; }
+.ds-search::before { content:'⌕'; position:absolute; left:7px; top:50%; transform:translateY(-50%);
+  opacity:.4; font-size:13px; pointer-events:none; }
+.ds-stat { font-size:11.5px; opacity:.55; }
+.ds-market-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(300px,1fr)); gap:12px; }
+.ds-market-card { display:flex; flex-direction:column; gap:8px; border:1px solid var(--ds-line); border-radius:12px;
+  padding:14px; background:var(--ds-card); min-height:136px; }
+.ds-mc-head { display:flex; align-items:center; gap:8px; }
+.ds-mc-name { font-weight:600; font-size:13px; }
+.ds-mc-desc { font-size:12px; opacity:.72; }
+.ds-market-card code { font-size:11px; opacity:.55; word-break:break-all; }
+.ds-chip[data-on="1"] { color:#0f9d58; border-color:#0f9d5855; }
+.ds-board { display:flex; gap:12px; padding:12px 16px 16px; overflow-x:auto; overflow-y:hidden; flex:1; min-height:0; align-items:stretch; }
+.ds-col { flex:0 0 282px; display:flex; flex-direction:column; min-height:0; border:1px solid var(--ds-line); border-radius:12px;
+  background:var(--ds-surface-2); overflow:hidden; }
+.ds-col[data-role="product"] { border-top:2px solid #2f6feb; }
+.ds-col[data-role="architect"] { border-top:2px solid #8b5cf6; }
+.ds-col[data-role="dev"] { border-top:2px solid #0f9d58; }
+.ds-col[data-role="qa"] { border-top:2px solid #e08600; }
+.ds-col-head { display:flex; align-items:center; gap:6px; padding:9px 11px; border-bottom:1px solid var(--ds-line); font-weight:600; font-size:12px; flex:none; background:var(--ds-card); }
+.ds-count { margin-left:auto; min-width:20px; text-align:center; border-radius:999px; padding:0 7px; line-height:17px;
+  background:var(--ds-soft2); border:1px solid var(--ds-line); font-weight:600; font-size:10.5px; font-variant-numeric:tabular-nums; }
+.ds-count[data-zero="1"] { opacity:.4; }
+.ds-col-owner { padding:0 11px 7px; font-size:10.5px; opacity:.55; flex:none; }
+.ds-col-body { display:flex; flex-direction:column; gap:8px; padding:9px; overflow-y:auto; flex:1; min-height:0; }
+.ds-card { border:1px solid var(--ds-line); border-radius:9px; background:var(--ds-surface); padding:9px 10px; cursor:pointer;
+  box-shadow:var(--ds-shadow);
+  display:flex; flex-direction:column; gap:6px; transition:transform .12s ease, border-color .12s ease, box-shadow .12s ease; }
+.ds-card:hover { border-color:var(--ds-accent); transform:translateY(-1px); box-shadow:0 4px 14px #00000014; }
+.ds-card[data-urgent="1"] { border-left:3px solid #e5484d; padding-left:8px; }
+.ds-card[data-running="1"] { border-color:var(--ds-accent); }
+.ds-card[data-blocked="1"] { border-color:#e5484d80; background:color-mix(in srgb, #e5484d 4%, var(--ds-surface)); box-shadow:inset 3px 0 0 #e5484d; }
+.ds-blocked-line { font-size:11px; color:#c0392b; line-height:1.4; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; }
+.ds-blocked-box { border:1px solid #e5484d55; background:color-mix(in srgb, #e5484d 7%, transparent); border-radius:8px; padding:9px 11px; display:flex; flex-direction:column; gap:3px; font-size:12px; color:#c0392b; }
+.ds-chip[data-proj="1"] { color:var(--ds-accent); border-color:color-mix(in srgb, var(--ds-accent) 40%, transparent); font-weight:600; cursor:pointer; }
+.ds-chip[data-req="1"] { color:#7c4dff; border-color:color-mix(in srgb, #7c4dff 36%, transparent); background:color-mix(in srgb, #7c4dff 8%, transparent); cursor:pointer; }
+.ds-chip[data-req-missing="1"] { border-style:dashed; opacity:.62; cursor:pointer; }
+.ds-chip[data-iter="1"] { opacity:.8; }
+.ds-check-progress { margin:2px 0 4px; }
+.ds-code-box { border:1px solid var(--ds-line); border-radius:8px; padding:10px 12px; background:var(--ds-card); display:flex; flex-direction:column; gap:8px; }
+.ds-code-head { display:flex; align-items:flex-start; gap:8px; }
+.ds-code-line { font-size:12.5px; font-weight:600; }
+.ds-code-list { display:flex; flex-direction:column; gap:3px; }
+.ds-code-item { display:flex; align-items:center; gap:8px; font-size:11.5px; }
+.ds-code-item code { font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:11px; padding:1px 5px; border-radius:4px; background:var(--ds-soft2); color:inherit; }
+.ds-code-files { display:flex; flex-wrap:wrap; gap:4px; }
+.ds-code-file { font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:11px; padding:2px 6px; border-radius:5px; background:var(--ds-soft2); color:inherit; }
+.ds-code-file[data-change="added"] { box-shadow:inset 2px 0 0 #0f9d58; }
+.ds-code-file[data-change="deleted"] { box-shadow:inset 2px 0 0 #e5484d; }
+.ds-code-file[data-change="modified"] { box-shadow:inset 2px 0 0 #d97706; }
+.ds-code-note { font-size:12px; padding:6px 8px; border-radius:6px; background:color-mix(in srgb, #e5484d 8%, transparent); }
+.ds-chip[data-review="approved"] { background:color-mix(in srgb, #0f9d58 16%, transparent); color:#0f6b3c; }
+.ds-chip[data-review="changes_requested"] { background:color-mix(in srgb, #e5484d 16%, transparent); color:#a3282b; }
+.ds-check-bar { height:6px; border-radius:999px; background:var(--ds-soft2); overflow:hidden; }
+.ds-check-bar > span { display:block; height:100%; background:var(--ds-accent); transition:width .2s ease; }
+.ds-check-bar[data-full="1"] > span { background:#0f9d58; }
+.ds-check-row { display:flex; align-items:flex-start; gap:9px; padding:7px 0; border-bottom:1px solid var(--ds-line); }
+.ds-check-row:last-of-type { border-bottom:none; }
+.ds-check-row input[type="checkbox"] { margin-top:2px; width:14px; height:14px; accent-color:var(--ds-accent); flex:0 0 auto; }
+.ds-check-text { font-size:12px; line-height:1.5; }
+.ds-check-row[data-done="1"] .ds-check-text { text-decoration:line-through; opacity:.55; }
+.ds-art-row { display:flex; align-items:center; gap:9px; padding:8px 0; border-bottom:1px solid var(--ds-line); }
+.ds-art-row:last-of-type { border-bottom:none; }
+.ds-art-row[data-result="fail"] { background: color-mix(in srgb, #e5484d 8%, transparent); border-left:3px solid #e5484d; }
+.ds-art-row[data-result="pass"] { border-left:3px solid #0f9d58; }
+.ds-art-row[data-result="pending"], .ds-art-row[data-result="skip"] { border-left:3px solid color-mix(in srgb, currentColor 22%, transparent); }
+.ds-chip-case { font-size:10.5px; font-weight:600; padding:1px 6px; border-radius:9px; white-space:nowrap; border:1px solid; }
+.ds-chip-case[data-r="pass"] { color:#0f9d58; border-color:#0f9d5855; background:#0f9d5812; }
+.ds-chip-case[data-r="fail"] { color:#e5484d; border-color:#e5484d55; background:#e5484d12; }
+.ds-chip-case[data-r="pending"], .ds-chip-case[data-r="skip"] { opacity:.6; }
+.ds-art-title { font-size:12px; font-weight:600; line-height:1.4; }
+.ds-art-ref { font-size:11px; opacity:.6; word-break:break-all; font-family:ui-monospace,SFMono-Regular,Menlo,monospace; }
+.ds-chip[data-kind="mr"] { color:#8b5cf6; border-color:#8b5cf655; }
+.ds-chip[data-kind="cases"] { color:#e08600; border-color:#e0860055; }
+.ds-chip[data-kind="design"] { color:#0f9d58; border-color:#0f9d5855; }
+.ds-btn-ghost { background:transparent; border-color:transparent; color:inherit; opacity:.45; padding:2px 6px; }
+.ds-btn-ghost:hover { opacity:.9; }
+.ds-proj-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(330px,1fr)); gap:14px; }
+.ds-proj-card { border:1px solid var(--ds-line); border-radius:10px; background:var(--ds-card); padding:14px 15px; display:flex; flex-direction:column; gap:10px; }
+.ds-proj-head { display:flex; align-items:flex-start; justify-content:space-between; gap:12px; }
+.ds-proj-name { font-size:13.5px; font-weight:600; }
+.ds-proj-stats { display:grid; grid-template-columns:repeat(3,1fr); gap:8px 12px; }
+.ds-proj-stats > div { display:flex; flex-direction:column; }
+.ds-proj-stats b { font-size:16px; font-weight:650; line-height:1.2; }
+.ds-proj-stats b[data-warn="1"] { color:#e5484d; }
+.ds-proj-stats span { font-size:11px; opacity:.6; }
+.ds-proj-bar { margin-top:2px; }
+.ds-card-title { font-size:12.5px; font-weight:600; line-height:1.45; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; }
+.ds-card-foot { display:flex; align-items:center; gap:6px; font-size:10.5px; opacity:.5; }
+.ds-meta { display:flex; flex-wrap:wrap; gap:4px; align-items:center; font-size:10.5px; opacity:.75; }
+.ds-chip { border:1px solid var(--ds-line); border-radius:999px; padding:0 6px; line-height:16px; }
+.ds-chip-soft { background: var(--ds-soft2); border-color: transparent; margin-left: 6px; }
+.ds-audit-row { display:grid; grid-template-columns: 64px 88px 120px minmax(0,1fr) 66px; align-items:center; gap:8px;
+  padding:6px 0; border-bottom:1px solid var(--ds-line); font-size:12px; }
+.ds-audit-row:last-child { border-bottom:none; }
+.ds-audit-row[data-ok="0"] { background: color-mix(in srgb, #e5484d 5%, transparent); }
+.ds-audit-time { color: color-mix(in srgb, currentColor 58%, transparent); font-variant-numeric: tabular-nums; }
+.ds-audit-by { font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.ds-audit-what { color: color-mix(in srgb, currentColor 82%, transparent); }
+.ds-audit-detail { color: color-mix(in srgb, currentColor 56%, transparent); overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+  font-family: ui-monospace, Menlo, monospace; font-size:11px; }
+.ds-audit-status { text-align:right; font-size:11px; font-weight:600; color:#0f9d58; }
+.ds-audit-status[data-ok="0"] { color:#e5484d; }
+@media (max-width:760px) { .ds-audit-row { grid-template-columns: 60px 1fr 60px; } .ds-audit-what, .ds-audit-detail { display:none; } }
+.ds-kpi-grid { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:12px; }
+@media (max-width:900px) { .ds-kpi-grid { grid-template-columns:repeat(2,minmax(0,1fr)); } }
+@media (max-width:560px) { .ds-kpi-grid { grid-template-columns:minmax(0,1fr); } }
+.ds-kpi { position:relative; overflow:hidden; border:1px solid var(--ds-line); border-radius:10px; padding:11px 13px 12px; background:var(--ds-card); box-shadow:var(--ds-shadow), inset 3px 0 0 color-mix(in srgb, var(--ds-accent) 55%, transparent); }
+.ds-kpi[data-warn="1"] { border-color: color-mix(in srgb, #e5484d 40%, var(--ds-line)); box-shadow:inset 3px 0 0 color-mix(in srgb, #e5484d 70%, transparent); }
+.ds-kpi-value { font-size:23px; font-weight:650; letter-spacing:-.02em; line-height:1.15; }
+.ds-kpi[data-warn="1"] .ds-kpi-value { color:#e5484d; }
+.ds-kpi-label { font-size:12px; font-weight:600; margin-top:1px; }
+.ds-kpi-hint { font-size:11px; opacity:.6; margin-top:3px; line-height:1.45; }
+/* 效能页：12 栅格显式排版。原来用 auto-fit 撑满，四块面板挤在一行、每块只有 290px，
+   柱条被压成发丝、数字挤成一坨；现在每块自己声明占几列，窄屏逐级退成 6 → 12 列。 */
+.ds-an-grid { display:grid; grid-template-columns:repeat(12,minmax(0,1fr)); gap:12px; align-items:start; }
+.ds-an-grid > .ds-panel { display:flex; flex-direction:column; min-width:0; }
+.ds-an-grid > .ds-panel > .ds-panel-body { flex:0 1 auto; }
+.ds-span-3 { grid-column:span 3; }
+.ds-span-4 { grid-column:span 4; }
+.ds-span-5 { grid-column:span 5; }
+.ds-span-6 { grid-column:span 6; }
+.ds-span-7 { grid-column:span 7; }
+.ds-span-8 { grid-column:span 8; }
+.ds-span-9 { grid-column:span 9; }
+.ds-span-12 { grid-column:span 12; }
+@media (max-width:1180px) { .ds-span-3, .ds-span-4, .ds-span-5 { grid-column:span 6; } .ds-span-7, .ds-span-8, .ds-span-9 { grid-column:span 12; } }
+@media (max-width:760px) { .ds-an-grid > .ds-panel { grid-column:span 12; } }
+.ds-an-sec { display:flex; align-items:baseline; gap:10px; margin:6px 0 -2px; padding-bottom:2px; font-size:12px; font-weight:600; letter-spacing:.02em; opacity:.8; }
+.ds-an-sec .ds-hint { margin-left:auto; font-weight:400; opacity:.75; }
+/* 栅格里已由 gap 控制间距，panel 自带的 margin-bottom 会把行高顶歪 */
+.ds-an-grid > .ds-panel { margin-bottom:0; }
+/* 面板底部小注：贴底，用来把「多高都行」的面板补满，不至于下面留一大片空白 */
+.ds-an-foot { margin-top:9px; padding-top:8px; border-top:1px dashed var(--ds-line); font-size:11.5px; opacity:.62; line-height:1.5; }
+.ds-an-row { display:grid; grid-template-columns:106px minmax(0,1fr) 84px; align-items:center; gap:9px; padding:5px 0; font-size:12px; }
+.ds-an-name { opacity:.8; }
+.ds-an-track { height:8px; border-radius:999px; background:var(--ds-soft2); overflow:hidden; }
+.ds-an-fill { height:100%; border-radius:999px; background:var(--ds-accent); }
+.ds-an-fill-warn { background:#d97706; }
+.ds-an-num { text-align:right; font-variant-numeric:tabular-nums; opacity:.75; }
+.ds-an-kv { display:flex; align-items:baseline; justify-content:space-between; gap:10px; padding:4px 0; border-bottom:1px dashed var(--ds-line); font-size:12px; }
+.ds-an-kv:last-child { border-bottom:none; }
+.ds-an-kv b[data-warn="1"] { color:#e5484d; }
+.ds-spark { display:flex; align-items:flex-end; gap:4px; height:78px; padding-top:6px; border-bottom:1px solid var(--ds-line); }
+.ds-spark-col { flex:1 1 0; display:flex; flex-direction:column; align-items:center; justify-content:flex-end; gap:4px; height:100%; }
+.ds-spark-bar { width:70%; min-height:2px; border-radius:3px 3px 0 0; background:color-mix(in srgb, var(--ds-accent) 70%, transparent); }
+.ds-spark-day { font-size:9.5px; opacity:.5; white-space:nowrap; height:12px; }
+.ds-chip[data-role="product"] { color:#2f6feb; border-color:#2f6feb55; }
+.ds-chip[data-role="architect"] { color:#8b5cf6; border-color:#8b5cf655; }
+.ds-chip[data-role="dev"] { color:#0f9d58; border-color:#0f9d5855; }
+.ds-chip[data-role="qa"] { color:#e08600; border-color:#e0860055; }
+.ds-chip-ai { color:var(--ds-accent); border-color:var(--ds-accent); animation: ds-pulse 1.6s ease-in-out infinite; }
+.ds-chip-blocked { color:#fff; background:#e5484d; border-color:#e5484d; font-weight:650; }
+.ds-card-warn { color:#e5484d; font-size:10.5px; font-weight:600; white-space:nowrap; }
+.ds-case-fail { color:#e5484d; font-weight:600; }
+.ds-card[data-nobody="1"] .ds-card-warn { animation: ds-pulse 2.2s ease-in-out infinite; }
+.ds-card[data-nobody="1"] { border-color: color-mix(in srgb, #e5484d 42%, var(--ds-line)); }
+.ds-art-row[data-missing="1"] { background: color-mix(in srgb, #e5484d 5%, transparent); }
+.ds-chip-bug { color:#c0392b; border-color:#c0392b66; background:color-mix(in srgb, #c0392b 8%, transparent); font-weight:650; }
+.ds-chip-bug[data-sev="p0"] { color:#fff; background:#c0392b; border-color:#c0392b; }
+.ds-chip-bug[data-sev="p1"] { color:#c0392b; background:color-mix(in srgb, #c0392b 16%, transparent); }
+.ds-chip[data-sla="overdue"] { color:#fff; background:#e5484d; border-color:#e5484d; font-weight:650; }
+.ds-chip[data-sla="due_soon"] { color:#b45309; border-color:#b4530966; background:color-mix(in srgb, #d97706 12%, transparent); }
+.ds-chip[data-sla="ok"] { color:#137a4b; border-color:#137a4b55; background:color-mix(in srgb, #0f9d58 8%, transparent); }
+.ds-smoke-done { color:color-mix(in srgb, currentColor 55%, transparent); text-decoration:line-through; }
+@keyframes ds-pulse { 0%,100% { opacity:.45 } 50% { opacity:1 } }
+.ds-dot { width:6px; height:6px; border-radius:50%; display:inline-block; }
+.ds-dot[data-p="urgent"] { background:#e5484d; }
+.ds-dot[data-p="normal"] { background:#8a8f98; }
+.ds-dot[data-p="relaxed"] { background:#4b7bec55; }
+.ds-empty { opacity:.4; font-size:11.5px; padding:14px 8px; text-align:center; border:1px dashed var(--ds-line); border-radius:8px; }
+.ds-body { flex:1; min-height:0; overflow:auto; padding:16px 18px; }
+.ds-panel { border:1px solid var(--ds-line); border-radius:10px; overflow:hidden; margin-bottom:14px; background:var(--ds-card);
+  box-shadow:var(--ds-shadow); }
+.ds-panel-head { padding:11px 15px; border-bottom:1px solid var(--ds-line); font-weight:600; font-size:12.5px; display:flex; align-items:center; gap:10px; justify-content:space-between; }
+.ds-panel-head > .ds-hint { font-weight:400; }
+/* Panel bodies stack by default: one field or one list row per line, never a mosaic. */
+.ds-panel-body { padding:14px 15px; display:flex; flex-direction:column; gap:12px; min-width:0; }
+.ds-panel-body > .ds-row { min-width:0; }
+.ds-panel-body > .ds-row > .ds-field { min-width:0; }
+/* Two-or-more column body, only where the content really is a set of short fields. */
+.ds-panel-body.ds-grid2 { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:14px 18px; align-items:start; }
+.ds-panel-body.ds-grid4 { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:14px 16px; align-items:start; }
+@media (max-width: 1080px) { .ds-panel-body.ds-grid4 { grid-template-columns:repeat(2,minmax(0,1fr)); } }
+@media (max-width: 660px) { .ds-panel-body.ds-grid2, .ds-panel-body.ds-grid4 { grid-template-columns:1fr; } }
+.ds-panel-body.ds-grid2 > .ds-span, .ds-panel-body.ds-grid4 > .ds-span { grid-column:1 / -1; }
+.ds-list { display:flex; flex-direction:column; gap:0; }
+.ds-listrow { display:flex; justify-content:space-between; align-items:flex-start; gap:16px; padding:11px 0;
+  border-bottom:1px solid var(--ds-line); }
+.ds-listrow:last-child { border-bottom:0; padding-bottom:2px; }
+.ds-listrow-main { min-width:0; flex:1 1 auto; display:flex; flex-direction:column; gap:3px; }
+.ds-listrow-main > div:first-child { font-size:12.5px; font-weight:600; display:flex; align-items:center; gap:6px; flex-wrap:wrap; }
+.ds-listrow-actions { display:flex; gap:6px; flex:0 0 auto; align-items:center; }
+/* Edit forms: keep the field grid readable instead of stretching inputs across the pane. */
+.ds-pane-stack { display:flex; flex-direction:column; gap:12px; }
+.ds-pane-stack > .ds-panel { margin-bottom:0; }
+.ds-pane-stack > .ds-form-panel { order:-1; }
+/* Right-side editor drawer: keep the list in view while editing one record. */
+.ds-side-wrap { position:fixed; inset:0; z-index:80; display:flex; justify-content:flex-end; }
+.ds-side-mask { position:absolute; inset:0; background:rgba(15,18,25,.42); }
+.ds-side { position:relative; display:flex; flex-direction:column; width:min(760px,96vw); height:100%; background:var(--ds-surface); color:inherit; border-left:1px solid var(--ds-line); box-shadow:-18px 0 48px rgba(0,0,0,.18); }
+.ds-side-head { flex:0 0 auto; display:flex; align-items:flex-start; justify-content:space-between; gap:12px; padding:14px 18px 12px; border-bottom:1px solid var(--ds-line); }
+.ds-side-title { font-size:15px; font-weight:600; }
+.ds-side-body { flex:1 1 auto; min-height:0; overflow-y:auto; padding:16px 18px 20px; display:flex; flex-direction:column; gap:16px; }
+.ds-side-foot { flex:0 0 auto; display:flex; align-items:center; gap:8px; padding:12px 18px; border-top:1px solid var(--ds-line); background:var(--ds-card); }
+.ds-side-note { margin-left:auto; }
+.ds-emoji-preview { font-size:30px; line-height:1.2; padding:6px 0; text-align:center; background:var(--ds-soft); border:1px solid var(--ds-line); border-radius:8px; }
+.ds-emojigrid { display:grid; grid-template-columns:repeat(auto-fill,minmax(36px,1fr)); gap:4px; }
+.ds-emoji { font-size:17px; line-height:1; padding:6px 0; border:1px solid var(--ds-line); border-radius:8px; background:var(--ds-soft); cursor:pointer; }
+.ds-emoji:hover { background:var(--ds-soft2); }
+.ds-emoji[data-on="1"] { border-color:var(--ds-accent); background:color-mix(in srgb, var(--ds-accent) 12%, transparent); box-shadow:0 0 0 2px color-mix(in srgb, var(--ds-accent) 22%, transparent); }
+@media (max-width:760px) { .ds-side { width:100%; } }
+.ds-form-panel { max-width:880px; }
+.ds-form-panel .ds-panel-body > .ds-row { align-items:flex-start; }
+.ds-form-panel .ds-panel-body > .ds-row:last-child { border-top:1px solid var(--ds-line); padding-top:12px; margin-top:2px; }
+.ds-form-panel .ds-panel-body > .ds-row:last-child .ds-btn-primary { min-width:88px; }
+/* Settings: a fixed section rail plus one pane, instead of one long scroll. */
+.ds-settings { display:grid; grid-template-columns:186px minmax(0,1fr); gap:18px; align-items:start; width:100%; }
+.ds-settings-nav { position:sticky; top:8px; display:flex; flex-direction:column; gap:1px;
+  border-right:1px solid var(--ds-line); padding:0 10px 10px 0; }
+.ds-settings-nav-group { font-size:10px; letter-spacing:.08em; opacity:.45; padding:10px 10px 4px; }
+.ds-nav-item { display:flex; align-items:center; gap:8px; width:100%; text-align:left; font:inherit; color:inherit;
+  border:0; background:none; padding:7px 10px; border-radius:8px; cursor:pointer; font-size:12.5px; line-height:1.2; }
+.ds-nav-item:hover { background:var(--ds-soft2); }
+.ds-nav-item[data-active="1"] { background:var(--ds-accent); color:#fff; }
+.ds-nav-item[data-active="1"] .ds-nav-count { opacity:.85; }
+.ds-nav-count { margin-left:auto; font-size:10.5px; opacity:.5; font-variant-numeric:tabular-nums; }
+.ds-settings-pane { min-width:0; width:100%; max-width:1060px; padding-bottom:24px; }
+.ds-pane-head { margin:0 0 14px; display:flex; align-items:flex-end; justify-content:space-between; gap:12px; flex-wrap:wrap; }
+.ds-pane-title { font-size:13.5px; font-weight:650; letter-spacing:.01em; }
+.ds-pane-desc { font-size:11px; opacity:.55; margin-top:3px; max-width:62ch; line-height:1.55; }
+.ds-settings-pane > .ds-panel:last-child { margin-bottom:0; }
+@media (max-width: 760px) {
+  .ds-settings { grid-template-columns:1fr; gap:10px; }
+  .ds-settings-nav { position:static; flex-direction:row; flex-wrap:wrap; gap:6px; border-right:0;
+    border-bottom:1px solid var(--ds-line); padding:0 0 10px; }
+  .ds-settings-nav-group { display:none; }
+  .ds-nav-item { width:auto; }
+}
+.ds-field { display:flex; flex-direction:column; gap:4px; }
+.ds-label { font-size:11px; opacity:.6; }
+.ds-input, .ds-textarea, .ds-select { width:100%; font:inherit; color:inherit; background:var(--ds-soft); border:1px solid var(--ds-line);
+  border-radius:7px; padding:6px 9px; outline:none; }
+.ds-input:focus, .ds-textarea:focus, .ds-select:focus { border-color:var(--ds-accent); }
+.ds-textarea { min-height:70px; resize:vertical; font-size:12px; }
+.ds-hint { font-size:10.5px; opacity:.5; }
+.ds-error { font-size:11px; color:#c0392b; }
+.ds-row { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+.ds-drawer-wrap { position:fixed; inset:0; background:#00000055; display:flex; justify-content:flex-end; z-index:60; }
+.ds-modal-wrap { position:fixed; inset:0; background:#00000055; display:flex; align-items:center; justify-content:center;
+  z-index:70; padding:24px; }
+.ds-modal { width:min(560px,96vw); max-height:min(86vh,760px); overflow:auto; display:flex; flex-direction:column; gap:14px;
+  background:var(--ds-surface); color:inherit; border:1px solid var(--ds-line); border-radius:14px; padding:20px 22px;
+  box-shadow:0 24px 60px #0000003d; }
+.ds-modal h3 { margin:0; font-size:15px; font-weight:650; }
+.ds-modal-foot { display:flex; align-items:center; gap:10px; padding-top:2px; }
+.ds-modal-foot .ds-grow { flex:1; }
+.ds-modal-grid { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
+.ds-drawer { width:min(980px,94vw); height:100%; max-height:100%; background:var(--ds-surface); color:inherit; border-left:1px solid var(--ds-line);
+  display:flex; flex-direction:column; overflow:hidden; box-shadow:-16px 0 40px #0000002e; }
+.ds-dw-head { display:flex; gap:10px; align-items:flex-start; padding:16px 20px 12px; border-bottom:1px solid var(--ds-line);
+  flex:0 0 auto; background:linear-gradient(180deg, color-mix(in srgb, var(--ds-accent) 5%, transparent), transparent); }
+.ds-dw-title { font-size:15.5px; font-weight:600; line-height:1.35; word-break:break-word; }
+.ds-dw-sub { font-size:11.5px; opacity:.6; margin-top:4px; }
+/* min-height:0 是关键：没有它，flex 子项不肯收缩，内容一长就把底部评论框顶到屏幕外 */
+.ds-dw-body { flex:1 1 auto; min-height:0; overflow-y:auto; overscroll-behavior:contain; padding:16px 20px 26px;
+  display:flex; flex-direction:column; gap:18px; }
+/* 详情按页签分组，这里只是包裹层，保持单列 */
+.ds-dw-cols, .ds-dw-col { display:block; }
+.ds-dw-tabs { display:flex; gap:4px; flex-wrap:wrap; padding:10px 20px 0; border-bottom:1px solid var(--ds-line); flex:0 0 auto; }
+.ds-dw-tab {
+  appearance:none; background:transparent; border:1px solid transparent; border-bottom:none; color:inherit;
+  font-size:12.5px; padding:7px 12px 8px; border-radius:8px 8px 0 0; cursor:pointer; display:flex; align-items:center; gap:5px;
+  opacity:.72; margin-bottom:-1px;
+}
+.ds-dw-tab:hover { opacity:1; background:color-mix(in srgb, currentColor 6%, transparent); }
+.ds-dw-tab[data-on="1"] {
+  opacity:1; font-weight:600; background:var(--ds-surface); border-color:var(--ds-line);
+  border-bottom:1px solid var(--ds-surface); color:var(--ds-accent);
+}
+.ds-dw-tab-count {
+  font-size:10.5px; line-height:1; padding:2px 5px; border-radius:8px; font-weight:600;
+  background:color-mix(in srgb, currentColor 12%, transparent);
+}
+.ds-dw-foot { flex:0 0 auto; border-top:1px solid var(--ds-line); padding:10px 20px 14px; background:var(--ds-surface); position:relative; }
+.ds-mention-bar { display:flex; align-items:center; gap:6px; margin-bottom:6px; flex-wrap:wrap; }
+.ds-mention-pop {
+  position:absolute; left:20px; right:20px; bottom:calc(100% - 4px);
+  background:var(--ds-surface); border:1px solid var(--ds-line); border-radius:10px;
+  box-shadow:0 12px 32px rgba(0,0,0,0.18); max-height:260px; display:flex; flex-direction:column;
+  overflow:hidden; z-index:60; color:inherit;
+}
+.ds-mention-search { border:0; border-bottom:1px solid var(--ds-line); background:transparent; color:inherit; padding:8px 12px; font:inherit; font-size:12.5px; outline:none; }
+.ds-mention-list { overflow:auto; padding:4px 0; }
+.ds-mention-group { font-size:11px; color:color-mix(in srgb, currentColor 55%, transparent); padding:6px 12px 2px; }
+.ds-mention-item {
+  display:flex; align-items:center; gap:8px; width:100%; text-align:left; background:none; border:0;
+  padding:6px 12px; font:inherit; font-size:12.5px; color:inherit; cursor:pointer;
+}
+.ds-mention-item:hover, .ds-mention-item[data-active='1'] { background:color-mix(in srgb, var(--ds-accent) 12%, transparent); }
+.ds-mention-item .ds-hint { margin-left:auto; }
+.ds-mention-empty { padding:10px 12px; font-size:12px; color:color-mix(in srgb, currentColor 55%, transparent); }
+.ds-colrow { border-bottom:1px solid var(--ds-line); padding:10px 0; display:flex; flex-direction:column; gap:8px; }
+.ds-colrow:last-of-type { border-bottom:0; }
+.ds-colrow-head { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+.ds-colrow-name { font-weight:600; font-size:12.5px; min-width:64px; }
+.ds-chip-owner { display:inline-flex; align-items:center; gap:4px; }
+.ds-chip-x { border:0; background:none; color:inherit; cursor:pointer; opacity:0.55; font-size:13px; line-height:1; padding:0 2px; }
+.ds-chip-x:hover { opacity:1; color:#e5484d; }
+.ds-skillbox { display:flex; flex-direction:column; gap:2px; max-height:190px; overflow-y:auto; border:1px solid var(--ds-line); border-radius:8px; padding:6px 8px; background:var(--ds-soft); }
+.ds-skillopt { display:flex; align-items:center; gap:8px; padding:4px 2px; border-radius:6px; cursor:pointer; }
+.ds-skillopt:hover { background:var(--ds-soft2); }
+.ds-skillopt[data-on="1"] { background:color-mix(in srgb, var(--ds-accent) 10%, transparent); }
+.ds-skillname { font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:11.5px; }
+.ds-skilldesc { flex:1 1 auto; min-width:0; color:var(--ds-muted, #6b7280); font-size:11px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.ds-skillusers { flex:0 0 auto; font-size:10.5px; opacity:.6; }
+.ds-chip[data-missing="1"] { border-color:color-mix(in srgb, #e5484d 45%, var(--ds-line)); }
+.ds-colpick { border:1px solid var(--ds-line); border-radius:10px; max-height:220px; display:flex; flex-direction:column; overflow:hidden; background:var(--ds-surface); }
+.ds-colpick-list { overflow:auto; padding:4px 0; }
+.ds-sec { display:flex; flex-direction:column; gap:8px; margin-bottom:16px; }
+.ds-sec:last-child { margin-bottom:0; }
+.ds-sec-head { display:flex; align-items:center; gap:8px; font-size:12px; font-weight:600; }
+.ds-sec-head .ds-hint { font-weight:400; }
+.ds-sec-body { display:flex; flex-direction:column; gap:8px; }
+/* 详情里不要套内层滚动条：外层 .ds-dw-body 已经能滚，再套一层会把内容「截一半」，让人以为丢了数据。 */
+.ds-sec-body[data-scroll="1"] { padding-right:4px; }
+.ds-comments { padding-right:4px; }
+.ds-kv { display:grid; grid-template-columns:92px 1fr; gap:6px 12px; font-size:12px; margin:0; padding:10px 12px;
+  border:1px solid var(--ds-line); border-radius:10px; background:var(--ds-soft); }
+.ds-kv dt { opacity:.55; }
+.ds-kv dd { margin:0; word-break:break-all; }
+/* Comment thread: the human's words sit flush left on an accent surface,
+   the agent's answer steps in behind a role-coloured rail. */
+.ds-comments { display:flex; flex-direction:column; gap:2px; }
+.ds-cm { display:grid; grid-template-columns:30px minmax(0,1fr); gap:10px; align-items:start;
+  padding:9px 0; border-top:1px solid var(--ds-line); }
+.ds-cm:first-child { border-top:0; }
+.ds-cm-avatar { width:30px; height:30px; border-radius:50%; display:flex; align-items:center; justify-content:center;
+  font-size:15px; line-height:1; border:1px solid var(--ds-line); background:var(--ds-card); }
+.ds-cm[data-kind="human"] .ds-cm-avatar { background:var(--ds-accent); border-color:transparent; }
+.ds-cm-initial { font-size:12px; font-weight:700; color:#fff; line-height:1; }
+.ds-cm-head { display:flex; align-items:center; gap:7px; margin-bottom:5px; flex-wrap:wrap; }
+.ds-cm-name { font-size:12px; font-weight:650; }
+.ds-cm-kind { font-size:9.5px; letter-spacing:.06em; text-transform:uppercase; padding:0 5px; line-height:15px;
+  border-radius:4px; border:1px solid currentColor; opacity:.75; }
+.ds-cm[data-kind="human"] .ds-cm-kind { color:var(--ds-accent); }
+.ds-cm[data-kind="agent"] .ds-cm-kind { opacity:.45; }
+.ds-cm-meta { font-size:10.5px; opacity:.45; margin-left:auto; }
+.ds-cm-bubble { font-size:12.5px; line-height:1.62; white-space:pre-wrap; border-radius:9px; padding:9px 12px;
+  border:1px solid var(--ds-line); background:var(--ds-card); }
+.ds-cm[data-kind="human"] .ds-cm-bubble { background:color-mix(in srgb, var(--ds-accent) 8%, transparent);
+  border-color:color-mix(in srgb, var(--ds-accent) 38%, transparent); }
+.ds-cm[data-kind="agent"] { margin-left:22px; }
+.ds-cm[data-kind="agent"] .ds-cm-bubble { border-left-width:3px; border-left-color:var(--ds-line); background:transparent; }
+.ds-cm[data-role="product"] .ds-cm-bubble { border-left-color:#2f6feb; }
+.ds-cm[data-role="architect"] .ds-cm-bubble { border-left-color:#8b5cf6; }
+.ds-cm[data-role="dev"] .ds-cm-bubble { border-left-color:#0f9d58; }
+.ds-cm[data-role="qa"] .ds-cm-bubble { border-left-color:#e08600; }
+.ds-cm-bubble > :first-child { margin-top:0; }
+.ds-cm-bubble > :last-child { margin-bottom:0; }
+.ds-md { white-space:normal; line-height:1.6; word-break:break-word; }
+.ds-md > *:first-child { margin-top:0; }
+.ds-md > *:last-child { margin-bottom:0; }
+.ds-md p { margin:0 0 8px; }
+.ds-md h3, .ds-md h4, .ds-md h5, .ds-md h6 { margin:12px 0 6px; line-height:1.35; }
+.ds-md h3 { font-size:14px; } .ds-md h4 { font-size:13px; } .ds-md h5, .ds-md h6 { font-size:12.5px; }
+.ds-md ul, .ds-md ol { margin:0 0 8px; padding-left:20px; }
+.ds-md li { margin:2px 0; }
+.ds-md code { font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size:11.5px;
+  background:var(--ds-soft2); border:1px solid var(--ds-line); border-radius:4px; padding:0 4px; }
+.ds-md pre { margin:0 0 10px; padding:10px 12px; overflow-x:auto; background:var(--ds-soft2); border:1px solid var(--ds-line); border-radius:8px; }
+.ds-md pre code { background:none; border:0; padding:0; font-size:11.5px; line-height:1.55; }
+.ds-md blockquote { margin:0 0 8px; padding:2px 0 2px 10px; border-left:3px solid var(--ds-line); opacity:.85; }
+.ds-md a { color:var(--ds-accent); text-decoration:none; }
+.ds-md a:hover { text-decoration:underline; }
+.ds-md hr { border:0; border-top:1px solid var(--ds-line); margin:10px 0; }
+.ds-md table { border-collapse:collapse; margin:0 0 10px; font-size:11.5px; width:100%; table-layout:fixed; }
+.ds-md th, .ds-md td { border:1px solid var(--ds-line); padding:4px 8px; text-align:left; vertical-align:top; word-break:break-word; }
+.ds-md th { background:var(--ds-soft2); font-weight:600; }
+.ds-err { color:#e5484d; font-size:12px; }
+.ds-ok { color:#0f9d58; font-size:12px; }
+.ds-loading { padding:24px; opacity:.5; font-size:12.5px; }
+/* ---- 需求页 ---- */
+.ds-req-grid { display:grid; grid-template-columns:320px minmax(0,1fr); gap:16px; align-items:start; }
+@media (max-width:980px) { .ds-req-grid { grid-template-columns:1fr; } }
+.ds-req-list { display:flex; flex-direction:column; gap:6px; }
+.ds-req-list-head { display:flex; align-items:center; justify-content:space-between; gap:8px; font-size:11.5px; opacity:.75; padding:0 2px 4px; }
+.ds-req-item { border:1px solid var(--ds-line); border-radius:9px; padding:9px 11px; cursor:pointer; display:flex; flex-direction:column; gap:5px; }
+.ds-req-item:hover { border-color:var(--ds-accent); }
+.ds-req-item[data-on="1"] { border-color:var(--ds-accent); background:color-mix(in srgb, var(--ds-accent) 7%, transparent); }
+.ds-req-item-title { font-size:12.5px; font-weight:600; line-height:1.35; }
+.ds-req-item-meta { display:flex; align-items:center; gap:6px; flex-wrap:wrap; }
+.ds-req-detail { border:1px solid var(--ds-line); border-radius:10px; padding:16px 18px; min-height:220px; }
+.ds-req-headline { display:flex; align-items:flex-start; justify-content:space-between; gap:12px; }
+.ds-req-code { font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:11.5px; opacity:.6; letter-spacing:.02em; }
+.ds-req-name { font-size:16px; font-weight:650; margin-top:2px; line-height:1.35; }
+.ds-req-actions { display:flex; align-items:center; gap:8px; flex:0 0 auto; }
+.ds-req-actions .ds-select { width:auto; min-width:96px; height:28px; }
+.ds-req-links { display:flex; gap:14px; flex-wrap:wrap; margin-top:10px; }
+.ds-link { color:var(--ds-accent); font-size:12px; text-decoration:none; }
+.ds-link:hover { text-decoration:underline; }
+.ds-req-desc { margin-top:10px; font-size:12px; line-height:1.65; opacity:.92; }
+.ds-req-stats { display:grid; grid-template-columns:repeat(auto-fit,minmax(96px,1fr)); gap:8px; margin-top:14px; }
+.ds-stat-box { border:1px solid var(--ds-line); border-radius:9px; padding:8px 10px; display:flex; flex-direction:column; gap:2px; }
+.ds-stat-box b { font-size:15px; font-weight:650; }
+.ds-matrix { display:flex; flex-direction:column; gap:8px; margin-top:8px; }
+.ds-matrix-sum { font-size:11.5px; opacity:.72; padding:6px 0 2px; }
+.ds-pt-row { display:flex; align-items:flex-start; gap:14px; padding:10px 12px; border:1px solid var(--ds-line); border-left:3px solid color-mix(in srgb, currentColor 20%, transparent); border-radius:9px; }
+.ds-pt-row[data-covered="1"] { border-left-color:#0f9d58; }
+.ds-pt-main { flex:1 1 auto; min-width:0; display:flex; flex-direction:column; gap:3px; }
+.ds-pt-title { display:flex; align-items:center; gap:8px; flex-wrap:wrap; font-size:12.5px; }
+.ds-pt-meta { font-size:11px; opacity:.7; }
+.ds-pt-loose { margin-top:10px; padding:10px 12px; border:1px dashed var(--ds-line); border-radius:9px; display:flex; flex-direction:column; gap:6px; }
+.ds-pt-loose-row { display:flex; align-items:center; gap:8px; font-size:11.5px; }
+.ds-pt-loose-title { flex:1 1 auto; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.ds-chip[data-pt="covered"] { color:#0f9d58; border-color:color-mix(in srgb, #0f9d58 40%, transparent); }
+.ds-chip[data-pt="open"] { color:#d97706; border-color:color-mix(in srgb, #d97706 40%, transparent); }
+.ds-gate { border:1px solid var(--ds-line); border-radius:9px; padding:10px 12px; display:flex; flex-direction:column; gap:5px; }
+.ds-gate[data-ready="1"] { border-color:color-mix(in srgb, #0f9d58 45%, transparent); }
+.ds-gate-head { display:flex; align-items:center; justify-content:space-between; gap:10px; font-size:12.5px; }
+.ds-gate-item { font-size:11.5px; line-height:1.55; }
+.ds-gate-item[data-kind="block"] { color:#c0392b; }
+.ds-gate-item[data-kind="warn"] { color:#b26a00; }
+.ds-gate-sign { display:flex; align-items:center; gap:10px; flex-wrap:wrap; font-size:11.5px; padding:8px 10px; border-radius:9px; background:var(--ds-soft); }
+.ds-stat-box span { font-size:11px; opacity:.6; }
+.ds-stat-box[data-warn="1"] { border-color:#e5484d; }
+.ds-stat-box[data-warn="1"] b { color:#e5484d; }
+.ds-req-tasks { display:flex; flex-direction:column; }
+.ds-req-task { cursor:pointer; }
+.ds-req-task:hover { background:var(--ds-soft); }
+.ds-req-task-title { display:flex; align-items:center; gap:7px; font-size:12.5px; font-weight:600; }
+.ds-chip-code { font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:10px; letter-spacing:.02em; border:1px solid var(--ds-line); border-radius:5px; padding:0 5px; opacity:.85; }
+.ds-chip[data-req="active"] { color:#0f9d58; border-color:#0f9d58; }
+.ds-chip[data-req="delivered"] { color:var(--ds-accent); border-color:var(--ds-accent); }
+.ds-chip[data-req="closed"] { opacity:.55; }
+/* ---- 需求文档与基线 ---- */
+.ds-base-box { display:flex; align-items:center; justify-content:space-between; gap:12px; border:1px solid var(--ds-line); border-radius:9px; padding:9px 12px; margin-top:8px; background:color-mix(in srgb, #0f9d58 6%, transparent); }
+.ds-base-box[data-empty="1"] { background:var(--ds-soft); color:inherit; }
+.ds-base-main { display:flex; flex-direction:column; gap:3px; min-width:0; }
+.ds-base-main b { font-size:12.5px; font-weight:650; }
+.ds-base-main span { font-size:11.5px; opacity:.72; line-height:1.45; }
+.ds-doc-list { display:flex; flex-direction:column; margin-top:6px; }
+.ds-doc-row { display:flex; align-items:flex-start; gap:10px; padding:9px 0; border-bottom:1px solid var(--ds-line); }
+.ds-doc-row:last-child { border-bottom:0; }
+.ds-doc-main { flex:1 1 auto; min-width:0; display:flex; flex-direction:column; gap:3px; }
+.ds-doc-title { display:flex; align-items:center; gap:7px; flex-wrap:wrap; font-size:12.5px; font-weight:600; }
+.ds-doc-meta { font-size:11px; opacity:.6; }
+.ds-chip[data-doc="prd"] { color:#2f6feb; border-color:#2f6feb; }
+.ds-chip[data-doc="proto"] { color:#8b5cf6; border-color:#8b5cf6; }
+.ds-chip[data-doc="acceptance"] { color:#0f9d58; border-color:#0f9d58; }
+.ds-chip[data-docstatus="baseline"] { color:#0f9d58; border-color:#0f9d58; background:color-mix(in srgb, #0f9d58 12%, transparent); }
+.ds-chip[data-docstatus="review"] { color:#d97706; border-color:#d97706; }
+/* ---- 滚动条：跟着插件主题走，不跟系统 ---- */
+[data-dsh-studio] { scrollbar-width:thin; scrollbar-color:color-mix(in srgb, currentColor 24%, transparent) transparent; }
+[data-dsh-studio] ::-webkit-scrollbar { width:10px; height:10px; }
+[data-dsh-studio] ::-webkit-scrollbar-track { background:transparent; }
+[data-dsh-studio] ::-webkit-scrollbar-thumb { background:color-mix(in srgb, currentColor 22%, transparent); border-radius:8px; }
+[data-dsh-studio] ::-webkit-scrollbar-thumb:hover { background:color-mix(in srgb, currentColor 38%, transparent); }
+[data-dsh-studio] ::-webkit-scrollbar-corner { background:transparent; }
+
+/* ---- 窄屏（平板竖屏 / 手机）：单列、卡片占满、按钮换行 ---- */
+@media (max-width:760px) {
+  .ds-head { padding:10px 12px 0; }
+  .ds-head-top { flex-wrap:wrap; gap:8px; }
+  .ds-head-actions { flex-wrap:wrap; gap:6px; margin-left:0; }
+  .ds-head-tabs { gap:8px; }
+  .ds-head-tabs .ds-grow { display:none; }
+  .ds-stat { display:none; }
+  .ds-tabs { flex:1 1 auto; min-width:0; flex-wrap:wrap; overflow:visible; }
+  .ds-tab { padding:4px 10px; }
+  .ds-board { gap:10px; padding:10px 12px 12px; }
+  .ds-col { flex:0 0 min(86vw,300px); }
+  .ds-panel-body { padding:12px; }
+  .ds-kv { grid-template-columns:1fr; gap:2px 0; }
+  .ds-kv dt { margin-top:6px; }
+  .ds-an-row { grid-template-columns:76px minmax(0,1fr) 64px; }
+  .ds-gate-head { flex-wrap:wrap; }
+  .ds-audit-row { grid-template-columns:56px 1fr 56px; }
+}
+@media (max-width:520px) {
+  .ds-col { flex:0 0 92vw; }
+  .ds-tabs { overflow-x:auto; max-width:100%; }
+  .ds-head-actions .ds-btn { padding:5px 9px; }
+}
+
+/* ---- 强制颜色（Windows 高对比度 / forced-colors）：选中态从底色改成边框 ---- */
+@media (forced-colors: active) {
+  .ds-panel, .ds-card, .ds-side, .ds-drawer, .ds-gate, .ds-stat-box, .ds-col, .ds-doc-row, .ds-tabs, .ds-seg { border:1px solid CanvasText; }
+  .ds-btn, .ds-chip, .ds-seg-btn { border:1px solid ButtonText; }
+  .ds-tab[data-on="1"], .ds-seg-btn[data-on="1"], .ds-chip[data-on="1"] { border:2px solid Highlight; }
+  .ds-btn-primary { border:2px solid ButtonText; background:ButtonFace; color:ButtonText; }
+  .ds-kpi[data-warn="1"], .ds-stat-box[data-warn="1"] { border:2px solid CanvasText; }
+  .ds-chip[data-pt="covered"], .ds-chip[data-pt="open"], .ds-chip[data-req="active"], .ds-chip[data-req="delivered"] { border-color:Highlight; }
+  [data-dsh-studio] :focus-visible { outline:2px solid Highlight; outline-offset:1px; }
+}
+/* ---- 登录页（统一登录要求登录、又还没有会话时盖的一层） ---- */
+.ds-login-wrap { flex:1 1 auto; display:flex; align-items:center; justify-content:center; padding:24px; }
+/* 已进入工作区后点「登录」时是浮层：固定盖住整页，别把下面的布局挤歪 */
+.ds-login-wrap[data-overlay="1"] { position:fixed; inset:0; z-index:90; flex:none;
+  background:color-mix(in srgb, var(--ds-surface) 76%, transparent); backdrop-filter:blur(2px); }
+.ds-login { width:min(380px,100%); display:flex; flex-direction:column; gap:10px; padding:20px;
+  border:1px solid var(--ds-line); border-radius:12px; background:var(--ds-surface);
+  box-shadow:0 12px 32px color-mix(in srgb, currentColor 12%, transparent); }
+.ds-login-wrap[data-overlay="1"] .ds-login { box-shadow:0 22px 60px color-mix(in srgb, currentColor 26%, transparent); }
+.ds-login-brand { font-size:16px; font-weight:600; }
+.ds-login-hint { font-size:12px; opacity:.75; line-height:1.6; }
+.ds-login-actions { display:flex; justify-content:flex-end; gap:8px; margin-top:2px; }
+.ds-login-note { font-size:11px; opacity:.6; word-break:break-all; }
+
+/* ======================================================================
+   shadcn/ui 风格层（2026-11-09）
+   对齐 https://ui.shadcn.com 的默认主题：一套 token + 统一圆角/描边/
+   焦点环/间距，组件按 Button / Input / Card / Badge / Tabs / Dialog /
+   Table 的默认外观重画。仍然零依赖、无构建，只追加规则覆盖旧样式。
+   ====================================================================== */
+[data-dsh-studio] {
+  --radius:10px;
+  --background:#fafafa; --foreground:#09090b;
+  --card:#ffffff; --card-foreground:#09090b;
+  --popover:#ffffff; --popover-foreground:#09090b;
+  --primary:#18181b; --primary-foreground:#fafafa;
+  --secondary:#f4f4f5; --secondary-foreground:#18181b;
+  --muted:#f4f4f5; --muted-foreground:#71717a;
+  --accent:#f4f4f5; --accent-foreground:#18181b;
+  --destructive:#dc2626; --destructive-foreground:#fafafa;
+  --border:#e4e4e7; --input:#e4e4e7; --ring:#a1a1aa;
+  --ds-bg:var(--background); --ds-surface:var(--card); --ds-surface-2:var(--muted);
+  --ds-card:var(--card); --ds-line:var(--border);
+  --ds-line-soft:color-mix(in srgb, var(--border) 55%, transparent);
+  --ds-soft:var(--muted); --ds-soft2:var(--secondary);
+  --ds-accent:var(--primary); --ds-shadow:0 1px 2px rgb(9 9 11 / .05);
+  background:var(--background); color:var(--foreground);
+}
+[data-dsh-studio][data-theme="light"] {
+  color-scheme:light; color:var(--foreground); background:var(--background);
+  --background:#fafafa; --foreground:#09090b;
+  --card:#ffffff; --card-foreground:#09090b;
+  --popover:#ffffff; --popover-foreground:#09090b;
+  --primary:#18181b; --primary-foreground:#fafafa;
+  --secondary:#f4f4f5; --secondary-foreground:#18181b;
+  --muted:#f4f4f5; --muted-foreground:#71717a;
+  --accent:#f4f4f5; --accent-foreground:#18181b;
+  --destructive:#dc2626; --border:#e4e4e7; --input:#e4e4e7; --ring:#a1a1aa;
+  --ds-bg:var(--background); --ds-surface:var(--card); --ds-surface-2:var(--muted);
+  --ds-card:var(--card); --ds-line:var(--border);
+  --ds-line-soft:color-mix(in srgb, var(--border) 55%, transparent);
+  --ds-soft:var(--muted); --ds-soft2:var(--secondary);
+  --ds-accent:var(--primary); --ds-shadow:0 1px 2px rgb(9 9 11 / .05);
+}
+[data-dsh-studio][data-theme="dark"] {
+  color-scheme:dark; color:var(--foreground); background:var(--background);
+  --background:#09090b; --foreground:#fafafa;
+  --card:#111113; --card-foreground:#fafafa;
+  --popover:#111113; --popover-foreground:#fafafa;
+  --primary:#fafafa; --primary-foreground:#18181b;
+  --secondary:#1b1b1f; --secondary-foreground:#fafafa;
+  --muted:#1b1b1f; --muted-foreground:#a1a1aa;
+  --accent:#1b1b1f; --accent-foreground:#fafafa;
+  --destructive:#ef4444; --border:#27272a; --input:#27272a; --ring:#52525b;
+  --ds-bg:var(--background); --ds-surface:var(--card); --ds-surface-2:var(--muted);
+  --ds-card:var(--card); --ds-line:var(--border);
+  --ds-line-soft:color-mix(in srgb, var(--border) 65%, transparent);
+  --ds-soft:var(--muted); --ds-soft2:var(--secondary);
+  --ds-accent:var(--primary); --ds-shadow:0 1px 2px rgb(0 0 0 / .45);
+}
+/* 焦点环：shadcn 的 ring-2 ring-ring ring-offset-2 */
+[data-dsh-studio] :focus-visible { outline:2px solid var(--ring); outline-offset:2px; border-radius:calc(var(--radius) - 4px); }
+
+/* 页头 / 页面底 */
+[data-dsh-studio] .ds-head { background:var(--background); border-bottom:1px solid var(--border); padding:14px 20px 0; }
+[data-dsh-studio] .ds-brand, [data-dsh-studio] .ds-title { letter-spacing:-.01em; }
+
+/* 按钮：outline（默认）、primary、ghost 三态 */
+[data-dsh-studio] .ds-btn { display:inline-flex; align-items:center; justify-content:center; gap:6px;
+  height:32px; padding:0 12px; border:1px solid var(--input); border-radius:var(--radius);
+  background:var(--card); color:var(--foreground); font-size:12.5px; font-weight:500; line-height:1;
+  box-shadow:var(--ds-shadow); cursor:pointer; transition:background .12s ease, border-color .12s ease, box-shadow .12s ease; }
+[data-dsh-studio] .ds-btn:hover { background:var(--muted); }
+[data-dsh-studio] .ds-btn:active { transform:translateY(.5px); }
+[data-dsh-studio] .ds-btn[disabled] { opacity:.5; cursor:not-allowed; box-shadow:none; }
+[data-dsh-studio] .ds-btn-primary { background:var(--primary); border-color:var(--primary); color:var(--primary-foreground); box-shadow:none; }
+[data-dsh-studio] .ds-btn-primary:hover { background:color-mix(in srgb, var(--primary) 88%, transparent); filter:none; }
+[data-dsh-studio] .ds-btn-ghost { background:transparent; border-color:transparent; box-shadow:none; opacity:.7; height:26px; padding:0 8px; }
+[data-dsh-studio] .ds-btn-ghost:hover { background:var(--muted); opacity:1; }
+
+/* 输入类：Input / Select / Textarea */
+[data-dsh-studio] .ds-input, [data-dsh-studio] .ds-select, [data-dsh-studio] .ds-textarea {
+  width:100%; height:32px; padding:0 10px; font:inherit; font-size:12.5px; color:var(--foreground);
+  background:var(--card); border:1px solid var(--input); border-radius:var(--radius);
+  box-shadow:var(--ds-shadow); transition:border-color .12s ease, box-shadow .12s ease; }
+[data-dsh-studio] .ds-textarea { height:auto; min-height:72px; padding:8px 10px; line-height:1.6; resize:vertical; }
+[data-dsh-studio] .ds-select { padding-right:8px; }
+[data-dsh-studio] .ds-input:hover, [data-dsh-studio] .ds-select:hover, [data-dsh-studio] .ds-textarea:hover { border-color:var(--ring); }
+[data-dsh-studio] .ds-input:focus, [data-dsh-studio] .ds-select:focus, [data-dsh-studio] .ds-textarea:focus {
+  border-color:var(--ring); outline:none; box-shadow:0 0 0 3px color-mix(in srgb, var(--ring) 35%, transparent); }
+[data-dsh-studio] .ds-input::placeholder, [data-dsh-studio] .ds-textarea::placeholder { color:var(--muted-foreground); }
+[data-dsh-studio] .ds-label { font-size:12px; font-weight:500; color:var(--foreground); }
+[data-dsh-studio] .ds-hint, [data-dsh-studio] .ds-sub, [data-dsh-studio] .ds-pane-desc, [data-dsh-studio] .ds-empty { color:var(--muted-foreground); }
+
+/* 卡片 / 面板 */
+[data-dsh-studio] .ds-panel { background:var(--card); border:1px solid var(--border); border-radius:calc(var(--radius) + 2px);
+  box-shadow:var(--ds-shadow); margin-bottom:16px; overflow:hidden; }
+[data-dsh-studio] .ds-panel-head { background:transparent; border-bottom:1px solid var(--border); padding:12px 16px; font-size:13px; }
+[data-dsh-studio] .ds-panel-body { padding:16px; gap:14px; }
+[data-dsh-studio] .ds-card { background:var(--card); border:1px solid var(--border); border-radius:var(--radius);
+  box-shadow:var(--ds-shadow); padding:10px 11px; transition:border-color .12s ease, box-shadow .12s ease, transform .12s ease; }
+[data-dsh-studio] .ds-card:hover { border-color:var(--ring); transform:none; box-shadow:0 2px 8px rgb(9 9 11 / .08); }
+[data-dsh-studio] .ds-kpi { background:var(--card); border:1px solid var(--border); border-radius:calc(var(--radius) + 2px);
+  box-shadow:var(--ds-shadow), inset 0 0 0 0 transparent; padding:14px 16px; }
+[data-dsh-studio] .ds-kpi-value { font-size:24px; font-weight:600; font-variant-numeric:tabular-nums; }
+[data-dsh-studio] .ds-kpi-label { font-size:12px; font-weight:500; color:var(--muted-foreground); }
+[data-dsh-studio] .ds-kpi-hint { font-size:11.5px; color:var(--muted-foreground); }
+[data-dsh-studio] .ds-stat-box, [data-dsh-studio] .ds-proj-card, [data-dsh-studio] .ds-market-card,
+[data-dsh-studio] .ds-req-item, [data-dsh-studio] .ds-gate, [data-dsh-studio] .ds-base-box {
+  background:var(--card); border:1px solid var(--border); border-radius:var(--radius); box-shadow:var(--ds-shadow); }
+
+/* Badge（chip） */
+[data-dsh-studio] .ds-chip { display:inline-flex; align-items:center; gap:4px; height:20px; padding:0 8px;
+  border:1px solid var(--border); border-radius:999px; background:var(--muted); color:var(--secondary-foreground);
+  font-size:11px; font-weight:500; line-height:1; white-space:nowrap; }
+[data-dsh-studio] .ds-chip[data-on="1"] { background:var(--primary); border-color:var(--primary); color:var(--primary-foreground); }
+[data-dsh-studio] .ds-chip-bug, [data-dsh-studio] .ds-chip[data-sla="overdue"] { background:color-mix(in srgb, var(--destructive) 12%, var(--card)); border-color:color-mix(in srgb, var(--destructive) 45%, var(--border)); color:var(--destructive); font-weight:600; }
+[data-dsh-studio] .ds-chip[data-sla="due_soon"] { background:color-mix(in srgb, #d97706 12%, var(--card)); border-color:color-mix(in srgb, #d97706 45%, var(--border)); color:#b45309; }
+[data-dsh-studio][data-theme="dark"] .ds-chip[data-sla="due_soon"] { color:#fbbf24; }
+
+/* Tabs（shadcn: 灰底胶囊 + 选中项浮起） */
+[data-dsh-studio] .ds-tabs { display:inline-flex; gap:4px; padding:4px; border-radius:calc(var(--radius) + 1px);
+  background:var(--muted); border:1px solid var(--border); }
+[data-dsh-studio] .ds-tab { border:0; background:transparent; color:var(--muted-foreground); font:inherit; font-size:12.5px;
+  font-weight:500; padding:5px 12px; border-radius:calc(var(--radius) - 2px); white-space:nowrap; flex:0 0 auto; transition:background .12s ease, color .12s ease; }
+[data-dsh-studio] .ds-tab:hover { background:color-mix(in srgb, var(--card) 60%, transparent); color:var(--foreground); opacity:1; }
+[data-dsh-studio] .ds-tab[data-on="1"] { background:var(--card); color:var(--foreground); font-weight:600; box-shadow:var(--ds-shadow); }
+[data-dsh-studio] .ds-seg { display:inline-flex; gap:3px; padding:3px; border-radius:calc(var(--radius) + 1px); background:var(--muted); border:1px solid var(--border); }
+[data-dsh-studio] .ds-seg-btn { border:0; background:transparent; color:var(--muted-foreground); font:inherit; font-size:11.5px;
+  padding:4px 10px; border-radius:calc(var(--radius) - 3px); white-space:nowrap; }
+[data-dsh-studio] .ds-seg-btn[data-on="1"] { background:var(--card); color:var(--foreground); font-weight:600; box-shadow:var(--ds-shadow); opacity:1; }
+[data-dsh-studio] .ds-dw-tabs { border-bottom:1px solid var(--border); gap:2px; }
+[data-dsh-studio] .ds-dw-tab { border-radius:calc(var(--radius) - 4px) calc(var(--radius) - 4px) 0 0; }
+[data-dsh-studio] .ds-dw-tab[data-on="1"] { background:var(--muted); border-bottom:2px solid var(--foreground); }
+
+/* 看板列 */
+[data-dsh-studio] .ds-col { background:color-mix(in srgb, var(--muted) 55%, transparent); border:1px solid var(--border);
+  border-radius:calc(var(--radius) + 2px); }
+[data-dsh-studio] .ds-col-head { background:transparent; border-bottom:1px solid var(--border); padding:10px 12px; font-size:12px; }
+
+/* 抽屉 / 弹窗（Dialog） */
+[data-dsh-studio] .ds-side, [data-dsh-studio] .ds-drawer { background:var(--card); border-left:1px solid var(--border);
+  box-shadow:-24px 0 60px rgb(9 9 11 / .18); }
+[data-dsh-studio] .ds-side-head, [data-dsh-studio] .ds-dw-head { border-bottom:1px solid var(--border); }
+[data-dsh-studio] .ds-side-foot, [data-dsh-studio] .ds-dw-foot { background:var(--card); border-top:1px solid var(--border); }
+[data-dsh-studio] .ds-modal { background:var(--card); border:1px solid var(--border); border-radius:calc(var(--radius) + 4px);
+  box-shadow:0 24px 64px rgb(9 9 11 / .24); padding:20px; }
+[data-dsh-studio] .ds-modal-wrap, [data-dsh-studio] .ds-drawer-wrap, [data-dsh-studio] .ds-side-mask { background:rgb(9 9 11 / .5); }
+
+/* 表格化行 */
+[data-dsh-studio] .ds-listrow, [data-dsh-studio] .ds-doc-row, [data-dsh-studio] .ds-audit-row,
+[data-dsh-studio] .ds-art-row, [data-dsh-studio] .ds-pt-row { border-bottom:1px solid var(--border); }
+[data-dsh-studio] .ds-listrow:hover, [data-dsh-studio] .ds-doc-row:hover, [data-dsh-studio] .ds-art-row:hover { background:var(--muted); }
+
+/* 滚动条 */
+[data-dsh-studio] { scrollbar-color:color-mix(in srgb, var(--foreground) 22%, transparent) transparent; }
+[data-dsh-studio] ::-webkit-scrollbar-thumb { background:color-mix(in srgb, var(--foreground) 20%, transparent); }
+[data-dsh-studio] ::-webkit-scrollbar-thumb:hover { background:color-mix(in srgb, var(--foreground) 32%, transparent); }
+
+/* 登录卡（Card + 表单） */
+[data-dsh-studio] .ds-login { border:1px solid var(--border); border-radius:calc(var(--radius) + 4px); background:var(--card); box-shadow:0 20px 48px rgb(9 9 11 / .18); }
+
+/* ---- 第二遍：密度与层级微调（看板 / 卡片 / 工具栏） ---- */
+[data-dsh-studio] .ds-board { gap:14px; padding:14px 20px 18px; }
+[data-dsh-studio] .ds-board-bar { gap:8px; padding:12px 20px; flex-wrap:wrap; }
+[data-dsh-studio] .ds-col { background:var(--muted); border:1px solid var(--border); }
+[data-dsh-studio] .ds-col-head { padding:11px 12px; font-size:12.5px; font-weight:600; letter-spacing:-.005em; }
+[data-dsh-studio] .ds-count { display:inline-flex; align-items:center; justify-content:center; min-width:20px; height:20px; padding:0 6px;
+  border-radius:999px; background:var(--card); border:1px solid var(--border); color:var(--muted-foreground); font-size:11px; font-weight:600; }
+[data-dsh-studio] .ds-col-owner { color:var(--muted-foreground); opacity:1; font-size:11px; }
+[data-dsh-studio] .ds-col-body { padding:10px; gap:10px; }
+[data-dsh-studio] .ds-card { padding:11px 12px; border-radius:var(--radius); }
+[data-dsh-studio] .ds-card-title { font-size:13px; font-weight:600; line-height:1.4; }
+[data-dsh-studio] .ds-card-foot { color:var(--muted-foreground); opacity:1; font-size:11px; }
+[data-dsh-studio] .ds-card-body, [data-dsh-studio] .ds-meta { color:var(--muted-foreground); }
+[data-dsh-studio] .ds-chip { height:21px; font-size:11px; padding:0 8px; background:var(--secondary); border-color:var(--border); }
+[data-dsh-studio] .ds-chip-code { background:var(--muted); border-color:var(--border); color:var(--muted-foreground); }
+[data-dsh-studio] .ds-chip[data-proj="1"] { background:color-mix(in srgb, var(--primary) 8%, var(--card)); border-color:color-mix(in srgb, var(--primary) 22%, var(--border)); color:var(--foreground); }
+[data-dsh-studio] .ds-sec-head, [data-dsh-studio] .ds-an-sec { font-size:12px; font-weight:600; color:var(--muted-foreground); text-transform:none; letter-spacing:.01em; }
+[data-dsh-studio] .ds-panel-head .ds-hint, [data-dsh-studio] .ds-head .ds-sub { font-size:11.5px; }
+[data-dsh-studio] .ds-filters, [data-dsh-studio] .ds-check-bar { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+`
+
+    // ----------------------------------------------------------------- state
+
+    function useStudio() {
+      const [state, setState] = React.useState(null)
+      const [error, setError] = React.useState(null)
+      /** 上一次渲染用的数据指纹：轮询拿回来的东西没变就不重渲染（每次 /state 600KB 上下，重渲染一次够卡好几帧）。 */
+      const signature = React.useRef('')
+      const reload = React.useCallback(async (force = false) => {
+        if (typeof document !== 'undefined' && document.hidden === true) return
+        try {
+          const payload = await api('/state')
+          // 服务端在「必须登录」又没带会话时只回 { locked: true, state: 精简版 }，
+          // locked 得留着，否则登录框不会出现。
+          const next = { ...(payload.state ?? {}), locked: payload.locked === true }
+          const sig = [
+            next.revision ?? '',
+            (next.tasks ?? []).length,
+            (next.requirements ?? []).length,
+            (next.agents ?? []).length,
+            next.locked === true ? 1 : 0,
+          ].join('|')
+          if (!force && sig === signature.current) { setError(null); return }
+          signature.current = sig
+          setState(next)
+          setError(null)
+        } catch (cause) {
+          setError(cause instanceof Error ? cause.message : String(cause))
+        }
+      }, [])
+      React.useEffect(() => {
+        let alive = true
+        const tick = async () => { if (alive) await reload() }
+        void tick()
+        // 5s → 15s：状态没变时本来就不重渲染，但每次仍要传 600KB JSON；挂后台时直接停。
+        const timer = setInterval(() => { void tick() }, 15000)
+        const onVisible = () => { if (document.hidden !== true) void tick() }
+        document.addEventListener('visibilitychange', onVisible)
+        return () => { alive = false; clearInterval(timer); document.removeEventListener('visibilitychange', onVisible) }
+      }, [reload])
+      return { state, error, reload }
+    }
+
+    const ROLE_LABEL = { product: '产品', architect: '架构', dev: '研发', qa: '测试' }
+    const PRIORITY_LABEL = { urgent: '紧急', normal: '普通', relaxed: '宽松' }
+    const TYPE_LABEL = { requirement: '需求', bug: '缺陷', design: '设计', dev: '开发', test: '测试', ops: '运维' }
+    const SEVERITY_LABEL = { p0: 'P0 致命', p1: 'P1 严重', p2: 'P2 一般', p3: 'P3 轻微' }
+    const ARTIFACT_KINDS = ['requirement', 'design', 'mr', 'cases', 'report', 'release', 'doc', 'screenshot', 'other']
+    const ARTIFACT_KIND_LABEL = { requirement: '需求', design: '方案', mr: 'MR', cases: '用例', report: '报告', release: '发布', doc: '文档', screenshot: '截图', other: '其它' }
+    const ARTIFACT_STATUS = ['draft', 'delivered', 'accepted']
+const CASE_RESULTS = ['pending', 'pass', 'fail', 'skip']
+const CASE_RESULT_LABEL = { pending: '⬜ 未跑', pass: '✅ 通过', fail: '❌ 不通过', skip: '⏭️ 跳过' }
+const CASE_TYPES = ['functional', 'api', 'ui', 'performance', 'security', 'other']
+const CASE_TYPE_LABEL = { functional: '功能', api: '接口', ui: '界面', performance: '性能', security: '安全', other: '其它' }
+const CASE_PRIORITIES = ['p0', 'p1', 'p2', 'p3']
+    const ARTIFACT_STATUS_LABEL = { draft: '草稿', delivered: '已交付', accepted: '已验收' }
+    const CODING_REVIEW_LABEL = { pending: '待评审', approved: '评审通过', changes_requested: '要求修改' }
+    const CODING_CHANGE_LABEL = { added: '新增', modified: '修改', deleted: '删除' }
+    const PROJECT_STATUS_LABEL = { active: '进行中', paused: '暂停', archived: '已归档' }
+    const ITERATION_STATUS_LABEL = { planned: '未开始', active: '进行中', closed: '已结束' }
+    const STRATEGY_LABEL = { round_robin: '轮询', best_match: '按专长匹配', lead: '团长分派' }
+
+    function fmtTime(value) {
+      if (typeof value !== 'number' || value === 0) return '—'
+      const date = new Date(value)
+      const pad = n => String(n).padStart(2, '0')
+      return `${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`
+    }
+
+    function fmtDate(value) {
+      if (typeof value !== 'number' || value === 0) return '—'
+      const date = new Date(value)
+      const pad = n => String(n).padStart(2, '0')
+      return `${pad(date.getMonth() + 1)}-${pad(date.getDate())}`
+    }
+
+    /** epoch 毫秒 ↔ <input type="date"> 的 yyyy-mm-dd。 */
+    function toDateInput(value) {
+      if (typeof value !== 'number' || value === 0) return ''
+      const date = new Date(value)
+      const pad = n => String(n).padStart(2, '0')
+      return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`
+    }
+
+    function fromDateInput(text) {
+      if (typeof text !== 'string' || text.trim() === '') return 0
+      const at = new Date(`${text.trim()}T23:59:00`).getTime()
+      return Number.isFinite(at) ? at : 0
+    }
+
+    // ------------------------------------------------------------------ card
+
+    /** 这张卡现在实际归谁：正在跑的那个 > 卡上指定的 > 本列负责人 > 没人。 */
+    function cardOwner(task, config) {
+      const experts = config.experts ?? []
+      if (task.dispatch?.state === 'running' && task.dispatch?.expert) {
+        const running = experts.find(expert => expert.id === task.dispatch.expert)
+        if (running !== undefined) return { label: `${running.emoji} ${running.name}`, note: '正在处理', expert: running }
+      }
+      const assigned = experts.find(expert => expert.id === task.expert)
+      if (assigned !== undefined) return { label: `${assigned.emoji} ${assigned.name}`, note: '卡上指派', expert: assigned }
+      const owner = config.columns?.[task.status]
+      if (owner !== undefined && Array.isArray(owner.members) && owner.members.length > 0) {
+        if (owner.members.length === 1) {
+          const only = owner.members[0]
+          const text = ownerLabel(config, { ...only, kind: only.kind })
+          if (text !== '') {
+            const expert = only.kind === 'expert' ? experts.find(entry => entry.id === only.id) : undefined
+            return { label: text, note: '本列候选人', expert }
+          }
+        }
+        const strategy = STRATEGY_LABEL[owner.strategy ?? 'round_robin'] ?? '轮询'
+        return { label: `候选池 ${owner.members.length} 人`, note: `本列候选：${owner.members.map(member => ownerLabel(config, member)).join('、')}（${strategy}）`, expert: undefined }
+      }
+      if (owner !== undefined && owner.kind !== 'none') {
+        const text = ownerLabel(config, owner)
+        if (text !== '') {
+          const expert = owner.kind === 'expert' ? experts.find(entry => entry.id === owner.id) : undefined
+          return { label: text, note: '本列负责人', expert }
+        }
+      }
+      return { label: '未指派', note: '等人认领', expert: undefined }
+    }
+
+    function artifactsWithoutBody(task) {
+      return (task.artifacts ?? []).filter(item => String(item.content ?? '').trim() === '')
+    }
+
+    function Card({ task, onOpen, config, requirements, onPickRequirement, onPickProject }) {
+      const owner = cardOwner(task, config ?? {})
+      const running = task.dispatch?.state === 'running'
+      const blocked = task.blocked ?? null
+      const project = (config?.projects ?? []).find(entry => entry.id === task.project)
+      const iteration = (project?.iterations ?? []).find(entry => entry.id === task.iteration)
+      const service = (project?.services ?? []).find(entry => entry.id === task.service)
+      const requirement = (requirements ?? []).find(entry => entry.id === task.requirementId)
+      const checklist = task.checklist ?? []
+      const doneCount = checklist.filter(item => item.done).length
+      const artifactCount = (task.artifacts ?? []).length
+      const noBody = artifactsWithoutBody(task).length
+      const overdue = task.dueAt > 0 && task.dueAt < Date.now() && task.status !== 'done'
+      return h('div', {
+        className: 'ds-card',
+        draggable: true,
+        onDragStart: event => { event.dataTransfer.setData('text/plain', task.id); event.dataTransfer.effectAllowed = 'move'; event.currentTarget.setAttribute('data-dragging', '1') },
+        onDragEnd: event => { event.currentTarget.removeAttribute('data-dragging') },
+        'data-urgent': task.priority === 'urgent' ? '1' : '0',
+        'data-running': running ? '1' : '0',
+        'data-blocked': blocked === null ? '0' : '1',
+        'data-nobody': noBody > 0 ? '1' : '0',
+        onClick: () => onOpen(task.id),
+        title: blocked === null ? (task.requirement || task.title) : `阻塞：${blocked.reason || '未填写原因'}`,
+      },
+        h('div', { className: 'ds-card-title' }, task.title),
+        h('div', { className: 'ds-meta' },
+          h('span', { className: 'ds-dot', 'data-p': task.priority, title: PRIORITY_LABEL[task.priority] }),
+          task.code ? h(ChipField, { className: 'ds-chip ds-chip-code', title: '需求下的编号' }, task.code) : null,
+          requirement !== undefined
+            ? h(ChipField, {
+                className: 'ds-chip',
+                'data-req': '1',
+                title: `需求 ${requirement.code || requirement.id}｜${requirement.title}${onPickRequirement === undefined ? '' : '（点一下只看这条需求）'}`,
+                onClick: event => {
+                  if (onPickRequirement === undefined) return
+                  event.stopPropagation()
+                  onPickRequirement(requirement.id)
+                },
+              }, `📄 ${requirement.code || requirement.title || '需求'}`)
+            : h(ChipField, {
+                className: 'ds-chip',
+                'data-req-missing': '1',
+                title: '这张卡还没挂到需求上：点开卡片，在「计划」里选一条需求，编号会自动补',
+                onClick: event => {
+                  event.stopPropagation()
+                  onOpen(task.id)
+                },
+              }, '未挂需求'),
+          project !== undefined
+            ? h(ChipField, {
+                className: 'ds-chip',
+                'data-proj': '1',
+                title: `${project.name}${onPickProject === undefined ? '' : '（点一下只看这个项目）'}`,
+                onClick: event => {
+                  if (onPickProject === undefined) return
+                  event.stopPropagation()
+                  onPickProject(project.id)
+                },
+              }, project.key || project.name)
+            : null,
+          iteration !== undefined
+            ? h(ChipField, { className: 'ds-chip', 'data-iter': '1', title: `迭代 ${iteration.name}（${iteration.start || '未定'} → ${iteration.due || '未定'}）` }, `🗓 ${iteration.name || iteration.id}`)
+            : null,
+          service !== undefined
+            ? h(ChipField, { className: 'ds-chip', 'data-svc': '1', title: `服务 ${service.name}${service.repoPath ? `｜${service.repoPath}` : ''}（worktree 从这里切）` }, `📦 ${service.name}`)
+            : (task.service ?? '') !== ''
+              ? h(ChipField, { className: 'ds-chip', 'data-svc-missing': '1', title: `卡上记的服务 ${task.service} 已经不在项目里了（服务被改名或删除），重新选一个` }, '📦 服务已失效')
+              : null,
+          task.type === 'bug' ? h(ChipField, { className: 'ds-chip ds-chip-bug', 'data-sev': task.severity ?? 'p2' }, `BUG ${String(task.severity || 'p2').toUpperCase()}`) : null,
+          task.sla !== null && task.sla !== undefined && task.status !== 'done'
+            ? h(ChipField, {
+                className: 'ds-chip',
+                'data-sla': task.sla.state,
+                title: `SLA ${task.sla.hours} 小时，应修于 ${new Date(task.sla.dueAt).toLocaleString('zh-CN')}`,
+              }, task.sla.state === 'overdue'
+                ? `⏰ 逾期 ${Math.max(1, Math.round(Math.abs(task.sla.remaining) / 3600000))}h`
+                : task.sla.state === 'due_soon' ? '⏰ 快到时限' : `⏰ 剩 ${Math.max(1, Math.round(task.sla.remaining / 3600000))}h`)
+            : null,
+          task.duplicateOf ? h(ChipField, { className: 'ds-chip', title: '和另一张缺陷是同一件事' }, '重复') : null,
+          (Number(task.reopenCount) || 0) > 0
+            ? h(ChipField, { className: 'ds-chip', title: `${task.reopenCount} 次修完又被打开` }, `重开 ${task.reopenCount}`)
+            : null,
+          blocked !== null ? h(ChipField, { className: 'ds-chip ds-chip-blocked' }, '⛔ 阻塞') : null,
+          h(ChipField, {
+            className: 'ds-chip',
+            'data-role': owner.expert?.role || task.role,
+            'data-open': owner.label === '未指派' ? '1' : '0',
+            title: owner.note === undefined || owner.note === '' ? owner.label : `${owner.label} · ${owner.note}`,
+          }, owner.label),
+          task.domain ? h(ChipField, { className: 'ds-chip' }, task.domain) : null,
+          running ? h(ChipField, { className: 'ds-chip ds-chip-ai' }, 'AI 处理中') : null,
+        ),
+        blocked !== null ? h('div', { className: 'ds-blocked-line' }, blocked.reason || '未填写原因') : null,
+        h('div', { className: 'ds-card-foot' },
+          h('span', {}, task.id),
+          task.dueAt > 0 ? h('span', { 'data-overdue': overdue ? '1' : '0', style: overdue ? { color: '#e5484d', fontWeight: 600 } : null }, `· ${fmtDate(task.dueAt)}${overdue ? ' 逾期' : ''}`) : null,
+          checklist.length > 0 ? h('span', { title: '验收清单' }, `· ☑ ${doneCount}/${checklist.length}`) : null,
+          artifactCount > 0 ? h('span', { title: '已登记交付物' }, `· 📎 ${artifactCount}`) : null,
+          (task.cases?.length ?? 0) > 0 ? (() => {
+            const total = task.cases.length
+            const passed = task.cases.filter(item => item.result === 'pass').length
+            const failed = task.cases.filter(item => item.result === 'fail').length
+            return h('span', {
+              className: failed > 0 ? 'ds-case-fail' : '',
+              title: `测试用例：通过 ${passed}/${total}${failed > 0 ? `，不通过 ${failed}` : ''}`,
+            }, `· ${failed > 0 ? '❌' : '✅'} ${passed}/${total}`)
+          })() : null,
+          noBody > 0 ? h('span', { className: 'ds-card-warn', title: `${noBody} 件交付物还没写正文，云盘文档里只有标题` }, '● 缺正文') : null,
+          (task.coding?.files?.length ?? 0) > 0 ? h('span', { title: 'AI Coding 改动文件数' }, `· ⌥ ${task.coding.files.length}`) : null,
+          task.comments.length > 0 ? h('span', {}, `· ${task.comments.length} 评论`) : null,
+          h('span', { style: { marginLeft: 'auto' } }, fmtTime(task.updatedAt)),
+        ),
+      )
+    }
+
+    function memberLabel(config, member) {
+      if (member === undefined || member === null) return ''
+      if (member.kind === 'role') return `🎯 ${ROLE_LABEL[member.id] ?? member.id}`
+      if (member.kind === 'team') {
+        const team = (config.teams ?? []).find(entry => entry.id === member.id)
+        return team === undefined ? '' : `👥 ${team.name}`
+      }
+      const expert = (config.experts ?? []).find(entry => entry.id === member.id)
+      return expert === undefined ? (ROLE_LABEL[member.id] ?? String(member.id ?? '')) : `${expert.emoji} ${expert.name}`
+    }
+    function ownerLabel(config, owner) {
+      if (owner === undefined || owner === null) return ''
+      if (owner.kind === 'pool') {
+        const names = (owner.members ?? []).map(member => memberLabel(config, member)).filter(name => name !== '')
+        if (names.length === 0) return ''
+        return names.length === 1 ? names[0] : `${names[0]} 等 ${names.length} 位`
+      }
+      return memberLabel(config, owner)
+    }
+
+    function Board({ state, onOpen, onMove, onWip }) {
+      const config = state.config ?? {}
+      const experts = config.experts ?? []
+      const [query, setQuery] = React.useState('')
+      const [expertFilter, setExpertFilter] = React.useState('')
+      const [typeFilter, setTypeFilter] = React.useState('')
+      const [projectFilter, setProjectFilter] = React.useState('')
+      const [iterationFilter, setIterationFilter] = React.useState('')
+      const [serviceFilter, setServiceFilter] = React.useState('')
+      const [requirementFilter, setRequirementFilter] = React.useState('')
+      const [hideEmpty, setHideEmpty] = React.useState(false)
+      const [onlyBlocked, setOnlyBlocked] = React.useState(false)
+      const [onlyNoBody, setOnlyNoBody] = React.useState(false)
+      const projects = config.projects ?? []
+      const activeProject = projects.find(item => item.id === projectFilter)
+      const byStatus = React.useMemo(() => {
+        const keyword = query.trim().toLowerCase()
+        const map = new Map()
+        for (const column of state.statuses) map.set(column.id, [])
+        for (const task of state.tasks) {
+          if (onlyBlocked && (task.blocked ?? null) === null) continue
+          if (onlyNoBody && artifactsWithoutBody(task).length === 0) continue
+          if (typeFilter !== '' && (task.type ?? 'requirement') !== typeFilter) continue
+          if (projectFilter !== '' && task.project !== projectFilter) continue
+          if (iterationFilter !== '' && task.iteration !== iterationFilter) continue
+          if (serviceFilter !== '' && (task.service ?? '') !== serviceFilter) continue
+          if (requirementFilter !== '' && (task.requirementId ?? '') !== requirementFilter) continue
+          if (expertFilter !== '' && task.expert !== expertFilter && task.dispatch?.expert !== expertFilter) continue
+          if (keyword !== '' && !`${task.title} ${task.requirement} ${task.domain} ${task.id}`.toLowerCase().includes(keyword)) continue
+          if (!map.has(task.status)) map.set(task.status, [])
+          map.get(task.status).push(task)
+        }
+        const weight = { urgent: 0, normal: 1, relaxed: 2 }
+        for (const list of map.values()) {
+          list.sort((left, right) => (weight[left.priority] ?? 1) - (weight[right.priority] ?? 1) || right.updatedAt - left.updatedAt)
+        }
+        return map
+      }, [state, query, expertFilter, typeFilter, projectFilter, iterationFilter, serviceFilter, requirementFilter, onlyBlocked, onlyNoBody])
+      const total = [...byStatus.values()].reduce((sum, list) => sum + list.length, 0)
+      const bugCount = [...byStatus.values()].reduce((sum, list) => sum + list.filter(task => task.type === 'bug').length, 0)
+      const blockedCount = state.tasks.filter(task => (task.blocked ?? null) !== null).length
+      const noBodyCount = state.tasks.filter(task => artifactsWithoutBody(task).length > 0).length
+      const columns = state.statuses.filter(column => !hideEmpty || (byStatus.get(column.id) ?? []).length > 0)
+      const filtering = query !== '' || expertFilter !== '' || typeFilter !== '' || onlyBlocked || onlyNoBody || projectFilter !== '' || iterationFilter !== '' || serviceFilter !== '' || requirementFilter !== ''
+      return h('div', { style: { display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 } },
+        h('div', { className: 'ds-board-bar' },
+          h('span', { className: 'ds-search' },
+            h(TextField, {
+              className: 'ds-input', style: { width: 200, fontSize: 12 }, value: query, placeholder: '搜标题 / 需求 / 领域 / 编号',
+              onChange: event => setQuery(event.target.value),
+            }),
+          ),
+          projects.length > 0
+            ? h(SelectField, {
+              className: 'ds-select', style: { width: 150, fontSize: 12 }, value: projectFilter,
+              onChange: event => { setProjectFilter(event.target.value); setIterationFilter(''); setServiceFilter('') },
+            },
+              h('option', { value: '' }, `全部项目（${projects.filter(item => item.status !== 'archived').length}）`),
+              projects.map(item => h('option', { key: item.id, value: item.id }, `${item.key ? `${item.key} · ` : ''}${item.name}`)),
+            )
+            : null,
+          activeProject !== undefined && (activeProject.iterations ?? []).length > 0
+            ? h(SelectField, {
+              className: 'ds-select', style: { width: 132, fontSize: 12 }, value: iterationFilter,
+              onChange: event => setIterationFilter(event.target.value),
+            },
+              h('option', { value: '' }, '全部迭代'),
+              activeProject.iterations.map(item => h('option', { key: item.id, value: item.id }, item.name)),
+            )
+            : null,
+          activeProject !== undefined && (activeProject.services ?? []).length > 0
+            ? h(SelectField, {
+              className: 'ds-select', style: { width: 150, fontSize: 12 }, value: serviceFilter,
+              onChange: event => setServiceFilter(event.target.value),
+            },
+              h('option', { value: '' }, `全部服务（${(activeProject.services ?? []).length}）`),
+              activeProject.services.map(item => h('option', { key: item.id, value: item.id }, item.name || item.id)),
+            )
+            : null,
+          (state.requirements ?? []).length > 0
+            ? h(SelectField, {
+              className: 'ds-select', style: { width: 190, fontSize: 12 }, value: requirementFilter,
+              title: '只看某条需求下的卡（需求是整条链路的锚点）',
+              onChange: event => setRequirementFilter(event.target.value),
+            },
+              h('option', { value: '' }, `全部需求（${(state.requirements ?? []).length}）`),
+              (state.requirements ?? []).map(item =>
+                h('option', { key: item.id, value: item.id }, `${item.code || item.id} ${item.title}`)),
+            )
+            : null,
+          h(SelectField, {
+            className: 'ds-select', style: { width: 108, fontSize: 12 }, value: typeFilter,
+            onChange: event => setTypeFilter(event.target.value),
+          },
+            h('option', { value: '' }, '全部类型'),
+            ['requirement', 'bug', 'design', 'dev', 'test', 'ops'].map(value =>
+              h('option', { key: value, value }, TYPE_LABEL[value] ?? value)),
+          ),
+          h(SelectField, {
+            className: 'ds-select', style: { width: 158, fontSize: 12 }, value: expertFilter,
+            onChange: event => setExpertFilter(event.target.value),
+          },
+            h('option', { value: '' }, '全部专家'),
+            experts.filter(expert => expert.enabled !== false).map(expert =>
+              h('option', { key: expert.id, value: expert.id }, `${expert.emoji} ${expert.name}`)),
+          ),
+          h('label', { className: 'ds-row', style: { gap: 5, fontSize: 12, cursor: 'pointer', opacity: .8 } },
+            h(CheckField, { checked: hideEmpty, onChange: event => setHideEmpty(event.target.checked) }),
+            h('span', {}, '隐藏空列'),
+          ),
+          blockedCount > 0
+            ? h('label', {
+              className: 'ds-row', style: { gap: 5, fontSize: 12, cursor: 'pointer', color: '#c0392b' },
+              title: '只看被标记为阻塞的卡（它们停在原列，等人决定怎么继续）',
+            },
+              h(CheckField, { checked: onlyBlocked, onChange: event => setOnlyBlocked(event.target.checked) }),
+              h('span', {}, `只看阻塞 ${blockedCount}`),
+            )
+            : null,
+          noBodyCount > 0
+            ? h('label', {
+              className: 'ds-row', style: { gap: 5, fontSize: 12, cursor: 'pointer', color: '#e5484d' },
+              title: '只看有交付物但没写正文的卡（云盘文档里只有标题，等于没交付）',
+            },
+              h(CheckField, { checked: onlyNoBody, onChange: event => setOnlyNoBody(event.target.checked) }),
+              h('span', {}, `只看缺正文 ${noBodyCount}`),
+            )
+            : null,
+          filtering
+            ? h('button', {
+              className: 'ds-btn', style: { padding: '4px 10px' },
+              onClick: () => { setQuery(''); setExpertFilter(''); setTypeFilter(''); setOnlyBlocked(false); setOnlyNoBody(false); setProjectFilter(''); setIterationFilter(''); setServiceFilter(''); setRequirementFilter('') },
+            }, '清除筛选')
+            : null,
+          h('span', { className: 'ds-stat', style: { marginLeft: 'auto' } },
+            bugCount > 0 ? `${total} 张卡 · ${bugCount} 个缺陷` : `${total} 张卡 · ${columns.length} 列`),
+        ),
+        h('div', {
+          className: 'ds-board',
+          tabIndex: 0,
+          'aria-label': '看板列，左右滚动或用方向键',
+        },
+          columns.map(column => {
+            const tasks = byStatus.get(column.id) ?? []
+            const owner = ownerLabel(config, config.columns?.[column.id])
+            return h('div', {
+              className: 'ds-col', key: column.id, 'data-col': column.id, 'data-role': column.role,
+              onDragOver: event => { event.preventDefault(); if (event.dataTransfer !== null) event.dataTransfer.dropEffect = 'move'; event.currentTarget.setAttribute('data-drag-over', '1') },
+              onDragLeave: event => event.currentTarget.removeAttribute('data-drag-over'),
+              onDrop: event => { event.preventDefault(); event.currentTarget.removeAttribute('data-drag-over'); const id = event.dataTransfer === null ? '' : event.dataTransfer.getData('text/plain'); if (id === '' || id === undefined) return; const wip = Number(config.columns?.[column.id]?.wip) || 0; const filled = (byStatus.get(column.id) ?? []).length; if (wip > 0 && filled >= wip) { toast(`「${column.label}」已到 WIP 上限 ${wip}，先把列里的卡往前推`, 'error'); return } void onMove(id, column.id) },
+            },
+              h('div', { className: 'ds-col-head' },
+                h('div', { className: 'ds-col-title' },
+                  h('span', { className: 'ds-col-name' }, column.label),
+                  (() => {
+                    const wip = Number(config.columns?.[column.id]?.wip) || 0
+                    const over = wip > 0 && tasks.length > wip
+                    return h('span', { className: 'ds-count', 'data-zero': tasks.length === 0 ? '1' : '0', 'data-over': over ? '1' : '0', onClick: event => { event.stopPropagation(); if (typeof onWip === 'function') onWip(column.id, wip) }, title: wip > 0 ? `WIP 上限 ${wip} 张，当前 ${tasks.length} 张${over ? '（已超出，先消化再加）' : ''}` : '这一列没有设 WIP 上限' }, wip > 0 ? `${tasks.length}/${wip}` : String(tasks.length))
+                  })(),
+                ),
+                h('div', { className: 'ds-col-owner', 'data-empty': owner.length === 0 ? '1' : '0', title: '这一列的默认负责人：卡推进到本列后由它接手' },
+                  h('span', { className: 'ds-col-owner-label' }, '负责人'),
+                  owner.length === 0 ? h('span', { className: 'ds-col-owner-name' }, '未配置') : h('span', { className: 'ds-col-owner-name' }, owner),
+                ),
+              ),
+              h('div', { className: 'ds-col-body' },
+                tasks.length === 0
+                  ? h('div', { className: 'ds-empty' }, query !== '' || expertFilter !== '' ? '没有匹配的卡' : '暂无任务')
+                  : tasks.map(task => h(Card, {
+                      key: task.id,
+                      task,
+                      onOpen,
+                      config,
+                      requirements: state.requirements ?? [],
+                      onPickRequirement: id => setRequirementFilter(current => (current === id ? '' : id)),
+                      onPickProject: id => { setProjectFilter(current => (current === id ? '' : id)); setIterationFilter('') },
+                    })),
+              ),
+            )
+          }),
+        ),
+      )
+    }
+
+    // ---------------------------------------------------------------- drawer
+
+    // ------------------------------------------------------------ markdown
+
+    function inlineMd(text, prefix) {
+      const nodes = []
+      const pieces = String(text ?? '').split(/(`[^`]+`)/g)
+      pieces.forEach((piece, pieceIndex) => {
+        if (piece.length > 1 && piece.startsWith('`') && piece.endsWith('`')) {
+          nodes.push(h('code', { key: `${prefix}c${pieceIndex}` }, piece.slice(1, -1)))
+          return
+        }
+        const pattern = /\[([^\]]+)\]\(([^)\s]+)\)|\*\*([^*]+)\*\*|__([^_]+)__|\*([^*\n]+)\*|_([^_\n]+)_/g
+        let cursor = 0
+        let match
+        while ((match = pattern.exec(piece)) !== null) {
+          if (match.index > cursor) nodes.push(piece.slice(cursor, match.index))
+          const k = `${prefix}i${pieceIndex}-${match.index}`
+          if (match[1] !== undefined) nodes.push(h('a', { key: k, href: match[2], target: '_blank', rel: 'noreferrer' }, match[1]))
+          else if (match[3] !== undefined || match[4] !== undefined) nodes.push(h('strong', { key: k }, match[3] ?? match[4]))
+          else nodes.push(h('em', { key: k }, match[5] ?? match[6]))
+          cursor = match.index + match[0].length
+        }
+        if (cursor < piece.length) nodes.push(piece.slice(cursor))
+      })
+      return nodes
+    }
+
+    function renderMarkdown(source) {
+      const lines = String(source ?? '').replace(/\r\n?/g, '\n').split('\n')
+      const blocks = []
+      let index = 0
+      const k = at => `md${at}`
+      const isDivider = line => /^\s*\|?\s*:?-{2,}:?\s*(\|\s*:?-{2,}:?\s*)*\|?\s*$/.test(line)
+      const cells = line => line.trim().replace(/^\|/, '').replace(/\|$/, '').split('|').map(cell => cell.trim())
+      while (index < lines.length) {
+        const line = lines[index]
+        const at = index
+        if (/^\s*$/.test(line)) { index += 1; continue }
+        if (/^\s*```([\w+#-]*)\s*$/.test(line)) {
+          const body = []
+          index += 1
+          while (index < lines.length && !/^\s*```\s*$/.test(lines[index])) { body.push(lines[index]); index += 1 }
+          index += 1
+          blocks.push(h('pre', { key: k(at) }, h('code', null, body.join('\n'))))
+          continue
+        }
+        const heading = /^(#{1,6})\s+(.*)$/.exec(line)
+        if (heading !== null) {
+          const level = Math.min(6, heading[1].length + 2)
+          blocks.push(h(`h${level}`, { key: k(at) }, inlineMd(heading[2], k(at))))
+          index += 1
+          continue
+        }
+        if (/^\s*(-{3,}|\*{3,}|_{3,})\s*$/.test(line)) {
+          blocks.push(h('hr', { key: k(at) }))
+          index += 1
+          continue
+        }
+        if (/^\s*>/.test(line)) {
+          const body = []
+          while (index < lines.length && /^\s*>/.test(lines[index])) {
+            body.push(lines[index].replace(/^\s*>\s?/, ''))
+            index += 1
+          }
+          blocks.push(h('blockquote', { key: k(at) }, renderMarkdown(body.join('\n'))))
+          continue
+        }
+        if (line.includes('|') && index + 1 < lines.length && isDivider(lines[index + 1])) {
+          const head = cells(line)
+          index += 2
+          const rows = []
+          while (index < lines.length && lines[index].includes('|') && !/^\s*$/.test(lines[index])) {
+            rows.push(cells(lines[index]))
+            index += 1
+          }
+          blocks.push(h('table', { key: k(at) },
+            h('thead', null, h('tr', null, head.map((cell, i2) => h('th', { key: i2 }, inlineMd(cell, `${k(at)}h${i2}`))))),
+            h('tbody', null, rows.map((row, r) => h('tr', { key: r }, head.map((_, c2) => h('td', { key: c2 }, inlineMd(row[c2] ?? '', `${k(at)}r${r}c${c2}`)))))),
+          ))
+          continue
+        }
+        const bullet = /^\s*[-*+]\s+(.*)$/
+        if (bullet.test(line)) {
+          const items = []
+          while (index < lines.length && bullet.test(lines[index])) {
+            items.push(h('li', { key: index }, inlineMd(bullet.exec(lines[index])[1], `${k(at)}l${index}`)))
+            index += 1
+          }
+          blocks.push(h('ul', { key: k(at) }, items))
+          continue
+        }
+        const numbered = /^\s*\d+[.)]\s+(.*)$/
+        if (numbered.test(line)) {
+          const items = []
+          while (index < lines.length && numbered.test(lines[index])) {
+            items.push(h('li', { key: index }, inlineMd(numbered.exec(lines[index])[1], `${k(at)}n${index}`)))
+            index += 1
+          }
+          blocks.push(h('ol', { key: k(at) }, items))
+          continue
+        }
+        const paragraph = [line]
+        index += 1
+        while (index < lines.length) {
+          const next = lines[index]
+          if (/^\s*$/.test(next) || /^\s*```/.test(next) || /^(#{1,6})\s+/.test(next) || /^\s*>/.test(next)
+            || /^\s*[-*+]\s+/.test(next) || /^\s*\d+[.)]\s+/.test(next) || /^\s*(-{3,}|\*{3,}|_{3,})\s*$/.test(next)) break
+          paragraph.push(next)
+          index += 1
+        }
+        blocks.push(h('p', { key: k(at) }, inlineMd(paragraph.join('\n'), k(at))))
+      }
+      return blocks
+    }
+
+    /** @ 名单：专家 + 专家团，一处来源，评论框和快捷键都用它。 */
+    function buildRoster(config) {
+      const items = []
+      // 角色位放最前面：泳道默认按「产品经理 / 研发工程师」配，具体落到哪位
+      // 领域专家由卡片所属业务领域决定。
+      for (const role of ['product', 'architect', 'dev', 'qa']) {
+        items.push({
+          key: 'r:' + role,
+          name: '角色 · ' + (ROLE_LABEL[role] ?? role),
+          emoji: '🎯',
+          hint: '按角色位派单，具体人按卡片业务领域挑',
+          group: '角色位',
+        })
+      }
+      for (const expert of config?.experts ?? []) {
+        if (expert.enabled === false) continue
+        items.push({
+          key: 'e:' + expert.id,
+          name: expert.name,
+          emoji: expert.emoji ?? '🤖',
+          hint: [expert.description, expert.domain ? `${expert.domain} · ${ROLE_LABEL[expert.role] ?? expert.role}` : ROLE_LABEL[expert.role] ?? expert.role].filter(Boolean).join(' · '),
+          group: '专家',
+        })
+      }
+      for (const team of config?.teams ?? []) {
+        items.push({
+          key: 't:' + team.id,
+          name: team.name,
+          emoji: team.emoji ?? '👥',
+          hint: `团长 ${config?.experts?.find(expert => expert.id === team.lead)?.name ?? '未设'} · ${(team.members ?? []).length} 位成员`,
+          group: '专家团',
+        })
+      }
+      return items
+    }
+
+    function filterRoster(roster, query) {
+      const needle = String(query ?? '').trim().toLowerCase()
+      if (needle === '') return roster
+      return roster.filter(item => `${item.name} ${item.hint}`.toLowerCase().includes(needle))
+    }
+
+    /** @ 选择器：一列可搜的名单，代替原来平铺的一堆按钮。 */
+    function MentionPicker({ roster, query, active, onQuery, onActive, onPick, onClose }) {
+      const hits = filterRoster(roster, query)
+      const move = delta => {
+        if (hits.length === 0) return
+        onActive((active + delta + hits.length) % hits.length)
+      }
+      const onKeyDown = event => {
+        if (event.key === 'ArrowDown') { event.preventDefault(); move(1) }
+        else if (event.key === 'ArrowUp') { event.preventDefault(); move(-1) }
+        else if (event.key === 'Enter') { event.preventDefault(); if (hits[active] !== undefined) onPick(hits[active].name) }
+        else if (event.key === 'Escape') { event.preventDefault(); onClose() }
+      }
+      return h('div', { className: 'ds-mention-pop', onKeyDown },
+        h(TextField, {
+          className: 'ds-mention-search', autoFocus: true, value: query,
+          placeholder: '搜专家或专家团，Enter 选中，Esc 关闭',
+          onChange: event => onQuery(event.target.value),
+        }),
+        h('div', { className: 'ds-mention-list' },
+          hits.length === 0
+            ? h('div', { className: 'ds-mention-empty' }, '没有匹配的专家或专家团')
+            : hits.map((item, index) => {
+              const first = index === 0 || hits[index - 1].group !== item.group
+              return [
+                first ? h('div', { key: item.group, className: 'ds-mention-group' }, item.group) : null,
+                h('button', {
+                  key: item.key, className: 'ds-mention-item', 'data-active': index === active ? '1' : '0',
+                  onMouseEnter: () => onActive(index),
+                  onClick: () => onPick(item.name),
+                }, h('span', null, item.emoji), h('span', null, item.name), h('span', { className: 'ds-hint' }, item.hint)),
+              ]
+            }).flat().filter(Boolean),
+        ),
+      )
+    }
+
+    function Drawer({ task, state, onClose, onChanged }) {
+      const [busy, setBusy] = React.useState(false)
+      const [error, setError] = React.useState(null)
+      const [comment, setComment] = React.useState('')
+      const [notice, setNotice] = React.useState(null)
+      const [picked, setPicked] = React.useState('')
+      const bodyRef = React.useRef(null)
+      // Esc 关抽屉：抽屉占满右侧，没有它只能去点右上角的小 ×。
+      React.useEffect(() => {
+        const onKey = event => { if (event.key === 'Escape') onClose() }
+        window.addEventListener('keydown', onKey)
+        return () => window.removeEventListener('keydown', onKey)
+      }, [onClose])
+      const [plan, setPlan] = React.useState({
+        project: task.project ?? '',
+        iteration: task.iteration ?? '',
+        service: task.service ?? '',
+        owner: task.owner ?? '',
+        due: toDateInput(task.dueAt),
+        releaseId: task.releaseId ?? '',
+      })
+      const [newItem, setNewItem] = React.useState('')
+      const [artifact, setArtifact] = React.useState({ kind: 'doc', title: '', ref: '', content: '' })
+      const [artEdit, setArtEdit] = React.useState(null)
+      const [artRead, setArtRead] = React.useState(null)
+      const [newCase, setNewCase] = React.useState({ title: '', expected: '', steps: '', stepsText: '', type: 'functional', priority: 'p2', preconditions: '' })
+      const [caseRun, setCaseRun] = React.useState({ busy: false, note: '' })
+      const [caseGen, setCaseGen] = React.useState({ busy: false, note: '' })
+      const [codingDraft, setCodingDraft] = React.useState(null)
+      const [reviewNote, setReviewNote] = React.useState('')
+      const coding = task.coding ?? null
+      const worktree = task.worktree ?? null
+      const [worktreeMsg, setWorktreeMsg] = React.useState('')
+      const [verify, setVerify] = React.useState({ busy: false, line: '', ok: null })
+      const cases = task.cases ?? []
+      const [gate, setGate] = React.useState(null)
+      const [gateNote, setGateNote] = React.useState('')
+      const casePass = cases.filter(item => item.result === 'pass').length
+      const caseFail = cases.filter(item => item.result === 'fail').length
+      const caseRest = cases.length - casePass - caseFail
+      const caseSummary = cases.length === 0
+        ? ''
+        : `${cases.length} 条 · ✅ 通过 ${casePass} · ❌ 不通过 ${caseFail}${caseRest > 0 ? ` · ⬜ 没跑 ${caseRest}` : ''}`
+      const checklist = task.checklist ?? []
+      const doneCount = checklist.filter(item => item.done).length
+      const artifacts = task.artifacts ?? []
+      const comments = task.comments ?? []
+      const [pane, setPane] = React.useState('overview')
+      React.useEffect(() => { setPane('overview') }, [task.id])
+      // 切页签时把内容滚回顶部，否则从长页面切到「讨论」会停在中间，看起来像只显示了半截。
+      React.useEffect(() => {
+        const node = bodyRef.current
+        if (node !== null) node.scrollTop = 0
+      }, [pane, task.id])
+      const hideWhen = name => (pane === name ? undefined : { display: 'none' })
+      const tabs = [
+        { id: 'overview', label: '概览', hint: '标题、状态、负责人、阻塞原因与关键时间' },
+        { id: 'content', label: '内容', hint: '需求正文与验收标准，支持 Markdown' },
+        { id: 'plan', label: '计划', hint: '项目、迭代、服务、挂哪条需求、优先级' },
+        { id: 'deliver', label: '交付物', count: artifacts.length > 0 ? artifacts.length : '', hint: '文档 / MR / 用例 / 报告；空的交付物会被准出拦下' },
+        { id: 'test', label: '测试', count: cases.length > 0 ? `${casePass}/${cases.length}` : (checklist.length > 0 ? `☑${doneCount}/${checklist.length}` : ''), hint: '验收清单、用例执行记录；失败的用例会自动开缺陷' },
+        { id: 'coding', label: '执行记录', count: coding === null ? '' : (coding.review?.status === 'approved' ? '✓ 已评审' : ''), hint: 'AI 的分支、提交、改动文件；可以「核对代码事实」' },
+        { id: 'discuss', label: '讨论', count: comments.length > 0 ? comments.length : '', hint: '评论；在评论里 @ 专家或专家团即派单' },
+      ]
+      const [draft, setDraft] = React.useState({ title: task.title, requirement: task.requirement, gitlabIssue: task.gitlabIssue, gitlabMR: task.gitlabMR?.url ?? '', pointId: task.pointId ?? '' })
+
+      const push = async (patch) => {
+        setBusy(true); setError(null)
+        try {
+          await api('/task/update', { id: task.id, patch })
+          await onChanged()
+        } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)) } finally { setBusy(false) }
+      }
+      // AI 失败后：清掉失败计数与自动挂的阻塞，让派单器重新接手。
+      const retryAgent = async () => {
+        setBusy(true); setError(null); setNotice(null)
+        try {
+          await api('/task/agent/retry', { id: task.id, by: currentUser() })
+          setNotice('已清掉失败计数，下一轮派单会重新接手')
+          await onChanged()
+        } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)) } finally { setBusy(false) }
+      }
+      const checkGate = async () => {
+        setBusy(true); setError(null)
+        try {
+          const out = await api('/task/gate', { id: task.id })
+          setGate(out.gate)
+        } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)) } finally { setBusy(false) }
+      }
+      const signOff = async (action) => {
+        setBusy(true); setError(null)
+        try {
+          const out = await api('/task/signoff', { id: task.id, action, note: gateNote, by: currentUser() })
+          setGateNote('')
+          setGate(out.gate ?? null)
+          await onChanged()
+        } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)) } finally { setBusy(false) }
+      }
+      const send = async () => {        if (comment.trim().length === 0) return
+        setBusy(true); setError(null)
+        try {
+          const out = await api('/task/comment', { id: task.id, body: comment, author: '人', kind: 'human' })
+          const told = (out.mentions ?? []).map(mention => mention.label ?? mention.id)
+          setComment('')
+          if (told.length > 0) setError(null)
+          setNotice(told.length > 0 ? `已通知 ${told.join('、')}` : null)
+          await onChanged()
+        } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)) } finally { setBusy(false) }
+      }
+      const mention = name => setComment(previous => previous.replace(/\s*$/, previous.length === 0 ? '' : ' ') + `@${name} `)
+      // 打「@」就地补全：只在光标前最后一个词是 @开头时给建议，选中后替换掉这半截词。
+      const [picker, setPicker] = React.useState(null)
+      const [active, setActive] = React.useState(0)
+      const roster = React.useMemo(() => buildRoster(state.config), [state.config])
+      const hits = picker === null ? [] : filterRoster(roster, picker.query)
+      const refreshPicker = (value, caret) => {
+        const head = value.slice(0, caret)
+        const hit = /@([^\s@]{0,24})$/.exec(head)
+        if (hit === null) { setPicker(previous => (previous !== null && previous.inline ? null : previous)); return }
+        setPicker({ query: hit[1], from: caret - hit[0].length, inline: true })
+        setActive(0)
+      }
+      const pick = name => {
+        const current = picker
+        if (current !== null && current.inline && current.from !== null) {
+          const from = current.from
+          setComment(value => value.slice(0, from) + `@${name} `)
+        } else {
+          mention(name)
+        }
+        setPicker(null)
+      }
+      const remove = async () => {
+        if (!(await confirmDialog(`删除任务「${task.title}」？`, { title: '删除任务', danger: true, okText: '删除' }))) return
+        setBusy(true)
+        try { await api('/task/delete', { id: task.id }); onClose(); await onChanged() }
+        catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)) } finally { setBusy(false) }
+      }
+
+      const runAgent = async () => {
+        setBusy(true); setError(null)
+        try { await api('/agents/run', { id: task.id, expert: picked }); await onChanged() }
+        catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)) } finally { setBusy(false) }
+      }
+
+      const blocked = task.blocked ?? null
+      const markBlocked = async () => {
+        const reason = await promptDialog('卡在哪了？（写清楚，之后要据此决定怎么继续）', { title: '标记阻塞', defaultValue: blocked?.reason ?? '', placeholder: '比如：等支付网关联调账号' })
+        if (reason === null) return
+        if (reason.trim() === '') { setError('阻塞原因至少写一句话'); return }
+        setBusy(true); setError(null); setNotice(null)
+        try { await api('/task/block', { id: task.id, reason: reason.trim() }); await onChanged() }
+        catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)) } finally { setBusy(false) }
+      }
+      const resolveBlocked = async (action, expert) => {
+        if (action === 'advance' && !(await confirmDialog('解除阻塞并把卡推到下一列？下一列的 AI 会立刻接手。', { title: '解除阻塞', okText: '解除并推进' }))) return
+        setBusy(true); setError(null); setNotice(null)
+        try {
+          await api('/task/unblock', { id: task.id, action, expert })
+          setNotice(action === 'advance'
+            ? '已解除阻塞，推进到下一列'
+            : action === 'assign'
+              ? '已解除阻塞，已交给指定专家'
+              : action === 'clear'
+                ? '已解除阻塞（暂不派单）'
+                : '已解除阻塞，已交回本列负责人')
+          await onChanged()
+        } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)) } finally { setBusy(false) }
+      }
+      const stopAgent = async () => {
+        setBusy(true); setError(null)
+        try { await api('/agents/stop', { id: task.id }); await onChanged() }
+        catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)) } finally { setBusy(false) }
+      }
+
+      const savePlan = async () => {
+        await push({
+          project: plan.project,
+          iteration: plan.project === '' ? '' : plan.iteration,
+          service: plan.project === '' ? '' : (plan.service ?? ''),
+          owner: plan.owner,
+          dueAt: fromDateInput(plan.due),
+          releaseId: plan.releaseId ?? '',
+        })
+      }
+      const addChecklist = async () => {
+        const text = newItem.trim()
+        if (text === '') return
+        setBusy(true); setError(null)
+        try { await api('/task/checklist', { id: task.id, action: 'add', text }); setNewItem(''); await onChanged() }
+        catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)) } finally { setBusy(false) }
+      }
+      const toggleChecklist = async (item) => {
+        setBusy(true); setError(null)
+        try {
+          await api('/task/checklist', { id: task.id, action: 'toggle', itemId: item.id, done: !item.done, note: item.done ? '' : undefined })
+          await onChanged()
+        } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)) } finally { setBusy(false) }
+      }
+      const removeChecklist = async (item) => {
+        setBusy(true); setError(null)
+        try { await api('/task/checklist', { id: task.id, action: 'remove', itemId: item.id }); await onChanged() }
+        catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)) } finally { setBusy(false) }
+      }
+      const addCase = async () => {
+        const title = newCase.title.trim()
+        if (title === '') return
+        setBusy(true); setError(null)
+        try {
+          const steps = parseSteps(newCase.steps)
+          const item = { title, expected: newCase.expected.trim() }
+          if (steps.length > 0) item.http = { steps }
+          if (newCase.type !== undefined && newCase.type !== 'functional') item.type = newCase.type
+          if (newCase.priority !== undefined && newCase.priority !== 'p2') item.priority = newCase.priority
+          if (String(newCase.preconditions ?? '').trim() !== '') item.preconditions = String(newCase.preconditions).trim()
+          if (String(newCase.stepsText ?? '').trim() !== '') {
+            item.steps = String(newCase.stepsText).split('\n').map(line => line.trim()).filter(line => line !== '')
+          }
+          await api('/task/case', { id: task.id, action: 'add', cases: [item] })
+          setNewCase({ title: '', expected: '', steps: '', stepsText: '', type: 'functional', priority: 'p2', preconditions: '' })
+          await onChanged()
+        } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)) } finally { setBusy(false) }
+      }
+      const setCaseResult = async (item, result) => {
+        setBusy(true); setError(null); setNotice(null)
+        try {
+          const json = await api('/task/case', { id: task.id, action: 'update', caseId: item.id, result })
+          const bug = json?.bug ?? null
+          if (result === 'fail' && bug !== null) {
+            const label = String(bug.code ?? '') !== '' ? bug.code : bug.id
+            setNotice(`用例判失败，已自动登记缺陷 ${label}（挂在同一条需求下，父任务指向本卡）。`)
+          } else if (json?.error) {
+            setNotice(`用例已更新，但自动建缺陷失败：${json.error}`)
+          }
+          await onChanged()
+        } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)) } finally { setBusy(false) }
+      }
+      const runCases = async caseId => {
+        setCaseRun({ busy: true, note: '' })
+        setError(null)
+        try {
+          const out = await api('/task/case/run', { id: task.id, caseId, by: '我在界面里跑的' })
+          const run = out?.run ?? {}
+          const made = (out?.bugs ?? []).filter(item => item.created === true).length
+          const parts = [`跑了 ${run.total ?? 0} 条：通过 ${run.passed ?? 0}，不通过 ${run.failed ?? 0}`]
+          if (made > 0) parts.push(`自动开缺陷 ${made} 张`)
+          setCaseRun({ busy: false, note: parts.join('，') })
+          await onChanged()
+        } catch (cause) {
+          setCaseRun({ busy: false, note: cause instanceof Error ? cause.message : String(cause) })
+        }
+      }
+      const generateCases = async () => {
+        setCaseGen({ busy: true, note: '' })
+        setError(null)
+        try {
+          const out = await api('/task/cases/generate', { id: task.id })
+          const note = out?.added > 0
+            ? `已生成 ${out.added} 条用例，这张卡现在共 ${out.total} 条`
+            : `没生成用例：${out?.reason ?? '没有可用的验收条件'}`
+          setCaseGen({ busy: false, note })
+          await onChanged()
+        } catch (cause) {
+          setCaseGen({ busy: false, note: cause instanceof Error ? cause.message : String(cause) })
+        }
+      }
+      const removeCase = async (item) => {
+        setBusy(true); setError(null)
+        try { await api('/task/case', { id: task.id, action: 'remove', caseId: item.id }); await onChanged() }
+        catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)) } finally { setBusy(false) }
+      }
+      const toggleFlaky = async (item) => {
+        setBusy(true); setError(null); setNotice(null)
+        try {
+          await api('/task/case', { id: task.id, action: 'update', caseId: item.id, flaky: item.flaky !== true })
+          setNotice(item.flaky === true ? '已取消不稳定标记' : '已标记为不稳定用例：以后失败不会自动开缺陷')
+          await onChanged()
+        } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)) } finally { setBusy(false) }
+      }
+      const addArtifact = async () => {
+        const title = artifact.title.trim()
+        if (title === '') return
+        setBusy(true); setError(null); setNotice(null)
+        try {
+          const json = await api('/task/artifact', { id: task.id, action: 'add', artifact: { kind: artifact.kind, title, ref: artifact.ref.trim(), content: artifact.content, status: 'delivered' } })
+          setArtifact({ kind: artifact.kind, title: '', ref: '', content: '' })
+          setNotice('已登记，正在归档到飞书云盘…')
+          await onChanged()
+          try {
+            const synced = await api('/task/artifact/sync', { id: task.id })
+            const first = (synced?.written ?? [])[0]
+            setNotice(first?.doc?.url ? `已归档到飞书云盘：${first.doc.url}` : '归档失败，稍后可点「同步到云盘」重试。')
+            await onChanged()
+          } catch { setNotice('登记成功，但归档失败：可点「同步到云盘」重试。') }
+        } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)) } finally { setBusy(false) }
+      }
+      const saveArtifactContent = async (item) => {
+        if (artEdit === null) return
+        setBusy(true); setError(null); setNotice(null)
+        try {
+          await api('/task/artifact', { id: task.id, action: 'update', artifactId: item.id, artifact: { content: artEdit.content } })
+          setArtEdit(null)
+          await onChanged()
+          try {
+            const synced = await api('/task/artifact/sync', { id: task.id, artifactId: item.id })
+            const doc = (synced?.written ?? [])[0]?.doc
+            setNotice(doc?.url ? `正文已更新并同步：${doc.url}` : '正文已保存，归档失败可再点「更新」。')
+            await onChanged()
+          } catch { setNotice('正文已保存，归档失败可再点「更新」。') }
+        } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)) } finally { setBusy(false) }
+      }
+      const syncArtifactTo = async (item) => {
+        setBusy(true); setError(null); setNotice(null)
+        try {
+          const json = await api('/task/artifact/sync', { id: task.id, artifactId: item.id })
+          const doc = (json?.written ?? [])[0]?.doc
+          const failed = (json?.errors ?? [])[0]
+          setNotice(doc?.url ? `已归档：${doc.url}` : `归档失败：${failed?.error ?? '未知原因'}`)
+          await onChanged()
+        } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)) } finally { setBusy(false) }
+      }
+      const syncAllArtifacts = async () => {
+        setBusy(true); setError(null); setNotice(null)
+        try {
+          const json = await api('/task/artifact/sync', { id: task.id })
+          const ok = (json?.written ?? []).length
+          const bad = (json?.errors ?? []).length
+          setNotice(`已归档 ${ok} 件${bad > 0 ? `，${bad} 件失败：${json.errors[0]?.error ?? ''}` : '。'}`)
+          await onChanged()
+        } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)) } finally { setBusy(false) }
+      }
+      const setArtifactStatus = async (item, status) => {
+        setBusy(true); setError(null)
+        try { await api('/task/artifact', { id: task.id, action: 'update', artifactId: item.id, artifact: { status } }); await onChanged() }
+        catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)) } finally { setBusy(false) }
+      }
+      const removeArtifact = async (item) => {
+        setBusy(true); setError(null)
+        try { await api('/task/artifact', { id: task.id, action: 'remove', artifactId: item.id }); await onChanged() }
+        catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)) } finally { setBusy(false) }
+      }
+
+      const openCoding = () => setCodingDraft({
+        agent: coding?.agent ?? '',
+        model: coding?.model ?? '',
+        branch: coding?.branch ?? '',
+        context: coding?.context ?? '',
+        total: String(coding?.unitTests?.total ?? 0),
+        passed: String(coding?.unitTests?.passed ?? 0),
+      })
+      const worktreeAction = async (action) => {
+        if (action === 'remove' && !(await confirmDialog('回收 worktree 会删掉这个目录和分支，未合并的改动会丢，确定？', { title: '回收 worktree', danger: true, okText: '回收' }))) return
+        setBusy(true); setError(null); setWorktreeMsg('')
+        try {
+          const result = await api('/task/worktree', { id: task.id, action })
+          if (action === 'list') setWorktreeMsg(String(result.output ?? '').replace(/\s+/g, ' ').slice(0, 400) || '（没有 worktree）')
+          else if (result.ok === true) setWorktreeMsg(action === 'create' ? '已建好 worktree' : '已回收')
+          else setWorktreeMsg(result.skipped || result.result?.error || '没成功')
+          if (action !== 'list') await onChanged()
+        } catch (cause) { setWorktreeMsg(cause instanceof Error ? cause.message : String(cause)) } finally { setBusy(false) }
+      }
+      const saveCoding = async () => {
+        if (codingDraft === null) return
+        const total = Math.max(0, Number(codingDraft.total) || 0)
+        const passed = Math.min(total, Math.max(0, Number(codingDraft.passed) || 0))
+        setBusy(true); setError(null)
+        try {
+          await api('/task/coding', {
+            id: task.id, action: 'update',
+            coding: {
+              agent: codingDraft.agent.trim(), model: codingDraft.model.trim(), branch: codingDraft.branch.trim(),
+              context: codingDraft.context, unitTests: { total, passed },
+            },
+          })
+          setCodingDraft(null)
+          await onChanged()
+        } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)) } finally { setBusy(false) }
+      }
+      const reviewCoding = async (status) => {
+        setBusy(true); setError(null)
+        try { await api('/task/coding', { id: task.id, action: 'review', status, note: reviewNote.trim() }); setReviewNote(''); await onChanged() }
+        catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)) } finally { setBusy(false) }
+      }
+      const mergeCoding = async () => {
+        setBusy(true); setError(null)
+        try { await api('/task/coding', { id: task.id, action: 'merge' }); await onChanged() }
+        catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)) } finally { setBusy(false) }
+      }
+      // 核对代码事实：拿 worktree 里的 git 记录，比 agent 自报的提交/文件/分支。
+      const verifyCoding = async () => {
+        setVerify({ busy: true, line: '', ok: null })
+        try {
+          const result = await api('/task/coding/verify', { id: task.id })
+          const report = result.report ?? {}
+          if (report.skipped !== undefined) setVerify({ busy: false, line: String(report.skipped), ok: false })
+          else setVerify({ busy: false, line: String(result.line ?? ''), ok: report.ok === true })
+          await onChanged()
+        } catch (cause) {
+          setVerify({ busy: false, line: cause instanceof Error ? cause.message : String(cause), ok: false })
+        }
+      }
+
+      const columnLabel = (state.statuses.find(item => item.id === task.status) ?? {}).label ?? task.status
+      const assignee = task.dispatch?.expert ? ownerLabel(state.config ?? {}, { kind: 'expert', id: task.dispatch.expert }) : ''
+      return h('div', { className: 'ds-drawer-wrap', onClick: event => { if (event.target === event.currentTarget) onClose() } },
+        h('div', { className: 'ds-drawer' },
+          h('div', { className: 'ds-dw-head' },
+            h('div', { className: 'ds-grow' },
+              h('div', { className: 'ds-dw-title' }, task.title),
+              h('div', { className: 'ds-dw-sub' }, `${task.id} · ${columnLabel}${assignee === '' ? '' : ` · ${assignee}`} · 更新 ${fmtTime(task.updatedAt)}`),
+            ),
+            h('button', { className: 'ds-btn', onClick: onClose }, '关闭'),
+            (Number(task.agentFailures) || 0) > 0
+              ? tipOf(
+                task.retryAt > 0 ? `下一次自动重试：${fmtTime(task.retryAt)}` : '失败次数已用完，重置后可以重新派单',
+                h('button', {
+                  className: 'ds-btn',
+                  disabled: busy,
+                  'data-agent-failed': '1',
+                  onClick: () => void retryAgent(),
+                }, `AI 失败 ${Number(task.agentFailures) || 0} 次 · 重新派单`),
+              )
+              : null,
+          ),
+          (kit('TabsBar') !== null
+            ? h(kit('TabsBar'), {
+                items: tabs.map(tab => ({ id: tab.id, label: tab.label, count: tab.count })),
+                value: pane,
+                onChange: next => setPane(next),
+                className: 'ds-dw-shadcn-tabs',
+              })
+            : h('div', { className: 'ds-dw-tabs' },
+              tabs.map(tab => h('button', {
+                key: tab.id, className: 'ds-dw-tab', 'data-on': pane === tab.id ? '1' : '0',
+                onClick: () => setPane(tab.id),
+              }, tab.label, tab.count === '' || tab.count === undefined || tab.count === null ? null : h('span', { className: 'ds-dw-tab-count' }, String(tab.count)))),
+            )),
+          h('div', { className: 'ds-dw-body', ref: bodyRef, 'data-pane': pane },
+          h('div', { className: 'ds-meta' },
+            h(ChipField, { className: 'ds-chip' }, task.id),
+            task.type === 'bug'
+              ? h(ChipField, { className: 'ds-chip ds-chip-bug', 'data-sev': task.severity ?? 'p2' }, `BUG ${String(task.severity || 'p2').toUpperCase()}`)
+              : h(ChipField, { className: 'ds-chip' }, TYPE_LABEL[task.type] ?? task.type),
+            h(ChipField, { className: 'ds-chip' }, `当前列：${state.statuses.find(c => c.id === task.status)?.label ?? task.status}`),
+            h(ChipField, {
+              className: 'ds-chip',
+              'data-role': (task.dispatch?.state === 'running' && task.dispatch?.expert) ? undefined : task.role,
+              'data-open': cardOwner(task, state.config ?? {}).label === '未指派' ? '1' : '0',
+              title: cardOwner(task, state.config ?? {}).note,
+            }, `负责：${cardOwner(task, state.config ?? {}).label}`),
+            task.type === 'bug'
+              ? h(SelectField, {
+                className: 'ds-select', style: { height: 20, fontSize: 11, padding: '0 4px' }, value: task.severity || 'p2',
+                title: '严重级别', onChange: event => void push({ severity: event.target.value }),
+              }, ['p0', 'p1', 'p2', 'p3'].map(value => h('option', { key: value, value }, SEVERITY_LABEL[value])))
+              : null,
+            h(ChipField, { className: 'ds-chip' }, PRIORITY_LABEL[task.priority] ?? task.priority),
+            h(ChipField, {
+              className: 'ds-chip', title: '点一下改业务领域（决定派给同领域专家）', style: { cursor: 'pointer' },
+              onClick: async () => {
+                const next = await promptDialog('业务领域（如 支付 / 风控 / 会员），留空表示不限', { title: '改业务领域', defaultValue: task.domain || '' })
+                if (next !== null) void push({ domain: next })
+              },
+            }, task.domain ? `领域：${task.domain}` : '领域：未标'),
+            h('span', {}, `创建 ${fmtTime(task.createdAt)}`),
+            h('span', {}, `更新 ${fmtTime(task.updatedAt)}`),
+          ),
+          h('div', { className: 'ds-dw-cols' },
+            h('div', { className: 'ds-dw-col' },
+          h('div', { className: 'ds-sec', style: hideWhen('overview') },
+            h('div', { className: 'ds-sec-head' }, '推进到', h('span', { className: 'ds-hint' }, '点一下就会移动卡片，并触发对应列的 AI')),
+            h('div', { className: 'ds-listrow-actions' }, (() => {
+              const order = state.statuses
+              const currentIndex = order.findIndex(item => item.id === task.status)
+              const forward = order[currentIndex + 1] ?? null
+              const rest = order.filter(item => item.id !== task.status && (forward === null || item.id !== forward.id))
+              const later = rest.filter(item => order.findIndex(o => o.id === item.id) > currentIndex)
+              const earlier = rest.filter(item => order.findIndex(o => o.id === item.id) < currentIndex)
+              return [
+                forward === null
+                  ? null
+                  : h('button', {
+                    key: 'next', className: 'ds-btn ds-btn-primary', disabled: busy,
+                    title: '推进到下一列，下一列的 AI 会接手',
+                    onClick: () => void push({ status: forward.id, role: forward.role }),
+                  }, `推进到「${forward.label}」`),
+                rest.length === 0 ? null : h(SelectField, {
+                  key: 'other', className: 'ds-select', value: '', disabled: busy,
+                  onChange: event => {
+                    const id = event.target.value
+                    if (id === '') return
+                    const target = order.find(item => item.id === id)
+                    if (target !== undefined) void push({ status: target.id, role: target.role })
+                  },
+                },
+                  h('option', { value: '' }, `其他状态（${rest.length}）`),
+                  ...later.map(item => h('option', { key: item.id, value: item.id }, `→ ${item.label}`)),
+                  ...earlier.map(item => h('option', { key: item.id, value: item.id }, `← ${item.label}（退回，AI 会重跑）`)),
+                ),
+              ].filter(Boolean)
+            })()),
+          ),
+          h('div', { className: 'ds-sec', style: hideWhen('overview') },
+            h('div', { className: 'ds-sec-head' }, '准出检查',
+              h('span', { className: 'ds-hint' }, '进「已完成」之前必须过这一关：清单全勾、没有失败用例、不在阻塞、有人签字')),
+            h('div', { className: 'ds-sec-body' },
+              gate === null
+                ? h('div', { className: 'ds-row', style: { gap: 8, alignItems: 'center' } },
+                    h('button', { className: 'ds-btn', onClick: () => void checkGate() }, '检查一下'),
+                    h('span', { className: 'ds-hint' }, '点一下看这张卡还差什么才能收口'))
+                : h('div', { className: 'ds-gate', 'data-ready': gate.ready ? '1' : '0' },
+                    h('div', { className: 'ds-gate-head' },
+                      h('b', null, gate.ready ? '✅ 可以进「已完成」' : `⛔ 还差 ${gate.blockers.length} 项`),
+                      h('button', { className: 'ds-btn ds-btn-ghost', onClick: () => void checkGate() }, '重新检查')),
+                    (gate.blockers ?? []).map(line => h('div', { key: line, className: 'ds-gate-item', 'data-kind': 'block' }, `⛔ ${line}`)),
+                    (gate.warnings ?? []).map(line => h('div', { key: line, className: 'ds-gate-item', 'data-kind': 'warn' }, `⚠ ${line}`)),
+                    (gate.blockers ?? []).length === 0 && (gate.warnings ?? []).length === 0
+                      ? h('div', { className: 'ds-hint' }, '没有遗留项。') : null),
+              task.signoff === null || task.signoff === undefined
+                ? h('div', { className: 'ds-row', style: { gap: 8, alignItems: 'center', flexWrap: 'wrap' } },
+                    h(TextField, {
+                      className: 'ds-input',
+                      style: { flex: '1 1 260px' },
+                      value: gateNote,
+                      placeholder: '验收签字：验了什么、遗留什么',
+                      onChange: event => setGateNote(event.target.value),
+                    }),
+                    h('button', { className: 'ds-btn ds-btn-primary', disabled: busy, onClick: () => void signOff('sign') }, '签字确认'))
+                : h('div', { className: 'ds-gate-sign' },
+                    h('span', null, `✍ ${task.signoff.by} 于 ${new Date(task.signoff.at).toLocaleString()} 签字：${task.signoff.note}`),
+                    h('button', { className: 'ds-btn ds-btn-ghost', onClick: () => void signOff('clear') }, '取消签字')),
+            ),
+          ),
+          h('div', { className: 'ds-sec', style: hideWhen('overview') },
+            h('div', { className: 'ds-sec-head' }, '阻塞',
+              h('span', { className: 'ds-hint' }, '卡住了打个标，卡留在本列停住，不会被自动往下派；怎么继续由人定')),
+            blocked === null
+              ? h('div', { className: 'ds-sec-body' },
+                h('div', { className: 'ds-hint' }, '缺信息、缺权限、等外部依赖、测试过不去——都可以标阻塞，别硬编。'),
+                h('div', { className: 'ds-listrow-actions' },
+                  h('button', { className: 'ds-btn ds-btn-ghost', 'data-warn': '1', disabled: busy, onClick: () => void markBlocked() }, '⛔ 标记阻塞'),
+                ),
+              )
+              : h('div', { className: 'ds-sec-body' },
+                h('div', { className: 'ds-blocked-box' },
+                  h('div', { style: { fontWeight: 600 } }, `⛔ ${blocked.reason || '未填写原因'}`),
+                  h('div', { className: 'ds-hint' }, `${blocked.by || '人'} · ${fmtTime(blocked.at)} · 停在「${state.statuses.find(c => c.id === task.status)?.label ?? task.status}」`),
+                ),
+                h('div', { className: 'ds-hint' }, '怎么继续：'),
+                h('div', { className: 'ds-listrow-actions' },
+                  h('button', { className: 'ds-btn ds-btn-primary', disabled: busy, onClick: () => void resolveBlocked('resume') }, '继续，交本列负责人'),
+                  h('button', { className: 'ds-btn', disabled: busy, onClick: () => void resolveBlocked('advance') }, '推进到下一列'),
+                  h(SelectField, {
+                    className: 'ds-select', style: { width: 190 }, value: picked, disabled: busy,
+                    onChange: e => setPicked(e.target.value),
+                  },
+                    h('option', { value: '' }, '选一个专家…'),
+                    (state.config?.experts ?? []).filter(expert => expert.enabled !== false).map(expert =>
+                      h('option', { key: expert.id, value: expert.id }, `${expert.emoji} ${expert.name}`)),
+                  ),
+                  h('button', { className: 'ds-btn', disabled: busy || picked === '', onClick: () => void resolveBlocked('assign', picked) }, '改派给他'),
+                  h('button', { className: 'ds-btn ds-btn-ghost', disabled: busy, onClick: () => void resolveBlocked('clear') }, '只解除，先不派'),
+                ),
+              ),
+          ),
+          h('div', { className: 'ds-sec', style: hideWhen('overview') },
+            h('div', { className: 'ds-sec-head' }, 'AI 处理', h('span', { className: 'ds-hint' }, '默认用本列负责人；也可以临时换人')),
+            h('div', { className: 'ds-sec-body' },
+              h('div', { className: 'ds-hint' },
+                task.dispatch?.state === 'running'
+                  ? `${ownerLabel(state.config ?? {}, { kind: 'expert', id: task.dispatch.expert ?? task.dispatch.role }) || 'AI'} 处理中 · 起于 ${fmtTime(task.dispatch.at)}`
+                  : task.dispatch?.state === 'failed'
+                    ? `上次派单失败：${task.dispatch.error ?? '未知原因'}`
+                    : task.dispatch?.state === 'stopped'
+                      ? '上次派单已被停止'
+                      : '这张卡还没有派给 AI'),
+              h('div', { className: 'ds-field', style: { marginTop: 4 } },
+                h('div', { className: 'ds-label' }, '派给谁'),
+                h(SelectField, {
+                  className: 'ds-select', value: picked, disabled: busy,
+                  onChange: e => setPicked(e.target.value),
+                },
+                  h('option', { value: '' }, '用本列负责人'),
+                  (state.config?.experts ?? []).filter(expert => expert.enabled !== false).map(expert =>
+                    h('option', { key: expert.id, value: expert.id }, `${expert.emoji} ${expert.name}`)),
+                ),
+              ),
+              h('div', { className: 'ds-listrow-actions', style: { marginTop: 8 } },
+                h('button', { className: 'ds-btn ds-btn-primary', disabled: busy, onClick: () => void runAgent() }, '马上处理'),
+                h('button', { className: 'ds-btn ds-btn-ghost', disabled: busy || task.dispatch?.state !== 'running', onClick: () => void stopAgent() }, '停止'),
+              ),
+            ),
+          ),
+          h('div', { className: 'ds-sec', style: hideWhen('content') },
+            h('div', { className: 'ds-sec-head' }, '内容'),
+          h('div', { className: 'ds-field' },
+            h('div', { className: 'ds-label' }, '标题'),
+            h(TextField, { className: 'ds-input', value: draft.title, onChange: e => setDraft({ ...draft, title: e.target.value }) }),
+          ),
+          h('div', { className: 'ds-field' },
+            h('div', { className: 'ds-label' }, '需求 / 背景 / 验收标准'),
+            String(draft.requirement ?? '').trim() === ''
+              ? null
+              : h('div', { className: 'ds-md-preview ds-reader', 'data-task-md': '1', style: { maxHeight: 220 } }, renderMarkdown(draft.requirement)),
+            h(MdField, {
+              className: 'ds-textarea',
+              rows: String(draft.requirement ?? '').trim() === '' ? 4 : 8,
+              value: draft.requirement,
+              placeholder: '这张卡要解决什么、背景是什么、做到什么算完成——AI 接手前最好写清楚。',
+              onChange: e => setDraft({ ...draft, requirement: e.target.value }),
+            }),
+            String(draft.requirement ?? '').trim() === ''
+              ? h('div', { className: 'ds-hint' }, '这张卡还没有需求描述：专家只能按标题猜。补完点下面的「保存改动」。')
+              : null,
+          ),
+          h('div', { className: 'ds-field' },
+            h('div', { className: 'ds-label' }, '对应功能点'),
+            (() => {
+              const req = (state.requirements ?? []).find(item => item.id === task.requirementId)
+              if (req === undefined) return h('div', { className: 'ds-hint' }, '这张卡还没挂需求，先在「计划」里挂到某个需求，才能选功能点。')
+              const points = req.points ?? []
+              if (points.length === 0) return h('div', { className: 'ds-hint' }, `需求 ${req.code || req.id} 还没拆功能点，去需求页「功能点与可追溯矩阵」加几条。`)
+              return h(SelectField, {
+                className: 'ds-select',
+                value: draft.pointId ?? '',
+                onChange: event => setDraft({ ...draft, pointId: event.target.value }),
+              },
+                h('option', { value: '' }, '不归到具体功能点'),
+                points.map(point => h('option', { key: point.id, value: point.id }, `${point.id} ${point.title}`)),
+              )
+            })(),
+          ),
+          h('div', { className: 'ds-row' },
+            h('div', { className: 'ds-field', style: { flex: 1 } },
+              h('div', { className: 'ds-label' }, 'GitLab Issue'),
+              h(TextField, { className: 'ds-input', value: draft.gitlabIssue, onChange: e => setDraft({ ...draft, gitlabIssue: e.target.value }) }),
+            ),
+            h('div', { className: 'ds-field', style: { flex: 1 } },
+              h('div', { className: 'ds-label' }, 'GitLab MR'),
+              (task.gitlabMR?.iid ?? 0) > 0
+                ? h('div', { className: 'ds-art-row', style: { padding: '6px 0', borderBottom: 'none' } },
+                    h(ChipField, { className: 'ds-chip', 'data-on': task.gitlabMR.state === 'opened' ? '1' : undefined }, `MR !${task.gitlabMR.iid} · ${task.gitlabMR.state}`),
+                    h('div', { className: 'ds-grow' },
+                      h('div', { className: 'ds-art-title' }, task.gitlabMR.title || `MR !${task.gitlabMR.iid}`),
+                      task.gitlabMR.url === '' ? null : h('div', { className: 'ds-art-ref' }, task.gitlabMR.url),
+                      (task.gitlabMR.sourceBranch ?? '') === '' ? null : h('div', { className: 'ds-art-ref' }, `分支 ${task.gitlabMR.sourceBranch} → ${task.gitlabMR.targetBranch || '—'}`),
+                      task.gitlabMR.pipeline === null || task.gitlabMR.pipeline === undefined ? null : h('div', { className: 'ds-art-ref' },
+                        h(ChipField, { className: 'ds-chip', 'data-sla': task.gitlabMR.pipeline.status === 'failed' ? 'overdue' : undefined }, `流水线 ${task.gitlabMR.pipeline.status}`),
+                        ' ',
+                        task.gitlabMR.pipeline.url === '' ? null : h('a', { className: 'ds-link', href: task.gitlabMR.pipeline.url, target: '_blank', rel: 'noreferrer' }, `#${task.gitlabMR.pipeline.id}`),
+                      ),
+                    ),
+                  )
+                : h(TextField, { className: 'ds-input', placeholder: '还没关联 MR；提了 MR 后会自动同步', value: draft.gitlabMR, onChange: e => setDraft({ ...draft, gitlabMR: e.target.value }) }),
+            ),
+          ),
+          h('div', { className: 'ds-row' },
+            h('button', { className: 'ds-btn ds-btn-primary', disabled: busy, onClick: () => void push((task.gitlabMR?.iid ?? 0) > 0 ? { ...draft, gitlabMR: undefined } : draft) }, '保存改动'),
+            h('button', { className: 'ds-btn', disabled: busy, onClick: remove }, '只删卡'),
+          ),
+          ),
+          h('div', { className: 'ds-sec', style: hideWhen('plan') },
+            h('div', { className: 'ds-sec-head' }, '计划',
+              h('span', { className: 'ds-hint' }, '这张卡属于哪个项目/迭代、谁提的、什么时候要')),
+            h('div', { className: 'ds-sec-body' },
+              h('div', { className: 'ds-row' },
+                h('div', { className: 'ds-field', style: { flex: 1 } },
+                  h('div', { className: 'ds-label' }, '业务项目'),
+                  h(SelectField, {
+                    className: 'ds-select', value: plan.project,
+                    onChange: event => setPlan({ ...plan, project: event.target.value, iteration: '', service: '' }),
+                  },
+                    h('option', { value: '' }, '不属于任何项目'),
+                    (state.config?.projects ?? []).map(item => h('option', { key: item.id, value: item.id }, `${item.key ? `${item.key} · ` : ''}${item.name}`)),
+                  ),
+                ),
+                h('div', { className: 'ds-field', style: { flex: 1 } },
+                  h('div', { className: 'ds-label' }, '迭代'),
+                  h(SelectField, {
+                    className: 'ds-select', value: plan.iteration,
+                    onChange: event => setPlan({ ...plan, iteration: event.target.value }),
+                  },
+                    h('option', { value: '' }, '不指定迭代'),
+                    ((state.config?.projects ?? []).find(item => item.id === plan.project)?.iterations ?? [])
+                      .map(item => h('option', { key: item.id, value: item.id }, item.name)),
+                  ),
+                ),
+              ),
+              ((state.config?.projects ?? []).find(item => item.id === plan.project)?.services ?? []).length === 0
+                ? null
+                : h('div', { className: 'ds-field' },
+                  h('div', { className: 'ds-label' }, '服务（决定用哪个 git 路径切 worktree）'),
+                  h(SelectField, {
+                    className: 'ds-select', value: plan.service ?? '',
+                    onChange: event => setPlan({ ...plan, service: event.target.value }),
+                  },
+                    h('option', { value: '' }, '用项目级默认目录'),
+                    ((state.config?.projects ?? []).find(item => item.id === plan.project)?.services ?? [])
+                      .map(item => h('option', { key: item.id, value: item.id }, `${item.name}${item.repoPath ? ` · ${item.repoPath}` : ''}`)),
+                  ),
+                  h('div', { className: 'ds-hint' }, '一个项目有多个服务（每个服务一个 git 路径）时，这里决定这张卡改哪个服务。'),
+                ),
+              h('div', { className: 'ds-row' },
+                h('div', { className: 'ds-field', style: { flex: 2 } },
+                  h('div', { className: 'ds-label' }, '业务负责人'),
+                  h(TextField, {
+                    className: 'ds-input', value: plan.owner, placeholder: '提需求的人，例如 张伟',
+                    onChange: event => setPlan({ ...plan, owner: event.target.value }),
+                  }),
+                ),
+                h('div', { className: 'ds-field', style: { flex: 1 } },
+                  h('div', { className: 'ds-label' }, '期望完成'),
+                  h(TextField, {
+                    className: 'ds-input', type: 'date', value: plan.due,
+                    onChange: event => setPlan({ ...plan, due: event.target.value }),
+                  }),
+                ),
+              ),
+              h('div', { className: 'ds-row' },
+                h('div', { className: 'ds-field', style: { flex: 1 } },
+                  h('div', { className: 'ds-label' }, '所属版本'),
+                  h(SelectField, {
+                    className: 'ds-select', value: plan.releaseId,
+                    onChange: event => setPlan({ ...plan, releaseId: event.target.value }),
+                  },
+                    h('option', { value: '' }, '不挂版本'),
+                    (state.releases ?? []).map(item => h('option', { key: item.id, value: item.id }, `${item.version || item.id} ${item.name}`.trim())),
+                  ),
+                ),
+                h('div', { className: 'ds-field', style: { flex: 1 } },
+                  h('div', { className: 'ds-label' }, '编号'),
+                  h('div', { className: 'ds-hint' }, task.code === '' ? '—（未挂需求）' : task.code),
+                ),
+              ),
+              h('div', { className: 'ds-listrow-actions' },
+                h('button', { className: 'ds-btn ds-btn-primary', disabled: busy, onClick: () => void savePlan() }, '保存计划'),
+                task.dueAt > 0 && task.dueAt < Date.now() && task.status !== 'done'
+                  ? h('span', { className: 'ds-err' }, '已逾期')
+                  : null,
+              ),
+            ),
+          ),
+          h('div', { className: 'ds-sec', style: hideWhen('plan') },
+            h('div', { className: 'ds-sec-head' }, '代码隔离（git worktree）',
+              h('span', { className: 'ds-hint' }, worktree === null ? '这张卡还没有独立工作目录' : '这张卡自己的分支与目录')),
+            h('div', { className: 'ds-sec-body' },
+              worktree === null
+                ? h('div', { className: 'ds-field' },
+                  h('div', { className: 'ds-hint' }, '开启「代码隔离 = worktree」并给项目配好本机代码目录后，派单会自动切一条 task/<编号> 分支；也可以先手动建一个。'),
+                  h('div', { className: 'ds-listrow-actions' },
+                    h('button', { className: 'ds-btn', disabled: busy, onClick: () => void worktreeAction('create') }, '建 worktree'),
+                  ),
+                )
+                : h('div', { className: 'ds-field' },
+                  h('div', { className: 'ds-code-line' }, `${worktree.branch} · 基线 ${worktree.base}`),
+                  h('div', { className: 'ds-code-line' }, worktree.path),
+                  h('div', { className: 'ds-hint' }, `仓库 ${worktree.repo}${worktreeMsg ? ` · ${worktreeMsg}` : ''}`),
+                  h('div', { className: 'ds-listrow-actions' },
+                    h('button', { className: 'ds-btn', disabled: busy, onClick: () => void worktreeAction('list') }, '看 git worktree 列表'),
+                    h('button', { className: 'ds-btn', disabled: busy, onClick: () => void worktreeAction('remove') }, '回收 worktree'),
+                  ),
+                ),
+              worktreeMsg && worktree === null ? h('div', { className: 'ds-hint' }, worktreeMsg) : null,
+            ),
+          ),
+          h('div', { className: 'ds-sec', style: hideWhen('coding') },
+            h('div', { className: 'ds-sec-head' }, 'AI Coding 执行记录',
+              h('span', { className: 'ds-hint' }, coding === null ? '改代码要留记录：谁、什么模型、改了什么' : '研发 agent 登记，人也可以补录或评审')),
+            h('div', { className: 'ds-sec-body' },
+              coding === null
+                ? h('div', { className: 'ds-empty' }, '还没有执行记录。')
+                : h('div', { className: 'ds-code-box' },
+                  h('div', { className: 'ds-code-head' },
+                    h(ChipField, { className: 'ds-chip', 'data-review': coding.review.status }, CODING_REVIEW_LABEL[coding.review.status] ?? coding.review.status),
+                    h('div', { className: 'ds-grow' },
+                      h('div', { className: 'ds-code-line' }, [coding.agent || '未登记 agent', coding.model, coding.branch].filter(Boolean).join(' · ')),
+                      coding.context === '' ? null : h('div', { className: 'ds-hint' }, coding.context),
+                    ),
+                    h('span', { className: 'ds-hint' }, coding.unitTests.total > 0 ? `单测 ${coding.unitTests.passed}/${coding.unitTests.total}` : '无单测'),
+                    worktree === null ? null : tipOf(
+                      '拿 worktree 里的 git 记录，比执行记录里自报的提交 / 文件 / 分支',
+                      h('button', {
+                        className: 'ds-btn ds-btn-ghost', disabled: busy || verify.busy,
+                        onClick: () => void verifyCoding(),
+                      }, verify.busy ? '核对中…' : (verify.line === '' ? '核对代码事实' : '再核对一次')),
+                    ),
+                  ),
+                  verify.line === ''
+                    ? (coding.verified === null || coding.verified === undefined
+                      ? null
+                      : h('div', { className: 'ds-hint', 'data-verify': coding.verified.ok ? 'ok' : 'bad', style: { marginTop: 6 } },
+                        `${coding.verified.ok ? '✅' : '⚠'} 上次核对 ${fmtTime(coding.verified.at)}：分支 ${coding.verified.branch} · 提交 ${coding.verified.commitCount.actual} 个 · 改动 ${coding.verified.fileCount.actual} 个文件` +
+                        `${coding.verified.missingCommits.length + coding.verified.missingFiles.length === 0 ? '' : ` · ${coding.verified.missingCommits.length + coding.verified.missingFiles.length} 项对不上`}`))
+                    : h('div', { className: 'ds-hint', 'data-verify': verify.ok === true ? 'ok' : 'bad', style: { marginTop: 6 } },
+                      `${verify.ok === true ? '✅' : '⚠'} ${verify.line}`),
+                  (coding.commits ?? []).length === 0 ? null : h('div', { className: 'ds-code-list' },
+                    coding.commits.slice(0, 6).map(item => h('div', { key: item.id, className: 'ds-code-item' },
+                      h('code', null, item.sha.slice(0, 8)),
+                      h('span', { className: 'ds-grow' }, item.message || '(无提交说明)'),
+                      h('span', { className: 'ds-hint' }, `${item.files} 文件`),
+                    )),
+                    coding.commits.length > 6 ? h('div', { className: 'ds-hint' }, `还有 ${coding.commits.length - 6} 次提交`) : null,
+                  ),
+                  (coding.files ?? []).length === 0 ? null : h('div', { className: 'ds-code-files' },
+                    coding.files.slice(0, 12).map(item => h('span', { key: item.id, className: 'ds-code-file', 'data-change': item.change },
+                      `${item.path}${item.additions > 0 ? ` +${item.additions}` : ''}${item.deletions > 0 ? ` -${item.deletions}` : ''}`)),
+                    coding.files.length > 12 ? h('span', { className: 'ds-hint' }, `还有 ${coding.files.length - 12} 个`) : null,
+                  ),
+                  coding.review.note === '' ? null : h('div', { className: 'ds-code-note' }, `评审意见：${coding.review.note}`),
+                  h('div', { className: 'ds-row' },
+                    h(TextField, {
+                      className: 'ds-input', style: { flex: 1 }, value: reviewNote, placeholder: '评审意见（可选，写清文件/行为什么/怎么改）',
+                      onChange: event => setReviewNote(event.target.value),
+                    }),
+                    h('button', { className: 'ds-btn', disabled: busy, onClick: () => void reviewCoding('approved') }, '评审通过'),
+                    h('button', { className: 'ds-btn', disabled: busy, onClick: () => void reviewCoding('changes_requested') }, '要求修改'),
+                    coding.mergedAt > 0
+                      ? h('span', { className: 'ds-hint' }, `已合并 · ${coding.mergedBy || '—'}`)
+                      : h('button', { className: 'ds-btn ds-btn-ghost', disabled: busy, onClick: () => void mergeCoding() }, '标记已合并'),
+                  ),
+                ),
+              codingDraft === null
+                ? h('div', { className: 'ds-row' },
+                  h('button', { className: 'ds-btn ds-btn-ghost', disabled: busy, onClick: openCoding }, coding === null ? '手动补录执行记录' : '编辑执行记录'))
+                : h('div', null,
+                  h('div', { className: 'ds-row' },
+                    h('div', { className: 'ds-field', style: { flex: 1 } },
+                      tipLabel('Coding Agent', '这次改代码的 agent 名字，只作记录，不影响派单'),
+                      h(TextField, { className: 'ds-input', value: codingDraft.agent, placeholder: 'claude-code / codex / 自研', onChange: e => setCodingDraft({ ...codingDraft, agent: e.target.value }) }),
+                    ),
+                    h('div', { className: 'ds-field', style: { flex: 1 } },
+                      h('div', { className: 'ds-label' }, '模型'),
+                      h(TextField, { className: 'ds-input', value: codingDraft.model, placeholder: 'deepseek-v4.1-flash', onChange: e => setCodingDraft({ ...codingDraft, model: e.target.value }) }),
+                    ),
+                    h('div', { className: 'ds-field', style: { flex: 1 } },
+                      h('div', { className: 'ds-label' }, '分支'),
+                      h(TextField, { className: 'ds-input', value: codingDraft.branch, placeholder: 'feature/xxx', onChange: e => setCodingDraft({ ...codingDraft, branch: e.target.value }) }),
+                    ),
+                  ),
+                  h('div', { className: 'ds-row' },
+                    h('div', { className: 'ds-field', style: { flex: '0 0 110px' } },
+                      tipLabel('单测总数', '这次执行报的单测总数，可以 agent 写回，也可以手填'),
+                      h(TextField, { className: 'ds-input', value: codingDraft.total, onChange: e => setCodingDraft({ ...codingDraft, total: e.target.value }) }),
+                    ),
+                    h('div', { className: 'ds-field', style: { flex: '0 0 110px' } },
+                      tipLabel('通过数', '通过的条数；少于总数时卡片过不了准出'),
+                      h(TextField, { className: 'ds-input', value: codingDraft.passed, onChange: e => setCodingDraft({ ...codingDraft, passed: e.target.value }) }),
+                    ),
+                    h('div', { className: 'ds-field', style: { flex: 1 } },
+                      h('div', { className: 'ds-label' }, '这次依据的上下文'),
+                      h(TextField, { className: 'ds-input', value: codingDraft.context, placeholder: '例如 PRD v1.2 + 架构方案 v1', onChange: e => setCodingDraft({ ...codingDraft, context: e.target.value }) }),
+                    ),
+                  ),
+                  h('div', { className: 'ds-row' },
+                    h('button', { className: 'ds-btn ds-btn-primary', disabled: busy, onClick: () => void saveCoding() }, '保存执行记录'),
+                    h('button', { className: 'ds-btn ds-btn-ghost', disabled: busy, onClick: () => setCodingDraft(null) }, '取消'),
+                  ),
+                ),
+            ),
+          ),
+            ),
+            h('div', { className: 'ds-dw-col' },
+          h('div', { className: 'ds-sec', style: hideWhen('test') },
+            h('div', { className: 'ds-sec-head' }, '验收清单',
+              h('span', { className: 'ds-hint' }, checklist.length === 0 ? '这张卡还没有清单' : `${doneCount} / ${checklist.length} 已勾`)),
+            h('div', { className: 'ds-sec-body' },
+              checklist.length === 0 ? null : h('div', { className: 'ds-check-progress' },
+                h('div', { className: 'ds-check-bar', 'data-full': doneCount === checklist.length ? '1' : '0' },
+                  h('span', { style: { width: `${checklist.length === 0 ? 0 : Math.round(doneCount / checklist.length * 100)}%` } }),
+                ),
+              ),
+              checklist.map(item => h('div', { key: item.id, className: 'ds-check-row', 'data-done': item.done ? '1' : '0' },
+                h(CheckField, { checked: item.done, disabled: busy,
+                  onChange: () => void toggleChecklist(item),
+                }),
+                h('div', { className: 'ds-grow' },
+                  h('div', { className: 'ds-check-text' }, item.text, h('span', { className: 'ds-hint' }, ` #${item.id}`)),
+                  item.note || item.by
+                    ? h('div', { className: 'ds-hint' }, `${item.by ? `${item.by} · ` : ''}${item.at ? fmtTime(item.at) : ''}${item.note ? ` · ${item.note}` : ''}`)
+                    : null,
+                ),
+                h('button', { className: 'ds-btn ds-btn-ghost', disabled: busy, onClick: () => void removeChecklist(item) }, '×'),
+              )),
+              h('div', { className: 'ds-row' },
+                h(TextField, {
+                  className: 'ds-input', style: { flex: 1 }, value: newItem, placeholder: '再加一条验收条目，回车提交',
+                  onChange: event => setNewItem(event.target.value),
+                  onKeyDown: event => { if (event.key === 'Enter') void addChecklist() },
+                }),
+                h('button', { className: 'ds-btn', disabled: busy || newItem.trim() === '', onClick: () => void addChecklist() }, '＋ 加一条'),
+              ),
+              h('div', { className: 'ds-hint' }, '清单就是「做完」的定义：AI 每完成一项要勾一项并附证据；人也可以直接勾。'),
+            ),
+          ),
+          h('div', { className: 'ds-sec', style: hideWhen('deliver') },
+            h('div', { className: 'ds-sec-head' }, '交付物',
+              h('span', { className: 'ds-hint' }, '文档、MR、用例、报告——交付要有东西，不只是一句「做完了」；登记后会写成飞书云盘需求文件夹里的一份文档'),
+              artifactsWithoutBody(task).length > 0
+                ? h('span', { className: 'ds-card-warn', title: '这些交付物还没写正文，点「正文」补上再同步' }, `● ${artifactsWithoutBody(task).length} 件缺正文`)
+                : null,
+              (task.artifacts ?? []).length > 0
+                ? h('button', {
+                  className: 'ds-btn ds-btn-ghost', disabled: busy,
+                  title: '把这张卡的交付物全部写进需求文件夹（已归档的会覆盖更新）',
+                  onClick: () => void syncAllArtifacts(),
+                }, '同步到云盘')
+                : null),
+            h('div', { className: 'ds-sec-body', 'data-scroll': '1' },
+              (task.artifacts ?? []).length === 0
+                ? h('div', { className: 'ds-empty' }, '还没有交付物。')
+                : (task.artifacts ?? []).map(item => h('div', { key: item.id, className: 'ds-art-wrap' }, h('div', { className: 'ds-art-row', 'data-missing': String(item.content ?? '').trim() === '' ? '1' : '0' },
+                  h(ChipField, { className: 'ds-chip', 'data-kind': item.kind }, ARTIFACT_KIND_LABEL[item.kind] ?? item.kind),
+                  h('div', { className: 'ds-grow' },
+                    h('div', { className: 'ds-art-title' },
+                      String(item.content ?? '').trim() === ''
+                        ? h('span', { className: 'ds-card-warn', style: { marginRight: 6 }, title: '这条交付物还没写正文，云盘文档里只有标题' }, '●')
+                        : null,
+                      item.title,
+                    ),
+                    h('div', { className: 'ds-art-ref' }, `正文 ${(item.content ?? '').length} 字${String(item.content ?? '').trim() === '' ? ' · 缺正文' : ''}${item.doc?.url ? '' : ' · 还没归档'}`),
+                    item.ref === '' ? null : h('div', { className: 'ds-art-ref' }, item.ref),
+                    item.doc?.url
+                      ? h('a', { className: 'ds-art-ref', href: item.doc.url, target: '_blank', rel: 'noreferrer' }, `📄 ${item.doc.name || '云盘文档'}`)
+                      : (item.doc?.error ? h('div', { className: 'ds-error' }, item.doc.error) : null),
+                  ),
+                  h('button', {
+                    className: 'ds-btn ds-btn-ghost', disabled: busy, title: '直接读正文（Markdown 渲染）',
+                    onClick: () => setArtRead(artRead === item.id ? null : item.id),
+                  }, artRead === item.id ? '收起' : '阅读'),
+                  h('button', {
+                    className: 'ds-btn ds-btn-ghost', disabled: busy, title: '编辑正文',
+                    onClick: () => setArtEdit(artEdit !== null && artEdit.id === item.id ? null : { id: item.id, content: item.content ?? '' }),
+                  }, '正文'),
+                  item.doc?.url
+                    ? h('button', { className: 'ds-btn ds-btn-ghost', disabled: busy, title: '用最新正文覆盖云盘文档', onClick: () => void syncArtifactTo(item) }, '更新')
+                    : h('button', { className: 'ds-btn ds-btn-ghost', disabled: busy, title: '写进需求文件夹', onClick: () => void syncArtifactTo(item) }, '归档'),
+                  h(SelectField, {
+                    className: 'ds-select', style: { width: 92, height: 22, fontSize: 11 }, value: item.status, disabled: busy,
+                    onChange: event => void setArtifactStatus(item, event.target.value),
+                  }, ARTIFACT_STATUS.map(value => h('option', { key: value, value }, ARTIFACT_STATUS_LABEL[value]))),
+                  h('button', { className: 'ds-btn ds-btn-ghost', disabled: busy, onClick: () => void removeArtifact(item) }, '×'),
+                ),
+                artRead === item.id
+                  ? h('div', { className: 'ds-md-preview ds-reader' }, String(item.content ?? '').trim() === ''
+                    ? h('span', { className: 'ds-hint' }, '这条交付物还没有正文。')
+                    : renderMarkdown(item.content))
+                  : null,
+              )),
+              artEdit === null ? null : h('div', { style: { marginTop: 8 } },
+                h(MdField, {
+                  className: 'ds-input', style: { width: '100%' }, rows: 8, value: artEdit.content,
+                  placeholder: '写清楚做了什么、结论、风险。这段会原样写进云盘文档正文。',
+                  onChange: event => setArtEdit({ ...artEdit, content: event.target.value }),
+                }),
+                h('div', { className: 'ds-row', style: { justifyContent: 'flex-end', marginTop: 6 } },
+                  h('button', { className: 'ds-btn ds-btn-ghost', disabled: busy, onClick: () => setArtEdit(null) }, '取消'),
+                  h('button', { className: 'ds-btn ds-btn-primary', disabled: busy, onClick: () => void saveArtifactContent({ id: artEdit.id }) }, '保存正文并同步'),
+                ),
+              ),
+              h('div', { className: 'ds-row' },
+                h(SelectField, {
+                  className: 'ds-select', style: { width: 104 }, value: artifact.kind,
+                  onChange: event => setArtifact({ ...artifact, kind: event.target.value }),
+                }, ARTIFACT_KINDS.map(value => h('option', { key: value, value }, ARTIFACT_KIND_LABEL[value]))),
+                h(TextField, {
+                  className: 'ds-input', style: { flex: 1 }, value: artifact.title, placeholder: '交付物名称，例如 登录模块技术方案',
+                  onChange: event => setArtifact({ ...artifact, title: event.target.value }),
+                }),
+                h(TextField, {
+                  className: 'ds-input', style: { flex: 1 }, value: artifact.ref, placeholder: '路径 / 链接 / MR 号',
+                  onChange: event => setArtifact({ ...artifact, ref: event.target.value }),
+                }),
+              ),
+              h(MdField, {
+                className: 'ds-input', style: { width: '100%', marginTop: 6 }, rows: 5, value: artifact.content,
+                placeholder: '交付物正文（Markdown）。这段会原样写成云盘文档的正文：做什么、怎么做、结论、风险。留空也能登记，但云盘里只有标题。',
+                onChange: event => setArtifact({ ...artifact, content: event.target.value }),
+              }),
+              h('div', { className: 'ds-row', style: { justifyContent: 'flex-end', marginTop: 6 } },
+                h('button', {
+                  className: 'ds-btn', disabled: busy || artifact.title.trim() === '',
+                  onClick: () => void addArtifact(),
+                }, '登记并归档'),
+              ),
+            ),
+          ),
+          h('div', { className: 'ds-sec', style: hideWhen('test') },
+            h('div', { className: 'ds-sec-head' }, '测试用例',
+              h('span', { className: 'ds-hint' }, cases.length === 0
+                ? '测试同学把用例登记在这里，逐条执行并回填结果'
+                : caseSummary),
+              h('button', {
+                className: 'ds-btn ds-btn-ghost',
+                disabled: caseGen.busy,
+                onClick: () => void generateCases(),
+              }, caseGen.busy ? '生成中…' : '✨ 按需求生成'),
+              h('button', {
+                className: 'ds-btn ds-btn-ghost',
+                disabled: caseRun.busy || cases.filter(item => item.http != null).length === 0,
+                onClick: () => void runCases(undefined),
+              }, caseRun.busy ? '运行中…' : '▶ 跑接口用例')),
+            h('div', { className: 'ds-sec-body', 'data-scroll': '1' },
+              caseRun.note === '' ? null : h('div', { className: 'ds-hint' }, caseRun.note),
+              caseGen.note === '' ? null : h('div', { className: 'ds-hint' }, caseGen.note),
+              cases.length === 0
+                ? h('div', { className: 'ds-empty' }, '还没有用例。')
+                : cases.map(item => h('div', { key: item.id, className: 'ds-art-row', 'data-result': item.result },
+                  h(SelectField, {
+                    className: 'ds-select', style: { width: 84, height: 22, fontSize: 11 }, value: item.result, disabled: busy,
+                    onChange: event => void setCaseResult(item, event.target.value),
+                  }, CASE_RESULTS.map(value => h('option', { key: value, value }, CASE_RESULT_LABEL[value]))),
+                  h('div', { className: 'ds-grow' },
+                    h('div', { className: 'ds-art-title' }, item.title),
+                    h('div', { className: 'ds-row', style: { gap: 6, alignItems: 'center', marginTop: 2 } },
+                      h(ChipField, { className: 'ds-chip ds-chip-soft' }, CASE_TYPE_LABEL[item.type ?? 'functional'] ?? '功能'),
+                      h(ChipField, { className: 'ds-chip ds-chip-soft', 'data-pri': item.priority ?? 'p2' }, String(item.priority ?? 'p2').toUpperCase()),
+                      String(item.preconditions ?? '') === '' ? null : h('span', { className: 'ds-hint' }, `前置：${item.preconditions}`),
+                      (item.steps ?? []).length === 0 ? null : h('span', { className: 'ds-hint' }, `步骤 ${item.steps.length} 条`),
+                    ),
+                    item.expected === '' ? null : h('div', { className: 'ds-art-ref' }, `期望：${item.expected}`),
+                    item.http == null ? null : h('div', { className: 'ds-art-ref' }, `接口：${item.http.method} ${item.http.url} → 期望 ${item.http.expectStatus}${item.http.expectContains ? ` 且含 «${item.http.expectContains}»` : ''}`),
+                    item.lastRun == null ? null : h('div', { className: 'ds-art-ref' }, `${item.lastRun.ok ? '✅' : '❌'} 最近执行：${item.lastRun.status === 0 ? item.lastRun.error : `${item.lastRun.status} · ${item.lastRun.ms}ms`}（${new Date(item.lastRun.at).toLocaleString('zh-CN')}）`),
+                    item.lastRun?.response ? h('div', { className: 'ds-code-note' }, `响应片段：${String(item.lastRun.response).slice(0, 400)}${String(item.lastRun.response).length > 400 ? '…' : ''}`) : null,
+                    (item.lastRun?.steps ?? []).length === 0 ? null : h('div', { className: 'ds-art-ref' }, `步骤：${item.lastRun.steps.map(step => `${step.ok ? '✅' : '❌'} ${step.method} ${step.url}${step.status === 0 ? '' : ` → ${step.status}`}`).join('；')}`),
+                    (item.http?.steps ?? []).length === 0 ? null : h(ChipField, { className: 'ds-chip ds-chip-soft' }, `多步 ${item.http.steps.length}`),
+                    ((state.requirements ?? []).find(entry => entry.id === task.requirementId)?.points ?? []).length === 0
+                      ? (item.pointId ? h('div', { className: 'ds-art-ref' }, `功能点：${item.pointId}`) : null)
+                      : h('div', { className: 'ds-row', style: { gap: 6, alignItems: 'center' } },
+                          h('span', { className: 'ds-hint' }, '功能点'),
+                          h(SelectField, {
+                            className: 'ds-select',
+                            style: { width: 190, height: 26 },
+                            value: item.pointId ?? '',
+                            onChange: async event => {
+                              try {
+                                await api('/task/case', { id: task.id, action: 'update', caseId: item.id, pointId: event.target.value })
+                                await onChanged()
+                              } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)) }
+                            },
+                          },
+                            h('option', { value: '' }, '不归功能点'),
+                            ((state.requirements ?? []).find(entry => entry.id === task.requirementId)?.points ?? []).map(point => h('option', { key: point.id, value: point.id }, `${point.id} ${point.title}`)),
+                          ),
+                        ),
+                    item.note === '' ? null : h('div', { className: 'ds-art-ref' }, `记录：${item.note}${item.by ? ` — ${item.by}` : ''}`),
+                  ),
+                  item.http == null ? null : h('button', { className: 'ds-btn ds-btn-ghost', disabled: caseRun.busy, onClick: () => void runCases(item.id) }, '▶'),
+                  h('button', {
+                    className: 'ds-btn ds-btn-ghost',
+                    disabled: busy,
+                    title: '标记为不稳定用例：失败时不自动开缺陷',
+                    'data-flaky': item.flaky === true ? '1' : '0',
+                    onClick: () => void toggleFlaky(item),
+                  }, item.flaky === true ? '不稳' : '标不稳'),
+                  h('button', { className: 'ds-btn ds-btn-ghost', disabled: busy, onClick: () => void removeCase(item) }, '×'),
+                )),
+              h('div', { className: 'ds-row' },
+                h(TextField, {
+                  className: 'ds-input', style: { flex: 1 }, value: newCase.title, placeholder: '用例：做什么，例如 用错误密码连续登录 5 次',
+                  onChange: event => setNewCase({ ...newCase, title: event.target.value }),
+                }),
+                h(TextField, {
+                  className: 'ds-input', style: { flex: 1 }, value: newCase.expected, placeholder: '期望结果，例如 第 5 次返回 429 并锁定 10 分钟',
+                  onChange: event => setNewCase({ ...newCase, expected: event.target.value }),
+                }),
+                h('button', { className: 'ds-btn', disabled: busy || newCase.title.trim() === '', onClick: () => void addCase() }, '＋ 加用例'),
+              ),
+              h('div', { className: 'ds-row', style: { gap: 8, flexWrap: 'wrap', marginTop: 6 } },
+                h(SelectField, {
+                  className: 'ds-select', style: { width: 96 }, value: newCase.type ?? 'functional',
+                  onChange: event => setNewCase({ ...newCase, type: event.target.value }),
+                }, CASE_TYPES.map(value => h('option', { key: value, value }, CASE_TYPE_LABEL[value]))),
+                h(SelectField, {
+                  className: 'ds-select', style: { width: 84 }, value: newCase.priority ?? 'p2',
+                  onChange: event => setNewCase({ ...newCase, priority: event.target.value }),
+                }, CASE_PRIORITIES.map(value => h('option', { key: value, value }, value.toUpperCase()))),
+                h(TextField, {
+                  className: 'ds-input', style: { flex: 1, minWidth: 200 }, value: newCase.preconditions ?? '', placeholder: '前置条件，例如 会员等级≥银卡、账户余额充足',
+                  onChange: event => setNewCase({ ...newCase, preconditions: event.target.value }),
+                }),
+              ),
+              h('div', { className: 'ds-field' },
+                h('label', {}, '测试步骤（可选，一行一步）'),
+                h(TextAreaField, {
+                  className: 'ds-input', rows: 2, value: newCase.stepsText ?? '',
+                  placeholder: '1. 打开积分抵扣页\n2. 选择「抵扣 10 元」\n3. 提交订单',
+                  onChange: event => setNewCase({ ...newCase, stepsText: event.target.value }),
+                }),
+              ),
+              h('div', { className: 'ds-field' },
+                h('label', {}, '多步接口（可选，一行一步：METHOD url | 期望状态码 | 提取变量）'),
+                h(TextAreaField, {
+                  className: 'ds-input', rows: 3, value: newCase.steps,
+                  placeholder: 'POST /api/auth/login | 200 | data.token\nGET /api/points | 200 |',
+                  onChange: event => setNewCase({ ...newCase, steps: event.target.value }),
+                }),
+                h('div', { className: 'ds-hint' }, '先登录取 token、再带 token 调业务接口时用；变量写成 {{data.token}} 放进 url 或 body。第一步失败后面不会跑。'),
+              ),
+            ),
+          ),
+          h('div', { className: 'ds-sec', style: hideWhen('overview') },
+            h('div', { className: 'ds-sec-head' }, '其它信息'),
+          h('dl', { className: 'ds-kv' },
+            h('dt', {}, '编号'), h('dd', {}, task.code === undefined || task.code === '' ? '未挂需求（无编号）' : task.code),
+            h('dt', {}, '所属需求'), h('dd', {}, (() => {
+              const req = (state.requirements ?? []).find(item => item.id === task.requirementId)
+              return req === undefined ? '未挂需求' : `${req.code || req.id}｜${req.title}`
+            })()),
+            h('dt', {}, '所属项目'), h('dd', {}, (state.config?.projects ?? []).find(item => item.id === task.project)?.name ?? '未归属项目'),
+            h('dt', {}, '迭代'), h('dd', {}, ((state.config?.projects ?? []).find(item => item.id === task.project)?.iterations ?? []).find(item => item.id === task.iteration)?.name ?? '未排期'),
+            h('dt', {}, '服务'), h('dd', {}, (() => {
+              const project = (state.config?.projects ?? []).find(item => item.id === task.project)
+              if ((task.service ?? '') === '') return '未指定（用项目默认目录）'
+              const service = (project?.services ?? []).find(item => item.id === task.service)
+              if (service === undefined) return `${task.service}（已失效）`
+              const deps = (service.dependsOn ?? [])
+                .map(id => (project.services ?? []).find(one => one.id === id))
+                .filter(one => one !== undefined)
+              const depNote = deps.length === 0 ? '' : ` · 依赖 ${deps.map(one => one.name).join('、')}`
+              return `${service.name}${service.repoPath ? ` · ${service.repoPath}` : ''}${depNote}`
+            })()),
+            h('dt', {}, '父任务'), h('dd', {}, (() => {
+              if (task.parent === '' || task.parent === undefined) return '无'
+              const parent = (state.tasks ?? []).find(item => item.id === task.parent)
+              return parent === undefined ? task.parent : `${parent.code || parent.id}｜${parent.title}`
+            })()),
+            h('dt', {}, '来源用例'), h('dd', {}, task.bugSource == null
+              ? '无（不是用例自动开的缺陷）'
+              : `${task.bugSource.code || task.bugSource.taskId} · ${task.bugSource.caseTitle}（判失败于 ${fmtTime(task.bugSource.at)}，${task.bugSource.by || '系统'}）`),
+            h('dt', {}, '关联缺陷'), h('dd', {}, (() => {
+              const bugs = (state.tasks ?? []).filter(item => item.bugSource != null && item.bugSource.taskId === task.id)
+              return bugs.length === 0
+                ? '无'
+                : bugs.map(item => `${item.code || item.id}（${(state.statuses ?? []).find(entry => entry.id === item.status)?.label ?? item.status}）`).join('、')
+            })()),
+            h('dt', {}, '飞书会话'), h('dd', {}, task.feishuThread === '' || task.feishuThread === undefined ? '未关联' : task.feishuThread),
+            h('dt', {}, '状态历史'), h('dd', {}, task.history.map(item => {
+              const label = (state.statuses ?? []).find(entry => entry.id === item.status)?.label ?? item.status
+              const tail = item.note === undefined || item.note === '' ? '' : `（${item.note}）`
+              return `${label} · ${fmtTime(item.at)}${tail}`
+            }).join(' → ') || '无'),
+          ),
+          ),
+          h('div', { className: 'ds-sec', style: hideWhen('discuss') },
+            h('div', { className: 'ds-sec-head' }, `评论（${task.comments.length}）`, h('span', { className: 'ds-hint' }, '最新的在最上面')),
+            task.comments.length === 0
+              ? h('div', { className: 'ds-empty' }, '还没有评论。在下面输入，或用 @专家名 直接点名派活。')
+              : h('div', { className: 'ds-comments' },
+                task.comments.slice().reverse().map(item => {
+                  const experts = state.config?.experts ?? []
+                  const expert = experts.find(entry => entry.name === item.author)
+                    ?? experts.find(entry => item.author !== undefined && item.author !== ''
+                      && (entry.name.includes(item.author) || item.author.includes(entry.name)))
+                    ?? experts.find(entry => item.author === (ROLE_LABEL[entry.role] ?? ''))
+                  // 没写 kind 的历史评论：作者对不上任何专家、也不像角色名，就按「人」处理，
+                  // 避免人也画出机器人头像。
+                  const looksAi = /产品|架构|研发|开发|测试|运维|专家/.test(String(item.author ?? ''))
+                  const human = item.kind === 'human' ? true : item.kind === 'agent' ? false : !(expert !== undefined || looksAi)
+                  const who = human
+                    ? (item.author === undefined || item.author === '' || item.author === '人' ? '我' : item.author)
+                    : (expert?.name ?? (item.author === '' || item.author === undefined ? 'AI' : item.author))
+                  // 老评论的作者可能是「架构」「研发」这类简写，或带 emoji 前缀；
+                  // 能对上专家就统一显示专家本名，对不上原样显示。
+                  const bodyNodes = renderMarkdown(item.body)
+                  return h('div', {
+                    className: 'ds-cm', key: item.id,
+                    'data-kind': human ? 'human' : 'agent',
+                    'data-role': expert?.role ?? '',
+                  },
+                    h('div', { className: 'ds-cm-avatar' },
+                      human ? h('span', { className: 'ds-cm-initial' }, who.slice(0, 1)) : (expert?.emoji ?? '🤖')),
+                    h('div', { className: 'ds-cm-main' },
+                      h('div', { className: 'ds-cm-head' },
+                        h('span', { className: 'ds-cm-name' }, who),
+                        h('span', { className: 'ds-cm-kind' }, human ? '我提出' : 'AI 回复'),
+                        expert !== undefined && expert.domain !== '' ? h(ChipField, { className: 'ds-chip', 'data-role': expert.role }, expert.domain) : null,
+                        h('span', { className: 'ds-cm-meta' }, fmtTime(item.at)),
+                      ),
+                      h('div', { className: 'ds-cm-bubble ds-md' },
+                        bodyNodes.length === 0 ? h('span', { className: 'ds-hint' }, '（这条评论没有正文）') : bodyNodes),
+                    ),
+                  )
+                }),
+              ),
+          ),
+            ),
+          ),
+          ),
+          h('div', { className: 'ds-dw-foot' },
+            h('div', { className: 'ds-mention-bar' },
+              h('button', {
+                className: 'ds-btn', disabled: busy,
+                onClick: () => { setActive(0); setPicker(current => (current === null || current.inline) ? { query: '', from: null, inline: false } : null) },
+              }, picker === null ? `@ 提到谁（${roster.length}）` : '收起名单'),
+              h('span', { className: 'ds-hint' }, '也可以在输入框里直接打「@」搜'),
+            ),
+            picker !== null
+              ? h(MentionPicker, {
+                roster,
+                query: picker.query,
+                active,
+                onActive: setActive,
+                onQuery: next => { setPicker(current => (current === null ? { query: next, from: null, inline: false } : { ...current, query: next })); setActive(0) },
+                onPick: pick,
+                onClose: () => setPicker(null),
+              })
+              : null,
+            h('div', { className: 'ds-composer' },
+            h(TextAreaField, {
+              className: 'ds-textarea',
+              style: { minHeight: 58 },
+              placeholder: '支持 Markdown：`# 标题`、`**粗体**`、`` `代码` ``、``` 代码块 ```、`- 列表`、`| 表格 |`；打「@」选专家派活。',
+              value: comment,
+              onFocus: () => setPane('discuss'),
+              onChange: e => { setComment(e.target.value); refreshPicker(e.target.value, e.target.selectionStart ?? e.target.value.length) },
+              onKeyDown: e => {
+                if ((e.metaKey || e.ctrlKey) && (e.key === 'Enter' || e.key === 'NumpadEnter')) {
+                  e.preventDefault()
+                  void send()
+                  return
+                }
+                if (picker === null || picker.inline !== true) return
+                if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+                  e.preventDefault()
+                  if (hits.length === 0) return
+                  setActive(current => (current + (e.key === 'ArrowDown' ? 1 : -1) + hits.length) % hits.length)
+                } else if (e.key === 'Enter' && hits.length > 0) {
+                  e.preventDefault()
+                  pick(hits[Math.min(active, hits.length - 1)].name)
+                } else if (e.key === 'Escape') {
+                  e.preventDefault(); setPicker(null)
+                }
+              },
+            }),
+            h('div', { className: 'ds-composer-bar' },
+              h('span', { className: 'ds-hint' }, 'Markdown 可用 · 打 @ 派活 · Ctrl/⌘+Enter 发送'),
+              h('span', { className: 'ds-composer-count' }, comment.trim() === '' ? '还没写' : `${comment.length} 字`),
+              h('button', { className: 'ds-btn ds-btn-primary', disabled: busy || comment.trim() === '', onClick: () => void send() }, busy ? '发送中…' : '发表评论'),
+            ),
+            notice !== null ? h('span', { className: 'ds-ok' }, notice) : null,
+            error !== null ? h('span', { className: 'ds-err' }, error) : null,
+            ),
+          ),
+        ),
+      )
+    }
+
+    // -------------------------------------------------------------- market
+
+    function Market({ state, onChanged }) {
+      const [data, setData] = React.useState(null)
+      const [busy, setBusy] = React.useState(null)
+      const [error, setError] = React.useState(null)
+      const [notice, setNotice] = React.useState(null)
+      const [form, setForm] = React.useState({ name: '', spec: '', description: '' })
+      const [adding, setAdding] = React.useState(false)
+      const [saving, setSaving] = React.useState(false)
+
+      const load = React.useCallback(async () => {
+        try { setData(await api('/market')) } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)) }
+      }, [])
+      React.useEffect(() => { void load() }, [load])
+
+      const installed = new Set(data?.installed ?? [])
+      const packageOf = spec => spec.replace(/^link:/, '').split('/').pop().replace(/^dsh-/, 'dsh-')
+
+      const act = async (item, action) => {
+        setBusy(item.id); setError(null); setNotice(null)
+        try {
+          const result = await api(`/market/${action}`, { id: item.id })
+          if (result.ok === false) throw new Error((result.result?.output ?? '').slice(-300) || '安装失败')
+          setNotice(action === 'install' ? '已安装，重启工作空间后生效' : '已移除，重启工作空间后生效')
+          await load()
+        } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)) } finally { setBusy(null) }
+      }
+
+      const addItem = async () => {
+        if (form.name.trim() === '' || form.spec.trim() === '') return
+        setSaving(true); setError(null)
+        try {
+          const items = [...(state.config.market.items ?? []), {
+            id: `m-${Math.random().toString(16).slice(2, 10)}`,
+            name: form.name.trim(), spec: form.spec.trim(), description: form.description.trim(),
+          }]
+          await api('/config', { market: { items } })
+          setForm({ name: '', spec: '', description: '' })
+          setAdding(false)
+          await onChanged(); await load()
+        } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)) } finally { setSaving(false) }
+      }
+
+      const removeItem = async (item) => {
+        if (!(await confirmDialog(`从市场列表移除「${item.name}」？不会卸载已安装的插件。`, { title: '移除插件', danger: true, okText: '移除' }))) return
+        const items = (state.config.market.items ?? []).filter(entry => entry.id !== item.id)
+        await api('/config', { market: { items } }).catch(() => undefined)
+        await onChanged(); await load()
+      }
+
+      const list = data?.items ?? state.config.market.items ?? []
+
+      return h('div', null,
+        h('div', { className: 'ds-row', style: { marginBottom: 12 } },
+          h('div', { style: { fontSize: 13.5, fontWeight: 650 } }, data?.title ?? state.config.market.title),
+          h('span', { className: 'ds-stat' }, `${list.length} 个条目 · profile ${state.profile ?? '—'}`),
+          h('div', { className: 'ds-grow' }),
+          h('button', { className: 'ds-btn', onClick: () => setAdding(!adding) }, adding ? '收起' : '＋ 添加条目'),
+        ),
+        error !== null ? h('div', { className: 'ds-err', style: { padding: '0 0 8px' } }, error) : null,
+        notice !== null ? h('div', { className: 'ds-ok', style: { padding: '0 0 8px' } }, notice) : null,
+        list.length === 0
+          ? h('div', { className: 'ds-empty' }, '还没有条目。把公司内部的插件包加进来，同事就能一键安装。')
+          : h('div', { className: 'ds-market-grid' },
+            list.map(item => {
+              const name = packageOf(item.spec)
+              const isInstalled = installed.has(name) || installed.has(item.name)
+              return h('div', { key: item.id, className: 'ds-market-card' },
+                h('div', { className: 'ds-mc-head' },
+                  h('span', { className: 'ds-mc-name ds-grow' }, item.name),
+                  h(ChipField, { className: 'ds-chip', 'data-on': isInstalled ? '1' : '0' }, isInstalled ? '已安装' : '未安装'),
+                ),
+                item.description !== '' ? h('div', { className: 'ds-mc-desc' }, item.description) : null,
+                h('code', null, item.spec),
+                h('div', { className: 'ds-row', style: { marginTop: 'auto' } },
+                  h('button', {
+                    className: isInstalled ? 'ds-btn' : 'ds-btn ds-btn-primary',
+                    disabled: busy === item.id,
+                    onClick: async () => {
+                    const ok = await confirmDialog(isInstalled ? `从 profile 移除「${name}」？` : `安装「${name}」到工作空间？`, { title: isInstalled ? '移除插件' : '安装插件', danger: isInstalled, okText: isInstalled ? '移除' : '安装' })
+                    if (ok) void act(item, isInstalled ? 'uninstall' : 'install')
+                  },
+                  }, busy === item.id ? '处理中…' : isInstalled ? '移除' : '安装'),
+                  h('button', { className: 'ds-btn', style: { marginLeft: 'auto', opacity: .7 }, onClick: () => void removeItem(item) }, '删条目'),
+                ),
+              )
+            }),
+          ),
+        adding
+          ? h('div', { className: 'ds-panel', style: { marginTop: 14 } },
+            h('div', { className: 'ds-panel-head' }, '添加条目'),
+            h('div', { className: 'ds-panel-body' },
+              h('div', { className: 'ds-field' },
+                h('div', { className: 'ds-label' }, '显示名'),
+                h(TextField, { className: 'ds-input', value: form.name, placeholder: '代码评审助手', onChange: e => setForm({ ...form, name: e.target.value }) }),
+              ),
+              h('div', { className: 'ds-field' },
+                h('div', { className: 'ds-label' }, '包名或路径'),
+                h(TextField, { className: 'ds-input', value: form.spec, placeholder: '@company/dsh-reviewer 或 link:/home/lyf/pkgs/reviewer', onChange: e => setForm({ ...form, spec: e.target.value }) }),
+              ),
+              h('div', { className: 'ds-field' },
+                h('div', { className: 'ds-label' }, '一句话说明'),
+                h(TextField, { className: 'ds-input', value: form.description, placeholder: '自动跑 GitLab MR 的评审清单', onChange: e => setForm({ ...form, description: e.target.value }) }),
+              ),
+            ),
+            h('div', { style: { padding: '0 14px 14px' } },
+              h('button', { className: 'ds-btn ds-btn-primary', disabled: saving || form.name.trim() === '' || form.spec.trim() === '', onClick: () => void addItem() }, saving ? '添加中…' : '加入市场'),
+            ),
+          )
+          : null,
+      )
+    }
+
+    // -------------------------------------------------------------- settings
+
+    // --------------------------------------------------- enterprise panels
+
+    /** Shared little editor frame: a list of rows plus one open draft. */
+    function Editor({ title, hint, rows, onAdd, addLabel, render, empty }) {
+      return h('div', { className: 'ds-panel' },
+        h('div', { className: 'ds-panel-head' },
+          h('span', {}, title),
+          h('button', { className: 'ds-btn', onClick: onAdd }, addLabel ?? '新增'),
+        ),
+        h('div', { className: 'ds-panel-body' },
+          hint !== undefined ? h('div', { className: 'ds-hint' }, hint) : null,
+          rows.length === 0 ? h('div', { className: 'ds-hint' }, empty ?? '还没有内容。') : null,
+          rows.map(render),
+        ),
+      )
+    }
+
+    /** Shared right-side editor drawer: fixed head, scrollable form, fixed action bar. */
+    function SideDrawer({ title, hint, onClose, footer, children }) {
+      const Sheet = kit('SheetDrawer')
+      if (Sheet !== null) {
+        return h(Sheet, { title, hint, onClose, footer }, children)
+      }
+      return h('div', {
+        className: 'ds-side-wrap',
+        onKeyDown: e => { if (e.key === 'Escape') onClose() },
+      },
+        h('div', { className: 'ds-side-mask', onClick: onClose }),
+        h('div', { className: 'ds-side', role: 'dialog', 'aria-modal': 'true' },
+          h('div', { className: 'ds-side-head' },
+            h('div', {},
+              h('div', { className: 'ds-side-title' }, title),
+              hint === undefined || hint === null ? null : h('div', { className: 'ds-hint' }, hint),
+            ),
+            h('button', { className: 'ds-btn', onClick: onClose }, '关闭'),
+          ),
+          h('div', { className: 'ds-side-body' }, children),
+          footer === undefined || footer === null ? null : h('div', { className: 'ds-side-foot' }, footer),
+        ),
+      )
+    }
+
+    function ExpertsPanel({ config, onChanged }) {
+      const experts = config.experts ?? []
+      const [draft, setDraft] = React.useState(null)
+      const [error, setError] = React.useState(null)
+      const [busy, setBusy] = React.useState(false)
+      const EMOJI_CHOICES = [
+        '🧩', '📋', '🏛️', '🛠️', '🧪', '🔍', '🛡️', '⚙️',
+        '📦', '💰', '💳', '📊', '📈', '🧠', '🤖', '🧭',
+        '🎯', '🚀', '🧱', '🔧', '🧰', '🧮', '📝', '📚',
+        '🗂️', '🔐', '🌐', '☁️', '🗄️', '🧬', '🩺', '⚖️',
+      ]
+
+      const save = async () => {
+        if (draft === null) return
+        setBusy(true); setError(null)
+        try { await api('/experts/save', { expert: draft }); setDraft(null); await onChanged() }
+        catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)) } finally { setBusy(false) }
+      }
+      const remove = async expert => {
+        if (!(await confirmDialog(`删除专家「${expert.name}」？已用它派的单会保留历史评论。`, { title: '删除专家', danger: true, okText: '删除' }))) return
+        setBusy(true); setError(null)
+        try { await api('/experts/delete', { id: expert.id }); await onChanged() }
+        catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)) } finally { setBusy(false) }
+      }
+      const set = (key, value) => setDraft({ ...draft, [key]: value })
+      const [batchDomain, setBatchDomain] = React.useState('')
+      const [library, setLibrary] = React.useState([])
+      React.useEffect(() => {
+        let alive = true
+        void api('/skills').then(payload => { if (alive) setLibrary(payload.skills ?? []) }).catch(() => {})
+        return () => { alive = false }
+      }, [])
+      const toggleSkill = name => {
+        const current = draft.skills ?? []
+        set('skills', current.includes(name) ? current.filter(entry => entry !== name) : [...current, name])
+      }
+      const [skillInput, setSkillInput] = React.useState('')
+      const addSkillName = () => {
+        const value = skillInput.trim()
+        if (value === '' || draft === null) return
+        const current = draft.skills ?? []
+        if (!current.includes(value)) set('skills', [...current, value])
+        setSkillInput('')
+      }
+      const createDomainSet = async () => {
+        const domain = batchDomain.trim()
+        if (domain.length === 0) return
+        setBusy(true); setError(null)
+        try {
+          const roles = [
+            { role: 'product', name: '产品经理', emoji: '📋', prompt: `你是${domain}业务的产品经理。\n先读 docs/ 与本领域的历史工单，再动手。\n需求写清：目标用户、主流程、异常路径、验收口径。` },
+            { role: 'architect', name: '架构师', emoji: '🏛️', prompt: `你是${domain}业务的架构师。\n方案必须给出：数据模型、接口契约、失败与回滚、性能与容量估算。\n不确定就去代码里找证据。` },
+            { role: 'dev', name: '开发工程师', emoji: '🛠️', prompt: `你是${domain}业务的开发工程师。\n改动要小步可验证，跑测试，写清改动的文件与风险。` },
+            { role: 'qa', name: '测试工程师', emoji: '🧪', prompt: `你是${domain}业务的测试工程师。\n按边界值、异常流、并发与幂等设计用例，列出实际执行结果。` },
+          ]
+          for (const role of roles) {
+            await api('/experts/save', {
+              expert: {
+                name: `${domain}${role.name}`,
+                emoji: role.emoji,
+                role: role.role,
+                domain,
+                description: `负责${domain}业务线的${role.name}工作`,
+                prompt: role.prompt,
+                model: '', preset: '', enabled: true,
+              },
+            })
+          }
+          setBatchDomain('')
+          await onChanged()
+        } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)) } finally { setBusy(false) }
+      }
+
+      const promptPreview = text => {
+        const value = String(text ?? '').trim()
+        if (value === '') return ''
+        const compact = value.replace(/\s*\n\s*/g, ' / ')
+        return compact.length > 96 ? `${compact.slice(0, 96)}…` : compact
+      }
+      const rows = experts.map(expert => h('div', { className: 'ds-listrow', key: expert.id },
+        h('div', { className: 'ds-listrow-main' },
+          h('div', {}, `${expert.emoji} ${expert.name}`,
+            expert.domain ? h(ChipField, { className: 'ds-chip' }, expert.domain) : null,
+            expert.enabled === false ? h('span', { className: 'ds-hint' }, ' （已停用）') : null),
+          h('div', { className: 'ds-hint' }, `${expert.model || '跟随默认模型'}${expert.description ? ' · ' + expert.description : ''}`),
+          promptPreview(expert.prompt) === ''
+            ? h('div', { className: 'ds-hint', 'data-empty': '1' }, '提示词：还没有写，会退回内置角色说明（点「编辑」补上）')
+            : h('div', {
+                className: 'ds-hint',
+                'data-prompt': '1',
+                title: String(expert.prompt ?? ''),
+                style: { cursor: 'pointer' },
+                onClick: () => setDraft({ ...expert }),
+              }, `提示词：${promptPreview(expert.prompt)}`),
+          (expert.skills ?? []).length > 0 ? h('div', { className: 'ds-hint' }, `技能：${expert.skills.join('、')}`) : null,
+        ),
+        h('div', { className: 'ds-listrow-actions' },
+          tipOf('编辑这位专家', h('button', { className: 'ds-btn', disabled: busy, onClick: () => setDraft({ ...expert }) }, '编辑')),
+          tipOf('删除这位专家', h('button', { className: 'ds-btn', disabled: busy, onClick: () => void remove(expert), 'data-danger': '1' }, '删除')),
+        ),
+      ))
+
+      return h('div', { className: 'ds-pane-stack' },
+        h(Editor, {
+          title: '专家（可在评论里 @ 他们）',
+          hint: '每个专家有名字、业务领域、角色提示词和技能；评论里 @名字 就会把这条工作派给他。',
+          rows, onAdd: () => setDraft({ id: '', name: '', emoji: '🧩', role: '', domain: '', description: '', prompt: '', skills: [], model: '', preset: '', sandbox: '', enabled: true }), addLabel: '新增专家',
+          render: row => row,
+          empty: '还没有专家，点「新增专家」建一个。',
+        }),
+        h('div', { className: 'ds-row', style: { gap: 8, alignItems: 'center', padding: '6px 0 10px' } },
+          h('span', { className: 'ds-hint' }, '按业务领域一次生成四位：'),
+          h(TextField, {
+            className: 'ds-input', style: { maxWidth: 180 }, value: batchDomain, placeholder: '支付 / 风控 / 会员',
+            onChange: e => setBatchDomain(e.target.value),
+          }),
+          h('button', { className: 'ds-btn', disabled: busy || batchDomain.trim().length === 0, onClick: () => void createDomainSet() }, '生成产品/架构/研发/测试'),
+          error !== null ? h('span', { className: 'ds-error' }, error) : null,
+        ),
+        draft === null ? null : h(SideDrawer, {
+          title: draft.id ? `编辑专家：${draft.name || draft.id}` : '新增专家',
+          hint: '技能与提示词会随下一次派活生效，改完点右下角「保存」。',
+          onClose: () => setDraft(null),
+          footer: [
+            h('button', { key: 'save', className: 'ds-btn ds-btn-primary', disabled: busy, onClick: () => void save() }, busy ? '保存中…' : '保存'),
+            h('button', { key: 'cancel', className: 'ds-btn', disabled: busy, onClick: () => setDraft(null) }, '取消'),
+            error !== null ? h('span', { key: 'error', className: 'ds-error ds-side-note' }, error) : null,
+          ],
+        },
+            h('div', { className: 'ds-row', style: { gap: 12, alignItems: 'flex-start' } },
+              h('div', { className: 'ds-field', style: { flex: 1 } },
+                h('div', { className: 'ds-label' }, '名字（@ 用这个名字）'),
+                h(TextField, { className: 'ds-input', value: draft.name, placeholder: '安全专家', onChange: e => set('name', e.target.value) }),
+              ),
+              h('div', { className: 'ds-field', style: { flex: '0 0 96px' } },
+                h('div', { className: 'ds-label' }, '当前图标'),
+                h('div', { className: 'ds-emoji-preview' }, draft.emoji || '🧩'),
+              ),
+            ),
+            h('div', { className: 'ds-field' },
+              h('div', { className: 'ds-label' }, '图标（点一个换上，也可以自己填）'),
+              h('div', { className: 'ds-emojigrid' },
+                EMOJI_CHOICES.map(face => h('button', {
+                  key: face, type: 'button', className: 'ds-emoji', 'data-on': draft.emoji === face ? '1' : '0',
+                  title: face, onClick: () => set('emoji', face),
+                }, face)),
+              ),
+              h('div', { className: 'ds-row', style: { gap: 8, marginTop: 8, alignItems: 'center' } },
+                h(TextField, {
+                  className: 'ds-input', style: { flex: '0 0 120px' }, value: draft.emoji, maxLength: 4,
+                  placeholder: '🧩',
+                  onChange: e => set('emoji', e.target.value),
+                }),
+                h('span', { className: 'ds-hint' }, '也可以粘一个 emoji，或者留空用默认的 🧩。'),
+              ),
+            ),
+            h('div', { className: 'ds-field' },
+              h('div', { className: 'ds-label' }, '一句话定位'),
+              h(TextField, { className: 'ds-input', value: draft.description, placeholder: '负责接口安全与权限模型评审', onChange: e => set('description', e.target.value) }),
+            ),
+            h('div', { className: 'ds-row', style: { gap: 12, alignItems: 'flex-start' } },
+              h('div', { className: 'ds-field', style: { flex: '0 0 132px' } },
+                tipLabel('角色位', '决定它对应看板上的哪一列；列负责人按角色位挑人时用得上'),
+                h(SelectField, {
+                  className: 'ds-select', value: draft.role ?? '',
+                  onChange: e => set('role', e.target.value),
+                },
+                  h('option', { value: '' }, '不限'),
+                  ['product', 'architect', 'dev', 'qa'].map(v => h('option', { key: v, value: v }, ROLE_LABEL[v] ?? v))),
+                h('div', { className: 'ds-hint' }, '决定默认接哪一列'),
+              ),
+              h('div', { className: 'ds-field', style: { flex: 1 } },
+                tipLabel('业务领域', '「按专长匹配」看这里：领域相同的卡优先派给它'),
+                h(TextField, { className: 'ds-input', value: draft.domain ?? '', placeholder: '支付 / 风控 / 会员（选填）', onChange: e => set('domain', e.target.value) }),
+                h('div', { className: 'ds-hint' }, '同一张卡会优先派给同领域的专家'),
+              ),
+            ),
+            h('div', { className: 'ds-field' },
+              h('div', { className: 'ds-label' }, `技能（从技能库勾选 · 已选 ${(draft.skills ?? []).length} 项）`),
+              library.length > 0
+                ? h('div', { className: 'ds-skillbox' },
+                  library.map(skill => {
+                    const on = (draft.skills ?? []).includes(skill.name)
+                    const users = experts.filter(item => (item.skills ?? []).includes(skill.name)).length
+                    return h('label', { key: skill.name, className: 'ds-skillopt', 'data-on': on ? '1' : '0', title: String(skill.description ?? '') },
+                      h(CheckField, { checked: on, onChange: () => toggleSkill(skill.name) }),
+                      h('span', { className: 'ds-skillname' }, skill.name),
+                      h('span', { className: 'ds-skilldesc' }, String(skill.description ?? '').slice(0, 46)),
+                      users > 0 ? h('span', { className: 'ds-skillusers' }, `${users} 位在用`) : null,
+                    )
+                  }),
+                )
+                : h('div', { className: 'ds-hint' }, '技能库还是空的，去「技能库」建一条，或者在下面直接写名字。'),
+              h('div', { className: 'ds-row', style: { gap: 8, marginTop: 8, alignItems: 'center' } },
+                h(TextField, {
+                  className: 'ds-input', style: { flex: 1 }, value: skillInput,
+                  placeholder: '技能库以外的技能名，例如 lark-doc、office-xlsx（回车或点「加上」）',
+                  onChange: e => setSkillInput(e.target.value),
+                  onKeyDown: e => { if (e.key === 'Enter') { e.preventDefault(); addSkillName() } },
+                }),
+                h('button', { className: 'ds-btn', onClick: () => addSkillName() }, '加上'),
+              ),
+              (draft.skills ?? []).filter(name => !library.some(skill => skill.name === name)).length > 0
+                ? h('div', { className: 'ds-row', style: { flexWrap: 'wrap', gap: 6, marginTop: 6, alignItems: 'center' } },
+                  h('span', { className: 'ds-hint' }, '不在技能库（仍会写进提示词）：'),
+                  (draft.skills ?? []).filter(name => !library.some(skill => skill.name === name)).map(name => h(ChipField, { key: name, className: 'ds-chip', 'data-missing': '1' },
+                    name,
+                    h('button', { className: 'ds-chip-x', title: '移除', onClick: () => set('skills', (draft.skills ?? []).filter(entry => entry !== name)) }, '×'),
+                  )),
+                )
+                : null,
+            ),
+            h('div', { className: 'ds-row', style: { gap: 8 } },
+              h('div', { className: 'ds-field', style: { flex: 1 } },
+                h('div', { className: 'ds-label' }, '模型'),
+                h(TextField, { className: 'ds-input', value: draft.model, placeholder: 'deepseek-v4.1-flash（留空跟随角色默认）', onChange: e => set('model', e.target.value) }),
+              ),
+              h('div', { className: 'ds-field', style: { flex: 1 } },
+                tipLabel('Agent 预设', '预设决定这个专家能用哪些工具、以什么身份干活（如 standard、架构师）'),
+                h(TextField, { className: 'ds-input', value: draft.preset, placeholder: 'standard', onChange: e => set('preset', e.target.value) }),
+              ),
+              h('div', { className: 'ds-field', style: { flex: 1 } },
+                tipLabel('沙箱档位', 'read-only 只能看；workspace-write 能改工作区；danger-full-access 不做限制'),
+                h(SelectField, {
+                  className: 'ds-input',
+                  value: draft.sandbox ?? '',
+                  onChange: e => set('sandbox', e.target.value),
+                },
+                  [['', '跟随全局'],
+                    ['read-only', '只读'],
+                    ['workspace-write', '只写工作区'],
+                    ['danger-full-access', '无沙箱']].map(([id, label]) =>
+                    h('option', { key: id, value: id }, label)),
+                ),
+                h('div', { className: 'ds-hint' }, '研发/测试这类要真跑命令的专家建议「只写工作区」。'),
+              ),
+            ),
+            h('div', { className: 'ds-field' },
+              h('div', { className: 'ds-label' }, '角色提示词（每次派活都会作为系统提示发给这个专家）'),
+              h(TextAreaField, {
+                className: 'ds-input', rows: 9, value: draft.prompt,
+                placeholder: '例如：\n你是支付域的产品经理。先读 docs/ 与支付相关的 ADR，再动手。\n需求必须写清：目标用户、主流程、异常与退款路径、对账口径。\n不确定的地方去代码或历史工单里找证据，禁止编造接口字段。',
+                onChange: e => set('prompt', e.target.value),
+              }),
+            ),
+            h('div', { className: 'ds-field' },
+              h('label', { className: 'ds-row', style: { alignItems: 'center', gap: 8, cursor: 'pointer' } },
+                h(CheckField, { checked: draft.enabled !== false, onChange: e => set('enabled', e.target.checked) }),
+                h('span', {}, '启用这个专家'),
+              ),
+            ),
+        ),
+      )
+    }
+
+    function TeamsPanel({ config, onChanged }) {
+      const teams = config.teams ?? []
+      const experts = config.experts ?? []
+      const [draft, setDraft] = React.useState(null)
+      const [error, setError] = React.useState(null)
+      const [busy, setBusy] = React.useState(false)
+      const nameOf = id => {
+        const found = experts.find(expert => expert.id === id)
+        return found === undefined ? id : `${found.emoji} ${found.name}`
+      }
+      const save = async () => {
+        if (draft === null) return
+        setBusy(true); setError(null)
+        try { await api('/teams/save', { team: draft }); setDraft(null); await onChanged() }
+        catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)) } finally { setBusy(false) }
+      }
+      const remove = async team => {
+        if (!(await confirmDialog(`删除专家团「${team.name}」？`, { title: '删除专家团', danger: true, okText: '删除' }))) return
+        setBusy(true); setError(null)
+        try { await api('/teams/delete', { id: team.id }); await onChanged() }
+        catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)) } finally { setBusy(false) }
+      }
+      const set = (key, value) => setDraft({ ...draft, [key]: value })
+
+      const rows = teams.map(team => h('div', { className: 'ds-listrow', key: team.id },
+        h('div', { className: 'ds-listrow-main' },
+          h('div', {}, `👥 ${team.name}`),
+          h('div', { className: 'ds-hint' }, `团长 ${nameOf(team.lead)} · 成员 ${team.members.map(nameOf).join('、')}`),
+        ),
+        h('div', { className: 'ds-listrow-actions' },
+          tipOf('编辑这个专家团', h('button', { className: 'ds-btn', disabled: busy, onClick: () => setDraft({ ...team }) }, '编辑')),
+          tipOf('删除这个专家团', h('button', { className: 'ds-btn', disabled: busy, onClick: () => void remove(team), 'data-danger': '1' }, '删除')),
+        ),
+      ))
+
+      return h('div', { className: 'ds-pane-stack' },
+        h(Editor, {
+          title: '专家团（一起干活）',
+          hint: '专家团有团长和成员。评论里 @团名，团长会拆活、给成员派活并汇总结论；成员之间可以继续 @ 接棒。',
+          rows, onAdd: () => setDraft({ id: '', name: '', description: '', members: [], lead: '', enabled: true }), addLabel: '新增专家团',
+          render: row => row,
+          empty: '还没有专家团。',
+        }),
+        draft === null ? null : h(SideDrawer, {
+          title: draft.id ? `编辑专家团：${draft.name || draft.id}` : '新增专家团',
+          hint: '团长负责拆活，成员之间在评论里用 @名字 接棒；改完点右下角「保存」。',
+          onClose: () => setDraft(null),
+          footer: [
+            h('button', { key: 'save', className: 'ds-btn ds-btn-primary', disabled: busy, onClick: () => void save() }, busy ? '保存中…' : '保存'),
+            h('button', { key: 'cancel', className: 'ds-btn', disabled: busy, onClick: () => setDraft(null) }, '取消'),
+            error !== null ? h('span', { key: 'error', className: 'ds-error ds-side-note' }, error) : null,
+          ],
+        },
+            h('div', { className: 'ds-field' },
+              h('div', { className: 'ds-label' }, '团名（@ 用这个名字）'),
+              h(TextField, { className: 'ds-input', value: draft.name, placeholder: '需求交付组', onChange: e => set('name', e.target.value) }),
+            ),
+            h('div', { className: 'ds-field' },
+              h('div', { className: 'ds-label' }, '这个团负责什么'),
+              h(TextField, { className: 'ds-input', value: draft.description, placeholder: '从需求澄清一路做到验收', onChange: e => set('description', e.target.value) }),
+            ),
+            h('div', { className: 'ds-field' },
+              h('div', { className: 'ds-label' }, '成员'),
+              experts.length === 0 ? h('div', { className: 'ds-hint' }, '先去上面建几个专家。') : h('div', { className: 'ds-row', style: { flexWrap: 'wrap', gap: 12 } },
+                experts.map(expert => h('label', { className: 'ds-row', key: expert.id, style: { alignItems: 'center', gap: 6, cursor: 'pointer' } },
+                  h(CheckField, { checked: (draft.members ?? []).includes(expert.id),
+                    onChange: e => set('members', e.target.checked
+                      ? [...(draft.members ?? []), expert.id]
+                      : (draft.members ?? []).filter(id => id !== expert.id)),
+                  }),
+                  h('span', {}, `${expert.emoji} ${expert.name}`),
+                )),
+              ),
+            ),
+            h('div', { className: 'ds-field' },
+              h('div', { className: 'ds-label' }, '团长（负责拆活和汇总）'),
+              h(SelectField, {
+                className: 'ds-input', value: draft.lead ?? '',
+                onChange: e => set('lead', e.target.value),
+              },
+                h('option', { value: '' }, '自动（第一个成员）'),
+                (draft.members ?? []).map(id => h('option', { key: id, value: id }, nameOf(id))),
+              ),
+            ),
+        ),
+      )
+    }
+
+    function TestingPanel({ config, onChanged }) {
+      const testing = config.testing ?? {}
+      const envs = Array.isArray(testing.envs) ? testing.envs : []
+      const [draft, setDraft] = React.useState(null)
+      const [hosts, setHosts] = React.useState((Array.isArray(testing.allowHosts) ? testing.allowHosts : []).join(', '))
+      const [timeoutText, setTimeoutText] = React.useState(String(testing.timeoutMs ?? 15000))
+      const [busy, setBusy] = React.useState(false)
+      const [error, setError] = React.useState(null)
+      const [note, setNote] = React.useState(null)
+
+      const push = async next => {
+        setBusy(true); setError(null); setNote(null)
+        try {
+          await api('/config', {
+            testing: {
+              envs: next.envs ?? envs,
+              defaultEnv: next.defaultEnv !== undefined ? next.defaultEnv : (testing.defaultEnv ?? ''),
+              timeoutMs: next.timeoutMs !== undefined ? next.timeoutMs : (testing.timeoutMs ?? 15000),
+              allowHosts: next.allowHosts !== undefined ? next.allowHosts : (Array.isArray(testing.allowHosts) ? testing.allowHosts : []),
+              concurrency: testing.concurrency ?? 4,
+            },
+          })
+          setNote('已保存'); toast('已保存')
+          await onChanged()
+        } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)) } finally { setBusy(false) }
+      }
+      const saveEnv = async () => {
+        if (draft === null) return
+        const name = String(draft.name ?? '').trim()
+        const baseUrl = String(draft.baseUrl ?? '').trim()
+        if (name === '') { setError('环境名不能为空'); return }
+        const entry = { id: draft.id ?? '', name, baseUrl }
+        const next = draft.id === undefined || draft.id === ''
+          ? [...envs, entry]
+          : envs.map(item => (item.id === draft.id ? { ...item, ...entry } : item))
+        setDraft(null)
+        await push({ envs: next, defaultEnv: testing.defaultEnv === '' ? '' : testing.defaultEnv })
+      }
+      const removeEnv = async env => {
+        if (!(await confirmDialog(`删除环境「${env.name}」？`, { title: '删除环境', danger: true, okText: '删除' }))) return
+        const next = envs.filter(item => item.id !== env.id)
+        await push({ envs: next, defaultEnv: testing.defaultEnv === env.id ? (next[0]?.id ?? '') : testing.defaultEnv })
+      }
+      const saveHosts = async () => {
+        const list = hosts.split(/[,，\s]+/).map(item => item.trim()).filter(item => item !== '')
+        const ms = Number(timeoutText)
+        await push({ allowHosts: list, timeoutMs: Number.isFinite(ms) && ms > 0 ? ms : 15000 })
+      }
+
+      const envRow = env => h('div', { key: env.id, className: 'ds-listrow' },
+        h('div', { className: 'ds-listrow-main' },
+          h('div', null, `${env.name}${testing.defaultEnv === env.id ? ' · 默认' : ''}`),
+          h('div', { className: 'ds-hint' }, env.baseUrl === '' ? '相对地址会因为没有 baseUrl 而失败' : env.baseUrl),
+        ),
+        h('div', { className: 'ds-listrow-actions' },
+          testing.defaultEnv === env.id ? null : h('button', { className: 'ds-btn ds-btn-ghost', disabled: busy, onClick: () => void push({ defaultEnv: env.id }) }, '设为默认'),
+          h('button', { className: 'ds-btn ds-btn-ghost', disabled: busy, onClick: () => setDraft({ ...env }) }, '编辑'),
+          h('button', { className: 'ds-btn ds-btn-ghost', disabled: busy, onClick: () => void removeEnv(env), 'data-danger': '1' }, '删除'),
+        ),
+      )
+
+      const form = draft === null ? null : h('div', { className: 'ds-panel ds-form-panel' },
+        h('div', { className: 'ds-panel-head' }, draft.id === undefined || draft.id === '' ? '新增环境' : `编辑环境：${draft.name}`),
+        h('div', { className: 'ds-panel-body' },
+          h('div', { className: 'ds-field' },
+            h('div', { className: 'ds-label' }, '环境名'),
+            h(TextField, { className: 'ds-input', value: draft.name ?? '', placeholder: '例如 测试环境 / 预发环境', onChange: event => setDraft({ ...draft, name: event.target.value }) }),
+          ),
+          h('div', { className: 'ds-field' },
+            tipLabel('baseUrl', '接口测试的根地址，用例里的 /path 会拼在它后面'),
+            h(TextField, { className: 'ds-input', value: draft.baseUrl ?? '', placeholder: 'https://test.example.com', onChange: event => setDraft({ ...draft, baseUrl: event.target.value }) }),
+          ),
+          h('div', { className: 'ds-row', style: { justifyContent: 'flex-end' } },
+            h('button', { className: 'ds-btn ds-btn-ghost', disabled: busy, onClick: () => setDraft(null) }, '取消'),
+            h('button', { className: 'ds-btn ds-btn-primary', disabled: busy, onClick: () => void saveEnv() }, '保存环境'),
+          ),
+        ),
+      )
+
+      return h('div', { className: 'ds-pane-stack' },
+        form,
+        h('div', { className: 'ds-panel' },
+          h('div', { className: 'ds-panel-head' }, '测试环境',
+            h('button', { className: 'ds-btn ds-btn-ghost', disabled: busy, onClick: () => setDraft({ name: '', baseUrl: '' }) }, '＋ 新增环境')),
+          h('div', { className: 'ds-panel-body' },
+            envs.length === 0 ? h('div', { className: 'ds-empty' }, '还没有环境。接口用例里的相对地址会拼到这里配置的 baseUrl。') : envs.map(envRow),
+          ),
+        ),
+        h('div', { className: 'ds-panel ds-form-panel' },
+          h('div', { className: 'ds-panel-head' }, '执行约束'),
+          h('div', { className: 'ds-panel-body' },
+            h('div', { className: 'ds-field' },
+              h('div', { className: 'ds-label' }, '允许访问的域名（逗号分隔，支持 *.example.com）'),
+              h(TextField, { className: 'ds-input', value: hosts, placeholder: '127.0.0.1, localhost, test.example.com', onChange: event => setHosts(event.target.value) }),
+            ),
+            h('div', { className: 'ds-field' },
+              h('div', { className: 'ds-label' }, '单条用例超时（毫秒）'),
+              h(TextField, { className: 'ds-input', value: timeoutText, onChange: event => setTimeoutText(event.target.value) }),
+            ),
+            h('div', { className: 'ds-row', style: { justifyContent: 'flex-end' } },
+              h('button', { className: 'ds-btn ds-btn-primary', disabled: busy, onClick: () => void saveHosts() }, busy ? '保存中…' : '保存约束'),
+            ),
+            note === null ? null : h('div', { className: 'ds-ok' }, note),
+            error === null ? null : h('div', { className: 'ds-err' }, error),
+          ),
+        ),
+      )
+    }
+
+    /** 通知升级：通道连续失败达到阈值时，往另一个群发一条，别和日常通知混在一起。 */
+    function EscalatePanel({ config, onChanged }) {
+      const feishu = config.feishu ?? {}
+      const [hook, setHook] = React.useState('')
+      const [after, setAfter] = React.useState(String(feishu.escalateAfter ?? 3))
+      const [busy, setBusy] = React.useState(false)
+      const [note, setNote] = React.useState(null)
+      const [error, setError] = React.useState(null)
+      const save = async () => {
+        setBusy(true); setNote(null); setError(null)
+        try {
+          const payload = {}
+          if (String(hook ?? '').trim() !== '') payload.escalateWebhook = String(hook).trim()
+          payload.escalateAfter = Number(after) || 3
+          await api('/config', { feishu: payload })
+          setHook('')
+          setNote('已保存：连续失败 ' + (Number(after) || 3) + ' 次后往升级群发一条')
+          await onChanged()
+        } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)) } finally { setBusy(false) }
+      }
+      return h('div', { className: 'ds-panel ds-form-panel', style: { marginTop: 14 } },
+        h('div', { className: 'ds-panel-head' }, '通知升级'),
+        h('div', { className: 'ds-panel-body' },
+          h('div', { className: 'ds-field' },
+            h('div', { className: 'ds-label' }, '升级群 Webhook'),
+            h(TextField, {
+              className: 'ds-input', value: hook,
+              placeholder: feishu.escalateWebhookSet === true ? '已设置（留空表示不修改）' : 'https://open.feishu.cn/open-apis/bot/v2/hook/…',
+              onChange: event => setHook(event.target.value),
+            }),
+          ),
+          h('div', { className: 'ds-field' },
+            tipLabel('连续失败几次后升级', '同一通道连续失败到这个次数，就给升级群发消息'),
+            h(TextField, { className: 'ds-input', style: { width: 90 }, value: after, onChange: event => setAfter(event.target.value) }),
+          ),
+          h('div', { className: 'ds-hint' }, '飞书通知、GitLab、云盘归档、代码隔离任一通道连续失败达到阈值时，只在跨过阈值那一次往升级群发一条，包含通道、失败次数与最近错误。'),
+          h('div', { className: 'ds-row', style: { justifyContent: 'flex-end' } },
+            h('button', { className: 'ds-btn ds-btn-primary', disabled: busy, onClick: () => void save() }, busy ? '保存中…' : '保存升级设置'),
+          ),
+          note === null ? null : h('div', { className: 'ds-ok' }, note),
+          error === null ? null : h('div', { className: 'ds-err' }, error),
+        ),
+      )
+    }
+
+    /** 部署环境：只用于登记「版本上过哪个环境」，平台不触发任何部署。 */
+    function EnvironmentsPanel({ config, onChanged }) {
+      const [rows, setRows] = React.useState(() => (config.environments ?? []).map(env => ({ id: env.id, name: env.name, kind: env.kind, note: env.note })))
+      const [busy, setBusy] = React.useState(false)
+      const [note, setNote] = React.useState(null)
+      const [error, setError] = React.useState(null)
+      const [rulesNote, setRulesNote] = React.useState(null)
+      const saveRules = async patch => {
+        setRulesNote(null)
+        try {
+          await api('/config', { releaseRules: patch })
+          setRulesNote('发布准入已更新')
+          await onChanged()
+        } catch (cause) {
+          setRulesNote(cause instanceof Error ? cause.message : String(cause))
+        }
+      }
+      const addRow = () => setRows(list => (list.length >= 12 ? list : [...list, { id: '', name: '', kind: 'other', note: '' }]))
+      const setRow = (index, patch) => setRows(list => list.map((row, i) => (i === index ? { ...row, ...patch } : row)))
+      const dropRow = index => setRows(list => list.filter((row, i) => i !== index))
+      const save = async () => {
+        setBusy(true); setNote(null); setError(null)
+        try {
+          const payload = rows
+            .map(row => ({ ...row, name: String(row.name ?? '').trim() }))
+            .filter(row => row.name !== '')
+          if (payload.length === 0) throw new Error('至少留一个环境，否则部署记录没处挂')
+          await api('/config', { environments: payload })
+          setNote(`已保存 ${payload.length} 个环境`); toast(`已保存 ${payload.length} 个环境`)
+          await onChanged()
+        } catch (cause) {
+          setError(cause instanceof Error ? cause.message : String(cause))
+        } finally {
+          setBusy(false)
+        }
+      }
+      return h('div', { className: 'ds-panel ds-form-panel' },
+        h('div', { className: 'ds-panel-head' }, '部署环境', h('span', { className: 'ds-hint' }, '只登记，不触发')),
+        h('div', { className: 'ds-panel-body' },
+          h('div', { className: 'ds-hint' }, '这些环境只用来在版本上留痕：谁在什么时候把哪个版本放到了哪个环境。平台不会调用任何部署脚本、webhook 或 CI，部署仍然由人或你们自己的流水线完成。'),
+          rows.map((row, index) => h('div', { key: `env-${index}`, className: 'ds-row', style: { gap: 8, marginTop: 8, alignItems: 'flex-end' } },
+            h('div', { className: 'ds-field', style: { flex: 1 } },
+              h('div', { className: 'ds-label' }, '名字'),
+              h(TextField, {
+                className: 'ds-input', value: row.name, placeholder: '例如 预发',
+                onChange: event => setRow(index, { name: event.target.value }),
+              }),
+            ),
+            h('div', { className: 'ds-field', style: { flex: '0 0 120px' } },
+              h('div', { className: 'ds-label' }, '类型'),
+              h(SelectField, {
+                className: 'ds-input', value: row.kind,
+                onChange: event => setRow(index, { kind: event.target.value }),
+              }, ['dev', 'staging', 'prod', 'other'].map(kind => h('option', { key: kind, value: kind }, kind))),
+            ),
+            h('div', { className: 'ds-field', style: { flex: 2 } },
+              h('div', { className: 'ds-label' }, '说明'),
+              h(TextField, {
+                className: 'ds-input', value: row.note, placeholder: '例如 上线前最后一关',
+                onChange: event => setRow(index, { note: event.target.value }),
+              }),
+            ),
+            h('button', { className: 'ds-btn ds-btn-ghost', onClick: () => dropRow(index), 'data-danger': '1' }, '删除'),
+          )),
+          h('div', { className: 'ds-row', style: { gap: 8, marginTop: 10 } },
+            h('button', { className: 'ds-btn', onClick: addRow, disabled: rows.length >= 12 }, '＋ 加一个环境'),
+          ),
+          h('div', { className: 'ds-hint' }, 'id 由名字生成一次就固定了：改名不会断开已有的部署记录；删掉的环境，历史记录里的名字会显示成 id。'),
+          h('div', { className: 'ds-row', style: { justifyContent: 'flex-end', marginTop: 10 } },
+            h('button', { className: 'ds-btn ds-btn-primary', disabled: busy, onClick: () => void save() }, busy ? '保存中…' : '保存环境'),
+          ),
+          note === null ? null : h('div', { className: 'ds-ok' }, note),
+          error === null ? null : h('div', { className: 'ds-err' }, error),
+        ),
+        h('div', { className: 'ds-panel-body', style: { borderTop: '1px solid var(--ds-line)' } },
+          h('div', { className: 'ds-label' }, '发布准入（发布时会检查，不满足要「强制发布」并写原因）'),
+          h('label', { className: 'ds-check', style: { marginTop: 8 } },
+            h(CheckField, { checked: (config.releaseRules?.requireStaging ?? false) === true,
+              onChange: event => void saveRules({ requireStaging: event.target.checked }),
+            }),
+            h('span', { className: 'ds-check-text' }, '发布前必须先在「预发」环境登记过一次部署'),
+          ),
+          h('label', { className: 'ds-check', style: { marginTop: 6 } },
+            h(CheckField, { checked: (config.releaseRules?.requireRequirementSignoff ?? false) === true,
+              onChange: event => void saveRules({ requireRequirementSignoff: event.target.checked }),
+            }),
+            h('span', { className: 'ds-check-text' }, '关联需求必须都签过验收字'),
+          ),
+          h('div', { className: 'ds-hint', style: { marginTop: 6 } }, '两条默认都不勾：不勾的时候发布只看门禁，不看你上没上过预发、需不需要签字。'),
+          rulesNote === null ? null : h('div', { className: 'ds-ok' }, rulesNote),
+        ),
+      )
+    }
+
+    /**
+     * 统一登录（LDAP）：配置连接 + 测试连接 + 开不开「必须登录」。
+     * 服务账号密码只往服务端写一次（存进 0600 的密钥文件），这里永远不回显。
+     */
+    function LdapPanel({ config, onChanged }) {
+      const ldap = config.ldap ?? {}
+      const [draft, setDraft] = React.useState({
+        enabled: ldap.enabled === true,
+        url: ldap.url ?? 'ldap://ldap.laiyifen.com:389',
+        baseDN: ldap.baseDN ?? 'DC=LYF,DC=COM',
+        bindDN: ldap.bindDN ?? 'cn=root',
+        bindPassword: '',
+        userFilter: ldap.userFilter ?? '(|(sAMAccountName={user})(uid={user})(mail={user}))',
+        nameAttr: ldap.nameAttr ?? 'displayName',
+        mailAttr: ldap.mailAttr ?? 'mail',
+        deptAttr: ldap.deptAttr ?? 'department',
+        defaultRole: ldap.defaultRole ?? 'member',
+        requireLogin: ldap.requireLogin === true,
+        timeoutMs: String(ldap.timeoutMs ?? 6000),
+      })
+      const [busy, setBusy] = React.useState(false)
+      const [testing, setTesting] = React.useState(false)
+      const [note, setNote] = React.useState(null)
+      const [error, setError] = React.useState(null)
+      const [steps, setSteps] = React.useState([])
+      const localAuth = config.localAuth ?? {}
+      const [oldPw, setOldPw] = React.useState('')
+      const [newPw, setNewPw] = React.useState('')
+      const [pwBusy, setPwBusy] = React.useState(false)
+      const [pwNote, setPwNote] = React.useState(null)
+      const [pwError, setPwError] = React.useState(null)
+      const changePassword = async () => {
+        setPwBusy(true); setPwNote(null); setPwError(null)
+        try {
+          await api('/auth/password', { username: localAuth.username, currentPassword: oldPw, newPassword: newPw })
+          setOldPw(''); setNewPw('')
+          setPwNote('密码已更新')
+          onChanged()
+        } catch (cause) {
+          setPwError(cause instanceof Error ? cause.message : String(cause))
+        } finally {
+          setPwBusy(false)
+        }
+      }
+      const patch = next => setDraft(current => ({ ...current, ...next }))
+
+      const test = async () => {
+        setTesting(true); setNote(null); setError(null); setSteps([])
+        try {
+          const payload = await api('/auth/ldap/test', {
+            ldap: {
+              url: draft.url, baseDN: draft.baseDN, bindDN: draft.bindDN, userFilter: draft.userFilter,
+              nameAttr: draft.nameAttr, mailAttr: draft.mailAttr, deptAttr: draft.deptAttr,
+              timeoutMs: Number(draft.timeoutMs),
+            },
+            bindPassword: draft.bindPassword,
+          })
+          setSteps(payload.steps ?? [])
+          setNote(payload.message ?? '连接正常'); toast(payload.message ?? '连接正常', payload.ok === false ? 'error' : 'success')
+        } catch (cause) {
+          const message = cause instanceof Error ? cause.message : String(cause)
+          setError(message)
+        } finally {
+          setTesting(false)
+        }
+      }
+
+      const save = async () => {
+        setBusy(true); setNote(null); setError(null)
+        try {
+          const body = {
+            ldap: {
+              enabled: draft.enabled,
+              url: draft.url.trim(),
+              baseDN: draft.baseDN.trim(),
+              bindDN: draft.bindDN.trim(),
+              userFilter: draft.userFilter.trim(),
+              nameAttr: draft.nameAttr.trim(),
+              mailAttr: draft.mailAttr.trim(),
+              deptAttr: draft.deptAttr.trim(),
+              defaultRole: draft.defaultRole,
+              requireLogin: draft.requireLogin,
+              timeoutMs: Number(draft.timeoutMs) || 6000,
+            },
+          }
+          if (draft.bindPassword.trim() !== '') body.ldap.bindPassword = draft.bindPassword.trim()
+          await api('/config', body)
+          patch({ bindPassword: '' })
+          setNote(draft.bindPassword.trim() === '' ? '已保存（服务账号密码没改）' : '已保存，服务账号密码已写入密钥文件')
+          await onChanged()
+        } catch (cause) {
+          setError(cause instanceof Error ? cause.message : String(cause))
+        } finally {
+          setBusy(false)
+        }
+      }
+
+      return h('div', { className: 'ds-panel ds-form-panel' },
+        h('div', { className: 'ds-panel-head' }, '统一登录（LDAP）',
+          h('span', { className: 'ds-hint' }, ldap.bindPasswordSet === true ? '服务账号密码已保存' : '服务账号密码还没保存')),
+        h('div', { className: 'ds-panel-body' },
+          h('div', { className: 'ds-hint' },
+            '开启后，页头会出现登录框：用域账号登录，平台拿到的用户名会记进 config.users（首次登录建档、之后只更新最近登录），写操作和审计都挂在这个名字下。'),
+          h('label', { className: 'ds-check', style: { marginTop: 8 } },
+            h(CheckField, { checked: draft.enabled, onChange: event => patch({ enabled: event.target.checked }) }),
+            h('span', { className: 'ds-check-text' }, '启用 LDAP 登录'),
+          ),
+          h('label', { className: 'ds-check', style: { marginTop: 6 } },
+            h(CheckField, { checked: draft.requireLogin, onChange: event => patch({ requireLogin: event.target.checked }) }),
+            h('span', { className: 'ds-check-text' }, '必须登录才能用（不勾也可以先配好再打开）'),
+          ),
+          h('div', { className: 'ds-row', style: { gap: 8, marginTop: 8 } },
+            h('div', { className: 'ds-field', style: { flex: 2 } },
+              h('div', { className: 'ds-label' }, '服务器地址'),
+              h(TextField, { className: 'ds-input', value: draft.url, placeholder: 'ldap://host:389', onChange: event => patch({ url: event.target.value }) }),
+            ),
+            h('div', { className: 'ds-field', style: { flex: '0 0 110px' } },
+              h('div', { className: 'ds-label' }, '超时（毫秒）'),
+              h(TextField, { className: 'ds-input', value: draft.timeoutMs, onChange: event => patch({ timeoutMs: event.target.value }) }),
+            ),
+          ),
+          h('div', { className: 'ds-row', style: { gap: 8, marginTop: 8 } },
+            h('div', { className: 'ds-field', style: { flex: 1 } },
+              h('div', { className: 'ds-label' }, 'BASE DN'),
+              h(TextField, { className: 'ds-input', value: draft.baseDN, placeholder: 'DC=LYF,DC=COM', onChange: event => patch({ baseDN: event.target.value }) }),
+            ),
+            h('div', { className: 'ds-field', style: { flex: 1 } },
+              h('div', { className: 'ds-label' }, '服务账号 DN'),
+              h(TextField, { className: 'ds-input', value: draft.bindDN, placeholder: 'cn=root', onChange: event => patch({ bindDN: event.target.value }) }),
+            ),
+          ),
+          h('div', { className: 'ds-row', style: { gap: 8, marginTop: 8 } },
+            h('div', { className: 'ds-field', style: { flex: 1 } },
+              h('div', { className: 'ds-label' }, ldap.bindPasswordSet === true ? '服务账号密码（留空 = 不改）' : '服务账号密码'),
+              h(TextField, {
+                className: 'ds-input', type: 'password', value: draft.bindPassword,
+                placeholder: ldap.bindPasswordSet === true ? '已保存，留空表示不修改' : '写一次就进密钥文件',
+                onChange: event => patch({ bindPassword: event.target.value }),
+              }),
+            ),
+            h('div', { className: 'ds-field', style: { flex: 1 } },
+              h('div', { className: 'ds-label' }, '用户过滤器（{user} 会被替换）'),
+              h(TextField, { className: 'ds-input', value: draft.userFilter, onChange: event => patch({ userFilter: event.target.value }) }),
+            ),
+          ),
+          h('div', { className: 'ds-row', style: { gap: 8, marginTop: 8 } },
+            h('div', { className: 'ds-field', style: { flex: 1 } },
+              h('div', { className: 'ds-label' }, '显示名属性'),
+              h(TextField, { className: 'ds-input', value: draft.nameAttr, onChange: event => patch({ nameAttr: event.target.value }) }),
+            ),
+            h('div', { className: 'ds-field', style: { flex: 1 } },
+              h('div', { className: 'ds-label' }, '邮箱属性'),
+              h(TextField, { className: 'ds-input', value: draft.mailAttr, onChange: event => patch({ mailAttr: event.target.value }) }),
+            ),
+            h('div', { className: 'ds-field', style: { flex: 1 } },
+              h('div', { className: 'ds-label' }, '部门属性'),
+              h(TextField, { className: 'ds-input', value: draft.deptAttr, onChange: event => patch({ deptAttr: event.target.value }) }),
+            ),
+          ),
+          h('div', { className: 'ds-row', style: { gap: 8, marginTop: 10 } },
+            h('button', { className: 'ds-btn', disabled: testing, onClick: () => void test() }, testing ? '测试中…' : '测试连接'),
+            h('button', { className: 'ds-btn ds-btn-primary', disabled: busy, onClick: () => void save() }, busy ? '保存中…' : '保存'),
+          ),
+          steps.length === 0 ? null : h('div', { style: { marginTop: 8 } },
+            steps.map((step, index) => h('div', { key: `ldap-step-${index}`, className: step.ok === true ? 'ds-ok' : 'ds-error' },
+              `${step.ok === true ? '✓' : '✗'} ${step.name}：${step.message}${step.ms > 0 ? `（${step.ms}ms）` : ''}`)),
+          ),
+          note === null ? null : h('div', { className: 'ds-ok', style: { marginTop: 8 } }, note),
+          error === null ? null : h('div', { className: 'ds-error', style: { marginTop: 8 } }, error),
+          h('div', { className: 'ds-hint', style: { marginTop: 10 } },
+            '依赖系统里的 ldapsearch（Ubuntu：apt-get install ldap-utils）。密码只写进 ~/.dsh/dsh-studio.secrets.json（0600），不会出现在状态、导出和日志里。'),
+        ),
+        h('div', { className: 'ds-panel-body', style: { borderTop: '1px solid var(--ds-line)' } },
+          h('div', { className: 'ds-label' }, '本地超管账号'),
+          h('div', { className: 'ds-hint', style: { marginTop: 4 } },
+            `账号：${localAuth.username ?? 'admin'} · ${localAuth.hasPassword === true ? '已设置自己的密码' : '还在用默认口令 admin'}。没启用 LDAP 时平台默认以这个身份使用，不需要登录；启用 LDAP 后它仍可用来兜底登录。`),
+          h('div', { className: 'ds-row', style: { gap: 8, marginTop: 8 } },
+            h('div', { className: 'ds-field', style: { flex: 1 } },
+              h('div', { className: 'ds-label' }, '当前密码'),
+              h(TextField, { className: 'ds-input', type: 'password', value: oldPw, onChange: event => setOldPw(event.target.value) }),
+            ),
+            h('div', { className: 'ds-field', style: { flex: 1 } },
+              h('div', { className: 'ds-label' }, '新密码（至少 8 位）'),
+              h(TextField, { className: 'ds-input', type: 'password', value: newPw, onChange: event => setNewPw(event.target.value) }),
+            ),
+            h('button', {
+              className: 'ds-btn',
+              disabled: pwBusy || oldPw === '' || newPw.length < 8,
+              onClick: () => void changePassword(),
+            }, pwBusy ? '提交中…' : '改密码'),
+          ),
+          pwNote === null ? null : h('div', { className: 'ds-ok', style: { marginTop: 6 } }, pwNote),
+          pwError === null ? null : h('div', { className: 'ds-error', style: { marginTop: 6 } }, pwError),
+        ),
+        h('div', { className: 'ds-panel-body', style: { borderTop: '1px solid var(--ds-line)' } },
+          h('div', { className: 'ds-label' }, `登录过的人（${(config.users ?? []).length}）`),
+          (config.users ?? []).length === 0
+            ? h('div', { className: 'ds-hint', style: { marginTop: 6 } }, '还没有人用 LDAP 登录过。')
+            : h('div', { style: { marginTop: 6 } }, (config.users ?? []).slice(0, 20).map(user => h('div', { key: user.id, className: 'ds-kv' },
+              h('div', null, user.name),
+              h('div', null, `${user.id} · ${user.dept === '' ? '（无部门）' : user.dept} · 登录 ${user.loginCount} 次 · 最近 ${fmtTime(user.lastLoginAt)}`),
+            ))),
+        ),
+      )
+    }
+
+
+    function CostsPanel({ config, onChanged }) {
+      const costs = config.costs ?? {}
+      const [runs, setRuns] = React.useState(String(costs.budgetRuns ?? 500))
+      const [hours, setHours] = React.useState(String(costs.budgetHours ?? 80))
+      const [warnAt, setWarnAt] = React.useState(String(costs.warnAt ?? 80))
+      const [busy, setBusy] = React.useState(false)
+      const [note, setNote] = React.useState(null)
+      const [error, setError] = React.useState(null)
+      const save = async () => {
+        setBusy(true); setNote(null); setError(null)
+        try {
+          const runValue = Number(runs)
+          const hourValue = Number(hours)
+          const warnValue = Number(warnAt)
+          if (!Number.isFinite(runValue) || runValue <= 0) throw new Error('预算次数要是正整数')
+          if (!Number.isFinite(hourValue) || hourValue <= 0) throw new Error('预算小时要是正整数')
+          await api('/config', {
+            costs: {
+              budgetRuns: Math.round(runValue),
+              budgetHours: Math.round(hourValue),
+              warnAt: Number.isFinite(warnValue) ? Math.min(100, Math.max(10, Math.round(warnValue))) : 80,
+            },
+          })
+          setNote('已保存：预算')
+          await onChanged()
+        } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)) } finally { setBusy(false) }
+      }
+      return h('div', { className: 'ds-panel ds-form-panel' },
+        h('div', { className: 'ds-panel-head' }, '成本预算'),
+        h('div', { className: 'ds-panel-body ds-grid2' },
+          h('div', { className: 'ds-field' },
+            h('div', { className: 'ds-label' }, '每月派单次数上限'),
+            h(TextField, { className: 'ds-input', value: runs, onChange: event => setRuns(event.target.value) }),
+          ),
+          h('div', { className: 'ds-field' },
+            h('div', { className: 'ds-label' }, '每月机上时长上限（小时）'),
+            h(TextField, { className: 'ds-input', value: hours, onChange: event => setHours(event.target.value) }),
+          ),
+          h('div', { className: 'ds-field' },
+            h('div', { className: 'ds-label' }, '警告阈值（百分比）'),
+            h(TextField, { className: 'ds-input', value: warnAt, onChange: event => setWarnAt(event.target.value) }),
+          ),
+          h('div', { className: 'ds-field ds-span' },
+            h('div', { className: 'ds-hint' }, '效能页的「AI 执行成本」下方会出现预算条；口径是派单次数与机上时长，宿主没有回传 token 用量。'),
+          ),
+          h('div', { className: 'ds-row', style: { justifyContent: 'flex-end' } },
+            h('button', { className: 'ds-btn ds-btn-primary', disabled: busy, onClick: () => void save() }, busy ? '保存中…' : '保存预算'),
+          ),
+          note === null ? null : h('div', { className: 'ds-ok' }, note),
+          error === null ? null : h('div', { className: 'ds-err' }, error),
+        ),
+      )
+    }
+
+    function BusinessPanel({ config, onChanged }) {
+      const projects = config.projects ?? []
+      const repos = config.gitlab?.projects ?? []
+      const [draft, setDraft] = React.useState(null)
+      const [error, setError] = React.useState(null)
+      const [note, setNote] = React.useState(null)
+      const [busy, setBusy] = React.useState(false)
+      const [iter, setIter] = React.useState({ name: '', start: '', due: '', status: 'planned' })
+
+      const save = async () => {
+        if (draft === null) return
+        setBusy(true); setError(null); setNote(null)
+        try {
+          await api('/projects/save', { project: { ...draft, iterations: draft.iterations ?? [] } })
+          setNote('已保存'); toast('已保存'); await onChanged()
+        } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)) } finally { setBusy(false) }
+      }
+      const remove = async project => {
+        if (!(await confirmDialog(`删除项目「${project.name}」？卡片会保留，但不再归属任何项目。`, { title: '删除项目', danger: true, okText: '删除' }))) return
+        setBusy(true); setError(null)
+        try { await api('/projects/delete', { id: project.id }); setDraft(null); await onChanged() }
+        catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)) } finally { setBusy(false) }
+      }
+      const addIteration = async project => {
+        if (iter.name.trim() === '') return
+        setBusy(true); setError(null)
+        try {
+          await api('/projects/iteration', {
+            project: project.id, name: iter.name.trim(),
+            start: fromDateInput(iter.start), due: fromDateInput(iter.due), status: iter.status,
+          })
+          setIter({ name: '', start: '', due: '', status: 'planned' })
+          await onChanged()
+        } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)) } finally { setBusy(false) }
+      }
+      const removeIteration = async (project, iteration) => {
+        setBusy(true); setError(null)
+        try { await api('/projects/iteration', { project: project.id, action: 'remove', iteration: iteration.id }); await onChanged() }
+        catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)) } finally { setBusy(false) }
+      }
+      const set = (key, value) => setDraft({ ...draft, [key]: value })
+      const setService = (index, key, value) => setDraft({
+        ...draft,
+        services: (draft.services ?? []).map((item, at) => (at === index ? { ...item, [key]: value } : item)),
+      })
+      const addService = () => setDraft({
+        ...draft,
+        services: [...(draft.services ?? []), { id: '', name: '', repoId: '', repoPath: '', baseBranch: draft.baseBranch || 'main', dependsOn: [] }],
+      })
+      const dropService = index => setDraft({ ...draft, services: (draft.services ?? []).filter((item, at) => at !== index) })
+      const services = draft === null ? [] : (draft.services ?? [])
+      // 服务依赖：只能选本项目里已经有 id 的其它服务（新建的服务要先保存一次才能被依赖）。
+      const toggleDep = (index, depId) => setDraft({
+        ...draft,
+        services: (draft.services ?? []).map((item, at) => {
+          if (at !== index) return item
+          const current = Array.isArray(item.dependsOn) ? item.dependsOn : []
+          return { ...item, dependsOn: current.includes(depId) ? current.filter(one => one !== depId) : [...current, depId] }
+        }),
+      })
+
+      const rows = projects.map(project => h('div', { className: 'ds-listrow', key: project.id },
+        h('div', { className: 'ds-listrow-main' },
+          h('div', {}, `${project.key ? `[${project.key}] ` : ''}${project.name} · ${PROJECT_STATUS_LABEL[project.status] ?? project.status}${project.lead ? ` · 负责人 ${project.lead}` : ''}`),
+          h('div', { className: 'ds-hint' }, `${(config.projects ?? []).find(x => x.id === project.id)?.iterations?.length ?? 0} 个迭代 · ${(project.services ?? []).length} 个服务${(() => { const edges = (project.services ?? []).reduce((sum, one) => sum + (one.dependsOn ?? []).length, 0); return edges > 0 ? ` · ${edges} 条依赖` : '' })()}${project.description ? ` · ${project.description}` : ''}`),
+        ),
+        h('div', { className: 'ds-listrow-actions' },
+          tipOf('改项目信息、加迭代', h('button', { className: 'ds-btn', disabled: busy, onClick: () => setDraft({ ...project }) }, '编辑 / 迭代')),
+          tipOf('删除这个项目（卡不会删）', h('button', { className: 'ds-btn', disabled: busy, onClick: () => void remove(project), 'data-danger': '1' }, '删除')),
+        ),
+      ))
+
+      return h('div', { className: 'ds-pane-stack' },
+        h(Editor, {
+          title: '业务项目（一个项目可以挂很多张卡和很多个迭代）',
+          hint: '项目是看板的第一层分组：卡片挂项目，项目下面划迭代，看板可按项目和迭代筛选，项目页签看每个项目的体检数据。',
+          rows, onAdd: () => setDraft({ id: '', name: '', key: '', description: '', lead: '', status: 'active', repos: [], services: [], iterations: [] }), addLabel: '新增项目',
+          render: row => row,
+          empty: '还没有项目。团队只跑一个产品也可以先不建，直接在看板上干活。',
+        }),
+        note !== null ? h('div', { className: 'ds-ok', style: { marginBottom: 8 } }, note) : null,
+        draft === null ? null : h('div', { className: 'ds-panel ds-form-panel' },
+          h('div', { className: 'ds-panel-head' }, draft.id ? `编辑项目：${draft.name || draft.id}` : '新增项目'),
+          h('div', { className: 'ds-panel-body' },
+            h('div', { className: 'ds-row', style: { gap: 12 } },
+              h('div', { className: 'ds-field', style: { flex: '0 0 110px' } },
+                h('div', { className: 'ds-label' }, '代号'),
+                h(TextField, { className: 'ds-input', value: draft.key ?? '', placeholder: 'ORD', onChange: e => set('key', e.target.value) }),
+              ),
+              h('div', { className: 'ds-field', style: { flex: 2 } },
+                h('div', { className: 'ds-label' }, '项目名'),
+                h(TextField, { className: 'ds-input', value: draft.name ?? '', placeholder: '订单中心', onChange: e => set('name', e.target.value) }),
+              ),
+              h('div', { className: 'ds-field', style: { flex: 1 } },
+                h('div', { className: 'ds-label' }, '状态'),
+                h(SelectField, { className: 'ds-select', value: draft.status ?? 'active', onChange: e => set('status', e.target.value) },
+                  Object.keys(PROJECT_STATUS_LABEL).map(value => h('option', { key: value, value }, PROJECT_STATUS_LABEL[value]))),
+              ),
+              h('div', { className: 'ds-field', style: { flex: 1 } },
+                h('div', { className: 'ds-label' }, '业务负责人'),
+                h(TextField, { className: 'ds-input', value: draft.lead ?? '', placeholder: '张伟', onChange: e => set('lead', e.target.value) }),
+              ),
+            ),
+            h('div', { className: 'ds-row', style: { gap: 12 } },
+              h('div', { className: 'ds-field', style: { flex: 3 } },
+                h('div', { className: 'ds-label' }, '默认代码目录（没有分服务时用）'),
+                h(TextField, {
+                  className: 'ds-input', value: draft.repoPath ?? '',
+                  placeholder: '/home/lyf/repos/order-center',
+                  onChange: e => set('repoPath', e.target.value),
+                }),
+              ),
+              h('div', { className: 'ds-field', style: { flex: 1 } },
+                h('div', { className: 'ds-label' }, '基线分支'),
+                h(TextField, {
+                  className: 'ds-input', value: draft.baseBranch ?? '',
+                  placeholder: 'main',
+                  onChange: e => set('baseBranch', e.target.value),
+                }),
+              ),
+            ),
+            h('div', { className: 'ds-hint', style: { margin: '-6px 0 4px' } }, '配了代码目录且「代码隔离」选 worktree 时，每张卡会切一条 task/<编号> 分支，互不干扰。项目里有多个服务时，用下面的服务列表分开配。'),
+            h('div', { className: 'ds-field' },
+              h('div', { className: 'ds-label' }, `服务（${services.length}）· 一个服务一个 git 路径，卡片可以指定改哪个`),
+              services.length === 0
+                ? h('div', { className: 'ds-empty' }, '还没有分服务。只有一个仓库时留空即可，走上面的默认代码目录。')
+                : services.map((service, index) => {
+                  const others = services.filter((one, at) => at !== index && String(one.id ?? '').trim() !== '')
+                  return h('div', { key: `${service.id}-${index}`, style: { marginBottom: 8 } },
+                    h('div', { className: 'ds-row', style: { gap: 8, alignItems: 'flex-end' } },
+                      h('div', { className: 'ds-field', style: { flex: '0 0 150px' } },
+                        h('div', { className: 'ds-label' }, '服务名'),
+                        h(TextField, {
+                          className: 'ds-input', value: service.name ?? '', placeholder: 'order-service',
+                          onChange: e => setService(index, 'name', e.target.value),
+                        }),
+                      ),
+                      h('div', { className: 'ds-field', style: { flex: 3 } },
+                        h('div', { className: 'ds-label' }, '本机 git 路径'),
+                        h(TextField, {
+                          className: 'ds-input', value: service.repoPath ?? '', placeholder: '/home/lyf/repos/order-service',
+                          onChange: e => setService(index, 'repoPath', e.target.value),
+                        }),
+                      ),
+                      h('div', { className: 'ds-field', style: { flex: '0 0 110px' } },
+                        h('div', { className: 'ds-label' }, '基线分支'),
+                        h(TextField, {
+                          className: 'ds-input', value: service.baseBranch ?? '', placeholder: 'main',
+                          onChange: e => setService(index, 'baseBranch', e.target.value),
+                        }),
+                      ),
+                      repos.length === 0
+                        ? null
+                        : h('div', { className: 'ds-field', style: { flex: '0 0 150px' } },
+                          h('div', { className: 'ds-label' }, 'GitLab 仓库'),
+                          h(SelectField, {
+                            className: 'ds-select', value: service.repoId ?? '',
+                            onChange: e => setService(index, 'repoId', e.target.value),
+                          },
+                            h('option', { value: '' }, '不关联'),
+                            repos.map(repo => h('option', { key: repo.id, value: repo.id }, repo.name || repo.project)),
+                          ),
+                        ),
+                      h('button', { className: 'ds-btn', type: 'button', onClick: () => dropService(index), 'data-danger': '1' }, '删除'),
+                    ),
+                    others.length === 0
+                      ? null
+                      : h('div', { className: 'ds-row', style: { gap: 6, alignItems: 'center', marginTop: 4, flexWrap: 'wrap' } },
+                        h('span', { className: 'ds-hint' }, '依赖'),
+                        h('span', { className: 'ds-hint', style: { marginRight: 2 } }, '（勾上的服务要先完成，本服务的卡才能收口）'),
+                        others.map(other => h('span', {
+                          key: other.id,
+                          className: 'ds-chip',
+                          'data-on': (service.dependsOn ?? []).includes(other.id) ? '1' : '0',
+                          title: `依赖 ${other.name || other.id}`,
+                          onClick: () => toggleDep(index, other.id),
+                        }, other.name || other.id)),
+                      ),
+                  )
+                }),
+              h('div', { className: 'ds-row', style: { gap: 8 } },
+                h('button', { className: 'ds-btn', type: 'button', onClick: () => addService() }, '＋ 加一个服务'),
+                h('span', { className: 'ds-hint' }, '服务名会被写进任务详情；worktree 从该服务的 git 路径切 task/<编号> 分支。'),
+              ),
+            ),
+            h('div', { className: 'ds-field' },
+              h('div', { className: 'ds-label' }, '项目说明'),
+              h(TextField, { className: 'ds-input', value: draft.description ?? '', placeholder: '这个项目做什么、给谁用', onChange: e => set('description', e.target.value) }),
+            ),
+            h('div', { className: 'ds-row', style: { gap: 8 } },
+              h('button', { className: 'ds-btn ds-btn-primary', disabled: busy, onClick: () => void save() }, busy ? '保存中…' : '保存项目'),
+              h('button', { className: 'ds-btn', disabled: busy, onClick: () => setDraft(null) }, '取消'),
+            ),
+          ),
+        ),
+        draft === null || draft.id === '' ? null : h('div', { className: 'ds-panel ds-form-panel' },
+          h('div', { className: 'ds-panel-head' }, '迭代', h('span', { className: 'ds-hint' }, '迭代用来按时间切需求，看板可按迭代筛选')),
+          h('div', { className: 'ds-panel-body' },
+            (draft.iterations ?? []).length === 0
+              ? h('div', { className: 'ds-empty' }, '还没有迭代。可以先加一个「2026-11 迭代」。')
+              : (draft.iterations ?? []).map(iteration => h('div', { className: 'ds-listrow', key: iteration.id },
+                h('div', { className: 'ds-listrow-main' },
+                  h('div', {}, `${iteration.name} · ${ITERATION_STATUS_LABEL[iteration.status] ?? iteration.status}`),
+                  h('div', { className: 'ds-hint' }, `${iteration.start ? new Date(iteration.start).toISOString().slice(0, 10) : '未定开始'} → ${iteration.due ? new Date(iteration.due).toISOString().slice(0, 10) : '未定结束'}`),
+                ),
+                h('div', { className: 'ds-listrow-actions' },
+                  h('button', { className: 'ds-btn ds-btn-ghost', disabled: busy, onClick: () => void removeIteration(draft, iteration) }, '×'),
+                ),
+              )),
+            h('div', { className: 'ds-row', style: { gap: 8, alignItems: 'flex-end' } },
+              h('div', { className: 'ds-field', style: { flex: 2 } },
+                h('div', { className: 'ds-label' }, '迭代名'),
+                h(TextField, { className: 'ds-input', value: iter.name, placeholder: '2026-11 迭代', onChange: e => setIter({ ...iter, name: e.target.value }) }),
+              ),
+              h('div', { className: 'ds-field', style: { flex: 1 } },
+                h('div', { className: 'ds-label' }, '开始'),
+                h(TextField, { className: 'ds-input', type: 'date', value: iter.start, onChange: e => setIter({ ...iter, start: e.target.value }) }),
+              ),
+              h('div', { className: 'ds-field', style: { flex: 1 } },
+                h('div', { className: 'ds-label' }, '结束'),
+                h(TextField, { className: 'ds-input', type: 'date', value: iter.due, onChange: e => setIter({ ...iter, due: e.target.value }) }),
+              ),
+              h('div', { className: 'ds-field', style: { flex: 1 } },
+                h('div', { className: 'ds-label' }, '状态'),
+                h(SelectField, { className: 'ds-select', value: iter.status, onChange: e => setIter({ ...iter, status: e.target.value }) },
+                  Object.keys(ITERATION_STATUS_LABEL).map(value => h('option', { key: value, value }, ITERATION_STATUS_LABEL[value]))),
+              ),
+              h('button', { className: 'ds-btn', disabled: busy || iter.name.trim() === '', onClick: () => void addIteration(draft) }, '＋ 加迭代'),
+            ),
+            h('div', { className: 'ds-hint' }, '迭代改完会立刻反映到看板的迭代筛选。'),
+          ),
+        ),
+      )
+    }
+
+    function ReposPanel({ config, onChanged }) {
+      const projects = config.gitlab?.projects ?? []
+      const [draft, setDraft] = React.useState(null)
+      const [error, setError] = React.useState(null)
+      const [note, setNote] = React.useState(null)
+      const [busy, setBusy] = React.useState(false)
+      const save = async () => {
+        if (draft === null) return
+        setBusy(true); setError(null); setNote(null)
+        try { await api('/repos/save', { project: draft }); setDraft(null); setNote('已保存'); toast('已保存'); await onChanged() }
+        catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)) } finally { setBusy(false) }
+      }
+      const remove = async project => {
+        if (!(await confirmDialog(`删除 GitLab 项目「${project.name}」？已同步的卡片会保留。`, { title: '删除 GitLab 项目', danger: true, okText: '删除' }))) return
+        setBusy(true); setError(null)
+        try { await api('/repos/delete', { id: project.id }); await onChanged() }
+        catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)) } finally { setBusy(false) }
+      }
+      const test = async project => {
+        setBusy(true); setError(null); setNote(null)
+        try { const out = await api('/repos/test', { id: project.id }); setNote(`连通：${project.project}（示例 Issue ${out.sample} 条）`) }
+        catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)) } finally { setBusy(false) }
+      }
+      const sync = async project => {
+        setBusy(true); setError(null); setNote(null)
+        try {
+          const out = await api('/gitlab/sync', { project: project.id })
+          const row = (out.summary?.projects ?? [])[0]
+          setNote(row === undefined ? '没有可同步的项目' : `${row.name}：拉取 ${row.fetched}，新建 ${row.created}${row.error ? '，错误 ' + row.error : ''}`)
+          await onChanged()
+        } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)) } finally { setBusy(false) }
+      }
+      const set = (key, value) => setDraft({ ...draft, [key]: value })
+
+      const rows = projects.map(project => h('div', { className: 'ds-listrow', key: project.id },
+        h('div', { className: 'ds-listrow-main' },
+          h('div', {}, `${project.name || project.project}${project.syncEnabled ? ' · 自动同步' : ''}${project.tokenSet ? '' : ' · 缺令牌'}`),
+          h('div', { className: 'ds-hint' }, `${project.url || config.gitlab.url || '（未填地址）'} / ${project.project}${project.lastSyncAt ? ' · 上次 ' + new Date(project.lastSyncAt).toLocaleString() : ''}`),
+          project.lastSyncError ? h('div', { className: 'ds-error' }, project.lastSyncError) : null,
+        ),
+        h('div', { className: 'ds-listrow-actions' },
+          h('button', { className: 'ds-btn', disabled: busy, onClick: () => void sync(project) }, '同步'),
+          h('button', { className: 'ds-btn', disabled: busy, onClick: () => void test(project) }, '测试'),
+          h('button', { className: 'ds-btn', disabled: busy, onClick: () => setDraft({ ...project, token: '' }) }, '编辑'),
+          tipOf('删除这个项目（卡不会删）', h('button', { className: 'ds-btn', disabled: busy, onClick: () => void remove(project), 'data-danger': '1' }, '删除')),
+        ),
+      ))
+
+      return h('div', { className: 'ds-pane-stack' },
+        h(Editor, {
+          title: '代码仓库（GitLab，可以有多个）',
+          hint: '每个项目单独填地址、项目路径和令牌；同步时按项目分开去重，两个仓库都有 #12 也不会串。',
+          rows, onAdd: () => setDraft({ id: '', name: '', url: config.gitlab?.url ?? '', project: '', token: '', syncEnabled: false, syncLabel: '' }), addLabel: '新增项目',
+          render: row => row,
+          empty: '还没有项目，点「新增项目」。',
+        }),
+        note !== null ? h('div', { className: 'ds-ok', style: { marginBottom: 8 } }, note) : null,
+        draft === null ? null : h(SideDrawer, {
+          title: draft.id ? `编辑仓库：${draft.name || draft.project}` : '新增仓库',
+          hint: '一个仓库对应 GitLab 上的一个项目；令牌只写盘不回显，留空表示不修改。',
+          onClose: () => setDraft(null),
+          footer: [
+            h('button', { key: 'save', className: 'ds-btn ds-btn-primary', disabled: busy, onClick: () => void save() }, busy ? '保存中…' : '保存'),
+            h('button', { key: 'cancel', className: 'ds-btn', disabled: busy, onClick: () => setDraft(null) }, '取消'),
+            error !== null ? h('span', { key: 'error', className: 'ds-error ds-side-note' }, error) : null,
+          ],
+        },
+            h('div', { className: 'ds-field' },
+              h('div', { className: 'ds-label' }, '显示名'),
+              h(TextField, { className: 'ds-input', value: draft.name, placeholder: '订单服务', onChange: e => set('name', e.target.value) }),
+            ),
+            h('div', { className: 'ds-field' },
+              h('div', { className: 'ds-label' }, 'GitLab 地址'),
+              h(TextField, { className: 'ds-input', value: draft.url, placeholder: 'https://gitlab.example.com', onChange: e => set('url', e.target.value) }),
+            ),
+            h('div', { className: 'ds-field' },
+              h('div', { className: 'ds-label' }, '项目路径（含 namespace）'),
+              h(TextField, { className: 'ds-input', value: draft.project, placeholder: 'backend/order-service', onChange: e => set('project', e.target.value) }),
+            ),
+            h('div', { className: 'ds-field' },
+              h('div', { className: 'ds-label' }, draft.tokenSet ? 'Access Token（已设置，留空则不修改）' : 'Access Token'),
+              h(TextField, {
+                className: 'ds-input', type: 'password', value: draft.token,
+                placeholder: draft.tokenSet ? '••••••••' : 'glpat-…',
+                onChange: e => set('token', e.target.value),
+              }),
+              h('div', { className: 'ds-hint' }, '需要 api 权限；只写入磁盘，不回显。'),
+            ),
+            h('div', { className: 'ds-field' },
+              h('div', { className: 'ds-label' }, '只同步带此标签的 Issue'),
+              h(TextField, { className: 'ds-input', value: draft.syncLabel, placeholder: '留空则同步全部 open Issue', onChange: e => set('syncLabel', e.target.value) }),
+            ),
+            h('div', { className: 'ds-field' },
+              h('label', { className: 'ds-row', style: { alignItems: 'center', gap: 8, cursor: 'pointer' } },
+                h(CheckField, { checked: draft.syncEnabled === true, onChange: e => set('syncEnabled', e.target.checked) }),
+                h('span', {}, '每分钟自动把这个项目的新 Issue 拉成卡片'),
+              ),
+            ),
+        ),
+      )
+    }
+
+    function BotsPanel({ config, onChanged }) {
+      const bots = config.feishu?.bots ?? []
+      const [draft, setDraft] = React.useState(null)
+      const [error, setError] = React.useState(null)
+      const [note, setNote] = React.useState(null)
+      const [busy, setBusy] = React.useState(false)
+      const [driveFolder, setDriveFolder] = React.useState(config.feishu?.driveFolder ?? '')
+      const [autoSync, setAutoSync] = React.useState(config.feishu?.autoSyncArtifacts !== false)
+      const [driveBusy, setDriveBusy] = React.useState(false)
+      const [driveNote, setDriveNote] = React.useState(null)
+      const saveDrive = async () => {
+        setDriveBusy(true); setDriveNote(null)
+        try {
+          await api('/config', { feishu: { driveFolder: driveFolder.trim(), autoSyncArtifacts: autoSync } })
+          setDriveNote('已保存')
+          await onChanged()
+        } catch (cause) { setDriveNote(cause instanceof Error ? cause.message : String(cause)) } finally { setDriveBusy(false) }
+      }
+      const save = async () => {
+        if (draft === null) return
+        setBusy(true); setError(null); setNote(null)
+        try { await api('/bots/save', { bot: draft }); setDraft(null); setNote('已保存'); toast('已保存'); await onChanged() }
+        catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)) } finally { setBusy(false) }
+      }
+      const remove = async bot => {
+        if (!(await confirmDialog(`删除飞书机器人「${bot.name}」？`, { title: '删除机器人', danger: true, okText: '删除' }))) return
+        setBusy(true); setError(null)
+        try { await api('/bots/delete', { id: bot.id }); await onChanged() }
+        catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)) } finally { setBusy(false) }
+      }
+      const test = async bot => {
+        setBusy(true); setError(null); setNote(null)
+        try {
+          const out = await api('/feishu/test', { id: bot.id })
+          const row = (out.results ?? [])[0]
+          setNote(row !== undefined && row.ok === true ? `「${bot.name}」测试消息已发送` : `「${bot.name}」发送失败：${row?.error ?? '检查 Webhook'}`)
+        } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)) } finally { setBusy(false) }
+      }
+      const set = (key, value) => setDraft({ ...draft, [key]: value })
+
+      const rows = bots.map(bot => h('div', { className: 'ds-listrow', key: bot.id },
+        h('div', { className: 'ds-listrow-main' },
+          h('div', {}, `${bot.name}${bot.enabled === false ? ' （已停用）' : ''}${bot.webhookSet ? '' : ' · 缺 Webhook'}`),
+          h('div', { className: 'ds-hint' }, `Webhook ${bot.webhookHint || '（未设置）'}${bot.chatId ? ' · 群 ' + bot.chatId : ''}${bot.notifyOnChange ? ' · 状态变化通知' : ''}`),
+        ),
+        h('div', { className: 'ds-listrow-actions' },
+          h('button', { className: 'ds-btn', disabled: busy, onClick: () => void test(bot) }, '测试'),
+          h('button', { className: 'ds-btn', disabled: busy, onClick: () => setDraft({ ...bot, webhook: '' }) }, '编辑'),
+          h('button', { className: 'ds-btn', disabled: busy, onClick: () => void remove(bot), 'data-danger': '1' }, '删除'),
+        ),
+      ))
+
+      return h('div', { className: 'ds-pane-stack' },
+        h(Editor, {
+          title: '飞书机器人（可以有多个）',
+          hint: '卡片状态变化时，所有启用的机器人都会收到一条消息；想按项目分群就多建几个。',
+          rows, onAdd: () => setDraft({ id: '', name: '', webhook: '', chatId: '', notifyOnChange: true, enabled: true }), addLabel: '新增机器人',
+          render: row => row,
+          empty: '还没有机器人。',
+        }),
+        note !== null ? h('div', { className: 'ds-ok', style: { marginBottom: 8 } }, note) : null,
+        h('div', { className: 'ds-panel ds-form-panel' },
+          h('div', { className: 'ds-panel-head' }, '云盘归档（产物文档）'),
+          h('div', { className: 'ds-panel-body' },
+            h('div', { className: 'ds-field' },
+              h('div', { className: 'ds-label' }, '云盘根文件夹 token 或链接'),
+              h(TextField, {
+                className: 'ds-input', value: driveFolder, placeholder: 'IuJPfTCtWlDrzwdCFmLc71aynbg 或文件夹链接',
+                onChange: e => setDriveFolder(e.target.value),
+              }),
+              h('div', { className: 'ds-hint' }, `每条需求会在它下面建一个「编号 + 标题」的同名文件夹，交付物写成文件夹里的一份 .md 文档。飞书授权：${config.feishu?.larkReady ? 'lark-cli 已就绪' : 'lark-cli 未就绪或未授权'}`),
+            ),
+            h('label', { className: 'ds-row', style: { alignItems: 'center', gap: 8, cursor: 'pointer' } },
+              h(CheckField, { checked: autoSync, onChange: e => setAutoSync(e.target.checked) }),
+              h('span', {}, '专家登记交付物时自动归档（关掉就只存平台里）'),
+            ),
+            h('div', { className: 'ds-row', style: { gap: 8 } },
+              h('button', { className: 'ds-btn ds-btn-primary', disabled: driveBusy, onClick: () => void saveDrive() }, driveBusy ? '保存中…' : '保存'),
+              driveNote !== null ? h('div', { className: 'ds-hint' }, driveNote) : null,
+            ),
+          ),
+        ),
+        draft === null ? null : h(SideDrawer, {
+          title: draft.id ? `编辑机器人：${draft.name || draft.id}` : '新增机器人',
+          hint: 'Webhook 只写盘不回显，留空表示不修改；一个群建一个机器人即可。',
+          onClose: () => setDraft(null),
+          footer: [
+            h('button', { key: 'save', className: 'ds-btn ds-btn-primary', disabled: busy, onClick: () => void save() }, busy ? '保存中…' : '保存'),
+            h('button', { key: 'cancel', className: 'ds-btn', disabled: busy, onClick: () => setDraft(null) }, '取消'),
+            error !== null ? h('span', { key: 'error', className: 'ds-error ds-side-note' }, error) : null,
+          ],
+        },
+            h('div', { className: 'ds-field' },
+              h('div', { className: 'ds-label' }, '名字'),
+              h(TextField, { className: 'ds-input', value: draft.name, placeholder: '研发群通知', onChange: e => set('name', e.target.value) }),
+            ),
+            h('div', { className: 'ds-field' },
+              h('div', { className: 'ds-label' }, draft.webhookSet ? 'Webhook（已设置，留空则不修改）' : 'Webhook'),
+              h(TextField, {
+                className: 'ds-input', type: 'password', value: draft.webhook,
+                placeholder: 'https://open.feishu.cn/open-apis/bot/v2/hook/…',
+                onChange: e => set('webhook', e.target.value),
+              }),
+              h('div', { className: 'ds-hint' }, '在飞书群里「添加机器人 → 自定义机器人」即可拿到，不需要自建应用。'),
+            ),
+            h('div', { className: 'ds-field' },
+              h('div', { className: 'ds-label' }, '备注群 chat_id（可选）'),
+              h(TextField, { className: 'ds-input', value: draft.chatId, placeholder: 'oc_…', onChange: e => set('chatId', e.target.value) }),
+            ),
+            h('div', { className: 'ds-row', style: { gap: 16 } },
+              h('label', { className: 'ds-row', style: { alignItems: 'center', gap: 8, cursor: 'pointer' } },
+                h(CheckField, { checked: draft.notifyOnChange !== false, onChange: e => set('notifyOnChange', e.target.checked) }),
+                h('span', {}, '卡片状态变化时发消息'),
+              ),
+              h('label', { className: 'ds-row', style: { alignItems: 'center', gap: 8, cursor: 'pointer' } },
+                h(CheckField, { checked: draft.enabled !== false, onChange: e => set('enabled', e.target.checked) }),
+                h('span', {}, '启用'),
+              ),
+            ),
+        ),
+      )
+    }
+
+    function SkillsPanel({ config, onChanged }) {
+      const [data, setData] = React.useState(null)
+      const [draft, setDraft] = React.useState(null)
+      const [error, setError] = React.useState(null)
+      const [note, setNote] = React.useState(null)
+      const [busy, setBusy] = React.useState(false)
+      const [uploading, setUploading] = React.useState(false)
+      const [overwrite, setOverwrite] = React.useState(false)
+
+      const load = React.useCallback(async () => {
+        try {
+          const payload = await api('/skills')
+          setData({ root: payload.root, skills: payload.skills ?? [], onDisk: payload.onDisk ?? [] })
+        } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)) }
+      }, [])
+      React.useEffect(() => { void load() }, [load])
+
+      const skills = data?.skills ?? []
+      const onDisk = data?.onDisk ?? []
+      const users = name => (config.experts ?? []).filter(expert => (expert.skills ?? []).includes(name))
+
+      const set = (key, value) => setDraft({ ...draft, [key]: value })
+      const save = async () => {
+        if (draft === null) return
+        setBusy(true); setError(null); setNote(null)
+        try {
+          const payload = await api('/skills/save', {
+            skill: {
+              name: draft.name, description: draft.description, whenToUse: draft.whenToUse,
+              tags: draft.tags, content: draft.content, enabled: draft.enabled !== false,
+            },
+          })
+          setDraft(null)
+          setNote(payload.warning ?? (payload.file ? `已写入 ${payload.file}` : '已保存'))
+          await load(); await onChanged()
+        } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)) } finally { setBusy(false) }
+      }
+      const remove = async skill => {
+        if (!(await confirmDialog(`删除技能「${skill.name}」？磁盘上的 SKILL.md 也会一起删掉。`, { title: '删除技能', danger: true, okText: '删除' }))) return
+        setBusy(true); setError(null); setNote(null)
+        try { await api('/skills/delete', { name: skill.name }); await load(); await onChanged() }
+        catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)) } finally { setBusy(false) }
+      }
+      const resync = async () => {
+        setBusy(true); setError(null); setNote(null)
+        try {
+          const payload = await api('/skills/sync', {})
+          setNote(`已重新写入 ${(payload.written ?? []).length} 条技能`)
+          await load()
+        } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)) } finally { setBusy(false) }
+      }
+
+      const upload = async file => {
+        if (file === undefined || file === null) return
+        setUploading(true); setError(null); setNote(null)
+        try {
+          const bytes = new Uint8Array(await file.arrayBuffer())
+          let binary = ''
+          const step = 0x8000
+          for (let index = 0; index < bytes.length; index += step) {
+            binary += String.fromCharCode.apply(null, bytes.subarray(index, index + step))
+          }
+          const payload = await api('/skills/upload', {
+            fileName: file.name, dataBase64: window.btoa(binary), overwrite,
+          })
+          const action = payload.overwritten === true ? '已覆盖' : '已上传'
+          setNote(`${action}技能「${payload.skill.name}」${payload.file ? `，写入 ${payload.file}` : ''}`)
+          setDraft(null)
+          await load(); await onChanged()
+        } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)) } finally { setUploading(false) }
+      }
+
+      const rows = skills.map(skill => h('div', { className: 'ds-listrow', key: skill.name },
+        h('div', { className: 'ds-listrow-main' },
+          h('div', {},
+            h('code', {}, skill.name),
+            (skill.tags ?? []).map(tag => h(ChipField, { className: 'ds-chip', key: tag }, tag)),
+            skill.enabled === false ? h('span', { className: 'ds-hint' }, ' （已停用）') : null,
+            onDisk.includes(skill.name) ? null : h('span', { className: 'ds-err' }, ' 未落盘'),
+          ),
+          h('div', { className: 'ds-hint' }, skill.description),
+          skill.whenToUse ? h('div', { className: 'ds-hint' }, `何时用：${skill.whenToUse}`) : null,
+          users(skill.name).length > 0
+            ? h('div', { className: 'ds-hint' }, `使用中的专家：${users(skill.name).map(expert => `${expert.emoji}${expert.name}`).join('、')}`)
+            : h('div', { className: 'ds-empty' }, '还没有专家挂这个技能'),
+        ),
+        h('div', { className: 'ds-listrow-actions' },
+          h('button', { className: 'ds-btn', disabled: busy, onClick: () => { setNote(null); setDraft({ ...skill, editing: true, tags: (skill.tags ?? []).join(', ') }) } }, '编辑'),
+          h('button', { className: 'ds-btn', disabled: busy, onClick: () => void remove(skill), 'data-danger': '1' }, '删除'),
+        ),
+      ))
+
+      const stray = onDisk.filter(name => !skills.some(skill => skill.name === name))
+
+      return h('div', { className: 'ds-pane-stack' },
+        h(Editor, {
+          title: '技能库（skills-manager）',
+          hint: data === null ? '读取中…' : `保存在 ${data.root}/<名字>/SKILL.md，所有专家都能用 skill 工具加载；专家也可以自己用 studio_skill_save 往这里加技能。支持上传 SKILL.md 或包含 SKILL.md 的 .zip 技能包。`,
+          rows, addLabel: '新建技能',
+          onAdd: () => { setNote(null); setDraft({ name: '', description: '', whenToUse: '', tags: '', content: '# 什么时候用\n\n# 步骤\n\n1. \n', enabled: true, editing: false }) },
+          render: row => row,
+          empty: '还没有技能。把一次摸索出来的做法写成第一条，下次就不用重新摸索。',
+        }),
+        stray.length > 0
+          ? h('div', { className: 'ds-hint' }, `磁盘上还有 ${stray.length} 个不归这里管的技能目录：${stray.join('、')}`)
+          : null,
+        h('div', { className: 'ds-row', style: { gap: 8, alignItems: 'center', padding: '6px 0 10px', flexWrap: 'wrap' } },
+          h('label', { className: 'ds-btn', style: { cursor: uploading ? 'progress' : 'pointer', opacity: uploading ? 0.6 : 1 } },
+            uploading ? '上传中…' : '上传技能',
+            h('input', {
+              type: 'file', accept: '.md,.markdown,.txt,.zip', style: { display: 'none' }, disabled: uploading,
+              onChange: event => { const file = event.target.files === null ? undefined : event.target.files[0]; event.target.value = ''; void upload(file) },
+            }),
+          ),
+          h('label', { className: 'ds-hint', style: { display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer' } },
+            h(CheckField, { checked: overwrite, onChange: event => setOverwrite(event.target.checked) }),
+            '覆盖同名技能',
+          ),
+          h('button', { className: 'ds-btn', disabled: busy || skills.length === 0, onClick: () => void resync() }, '重新写入磁盘'),
+          note !== null ? h('span', { className: 'ds-ok' }, note) : null,
+          error !== null ? h('span', { className: 'ds-error' }, error) : null,
+        ),
+        draft === null ? null : h(SideDrawer, {
+          title: draft.editing === true ? `编辑技能：${draft.name}` : '新建技能',
+          hint: '技能正文就是一个 SKILL.md：什么情况用、步骤、命令、踩过的坑。保存后写入 ~/.dsh/skills/<名字>/SKILL.md。',
+          onClose: () => setDraft(null),
+          footer: [
+            h('button', { key: 'save', className: 'ds-btn ds-btn-primary', disabled: busy || draft.name.length === 0 || draft.content.trim().length === 0, onClick: () => void save() }, busy ? '保存中…' : '保存技能'),
+            h('button', { key: 'cancel', className: 'ds-btn', disabled: busy, onClick: () => setDraft(null) }, '取消'),
+            error !== null ? h('span', { key: 'error', className: 'ds-error ds-side-note' }, error) : null,
+          ],
+        },
+            h('div', { className: 'ds-row', style: { gap: 8 } },
+              h('div', { className: 'ds-field', style: { flex: 1 } },
+                h('div', { className: 'ds-label' }, '技能名（kebab-case）'),
+                h(TextField, {
+                  className: 'ds-input', value: draft.name, disabled: draft.editing === true,
+                  placeholder: 'gitlab-mr-review',
+                  onChange: e => set('name', e.target.value.trim().toLowerCase().replace(/[^a-z0-9-]+/g, '-')),
+                }),
+              ),
+              h('div', { className: 'ds-field', style: { flex: 2 } },
+                h('div', { className: 'ds-label' }, '什么时候该用（一行，模型据此决定要不要加载）'),
+                h(TextField, { className: 'ds-input', value: draft.description, placeholder: '评审 GitLab MR 时：怎么读 diff、怎么留评论', onChange: e => set('description', e.target.value) }),
+              ),
+            ),
+            h('div', { className: 'ds-row', style: { gap: 8 } },
+              h('div', { className: 'ds-field', style: { flex: 2 } },
+                h('div', { className: 'ds-label' }, '补充触发条件（选填）'),
+                h(TextField, { className: 'ds-input', value: draft.whenToUse, placeholder: '收到 @研发 且带 MR 链接时', onChange: e => set('whenToUse', e.target.value) }),
+              ),
+              h('div', { className: 'ds-field', style: { flex: 1 } },
+                h('div', { className: 'ds-label' }, '标签（逗号分隔）'),
+                h(TextField, { className: 'ds-input', value: draft.tags, placeholder: 'gitlab, review', onChange: e => set('tags', e.target.value) }),
+              ),
+            ),
+            h('div', { className: 'ds-field' },
+              h('div', { className: 'ds-label' }, '技能正文（Markdown：什么情况用、步骤、命令、坑）'),
+              h(MdField, {
+                className: 'ds-input', rows: 14, value: draft.content,
+                placeholder: '# 什么时候用\n\n# 步骤\n\n1. \n\n# 坑\n\n- ',
+                onChange: e => set('content', e.target.value),
+              }),
+            ),
+            h('div', { className: 'ds-field' },
+              h('label', { className: 'ds-row', style: { alignItems: 'center', gap: 8, cursor: 'pointer' } },
+                h(CheckField, { checked: draft.enabled !== false, onChange: e => set('enabled', e.target.checked) }),
+                h('span', {}, '启用（停用则不写入磁盘）'),
+              ),
+            ),
+        ),
+      )
+    }
+
+    const STRATEGIES = [
+      { id: 'round_robin', label: '轮询：谁手上活少给谁' },
+      { id: 'best_match', label: '按专长匹配：领域 / 角色位 / 技能' },
+      { id: 'lead', label: '交给专家团团长分派' },
+    ]
+
+    const ACCESS_ROLE_OPTIONS = [
+      { id: 'admin', label: '管理员', hint: '能改配置、删数据、发布版本' },
+      { id: 'member', label: '成员', hint: '能建卡、推卡、评论、跑用例' },
+      { id: 'viewer', label: '只读', hint: '只能看，不能动' },
+    ]
+
+    const ROUTE_LABEL = {
+      '/config': '改配置',
+      '/task/create': '新建卡',
+      '/task/update': '改卡',
+      '/task/delete': '删卡',
+      '/task/block': '标记阻塞',
+      '/task/unblock': '解除阻塞',
+      '/task/comment': '评论',
+      '/task/artifact': '登记交付物',
+      '/task/artifact/sync': '归档交付物',
+      '/task/checklist': '勾验收清单',
+      '/task/case': '登记用例',
+      '/task/case/run': '跑接口用例',
+      '/task/coding': '登记 AI Coding',
+      '/task/worktree': 'worktree 操作',
+      '/mention': '点名派活',
+      '/agents/run': '手动派单',
+      '/agents/stop': '停止派单',
+      '/experts/save': '存专家',
+      '/experts/delete': '删专家',
+      '/teams/save': '存专家团',
+      '/teams/delete': '删专家团',
+      '/skills/save': '存技能',
+      '/skills/delete': '删技能',
+      '/projects/save': '存项目',
+      '/projects/delete': '删项目',
+      '/release/save': '存版本',
+      '/release/publish': '发布版本',
+      '/release/rollback': '回滚版本',
+      '/release/approve': '审批版本',
+      '/requirement/save': '存需求',
+      '/requirement/delete': '删需求',
+      '/access/save': '改成员权限',
+      '/access/delete': '删成员',
+      '/audit/clear': '清空审计日志',
+      '/market/install': '装插件',
+      '/market/uninstall': '卸插件',
+    }
+
+    function AccessPanel({ state, config, onChanged }) {
+      const access = config.access ?? { enabled: false, members: [] }
+      const audit = state.audit ?? []
+      const [draft, setDraft] = React.useState({ name: '', role: 'member' })
+      const [busy, setBusy] = React.useState(false)
+      const [note, setNote] = React.useState(null)
+      const [onlyBy, setOnlyBy] = React.useState('')
+      const [onlyFailed, setOnlyFailed] = React.useState(false)
+      const [queryText, setQueryText] = React.useState('')
+
+      const act = async (path, body) => {
+        setBusy(true); setNote(null)
+        try {
+          await api(path, body)
+          await onChanged()
+        } catch (cause) {
+          { const detail = cause instanceof Error ? cause.message : String(cause); setNote(detail); toast(detail, 'error') }
+        } finally { setBusy(false) }
+      }
+
+      const addMember = async () => {
+        const name = draft.name.trim()
+        if (name === '') return
+        await act('/access/save', { member: { name, role: draft.role } })
+        setDraft({ name: '', role: 'member' })
+      }
+
+      const people = Array.from(new Set(audit.map(item => item.by))).sort()
+      const keyword = queryText.trim().toLowerCase()
+      const matched = audit.filter(item => (onlyBy === '' || item.by === onlyBy)
+        && (onlyFailed === false || item.ok === false)
+        && (keyword === '' || `${ROUTE_LABEL[item.route] ?? item.route} ${item.by} ${item.summary}`.toLowerCase().includes(keyword)))
+      const rows = matched.slice(0, 120)
+
+      // 走服务端导出：http 页面里的 blob 下载会被 Chrome 拦，服务端 Content-Disposition 才稳
+      const exportCsv = () => {
+        const params = new URLSearchParams({
+          by: onlyBy, q: queryText.trim(), failed: onlyFailed ? '1' : '0',
+          token: sessionToken() ?? '',
+        })
+        const anchor = document.createElement('a')
+        anchor.href = `${API}/audit/export.csv?${params.toString()}`
+        anchor.rel = 'noopener'
+        document.body.appendChild(anchor)
+        anchor.click()
+        document.body.removeChild(anchor)
+        toast(`正在导出 ${matched.length} 条审计记录`)
+      }
+
+      return h('div', { className: 'ds-pane-stack' },
+        h('div', { className: 'ds-panel ds-form-panel' },
+          h('div', { className: 'ds-panel-head' },
+            h('span', null, '成员权限'),
+            h(ChipField, { className: 'ds-chip' }, `当前身份：${currentUser()}`),
+          ),
+          h('div', { className: 'ds-panel-body' },
+            h('div', { className: 'ds-row', style: { gap: 10, alignItems: 'center', flexWrap: 'wrap' } },
+              h('label', { className: 'ds-check', style: { flex: '0 0 auto' } },
+                h(CheckField, { checked: access.enabled === true, disabled: busy,
+                  onChange: event => void act('/access/save', { enabled: event.target.checked }),
+                }),
+                h('span', null, '启用成员权限'),
+              ),
+              h('span', { className: 'ds-hint' },
+                access.enabled === true
+                  ? '已启用：写操作要认人，删除/配置/发布要管理员。'
+                  : '未启用：任何人都是管理员（单机用法）。'),
+            ),
+            access.enabled === true && (access.members ?? []).length === 0
+              ? h('div', { className: 'ds-error' }, '已启用但名单是空的：除了名单里的人，其他人都动不了。先把你自己加进去。')
+              : null,
+            access.enabled === true
+              ? h('label', { className: 'ds-check' },
+                  h(CheckField, { checked: (access.agents ?? 'inherit') === 'inherit',
+                    disabled: busy,
+                    onChange: event => void act('/access/save', { agents: event.target.checked ? 'inherit' : 'bypass' }),
+                  }),
+                  h('span', null, 'AI 专家也受这份名单约束'),
+                )
+              : null,
+            access.enabled === true
+              ? h('div', { className: 'ds-hint' }, (access.agents ?? 'inherit') === 'inherit'
+                  ? '专家调工具时按同一张名单判权限：只读专家只能看，成员能干活，管理员才能改配置。名单里没有的专家会被拦下，记得在下面加进去。'
+                  : '已豁免：专家调用工具不受名单限制，但仍记审计。适合「全交给 AI」的团队。')
+              : null,
+            (access.members ?? []).map(member => h('div', { key: member.name, className: 'ds-listrow' },
+              h('div', { className: 'ds-listrow-main' },
+                h('div', null, member.name, member.name === currentUser() ? h(ChipField, { className: 'ds-chip ds-chip-soft' }, '我') : null),
+                h('div', { className: 'ds-hint' }, (ACCESS_ROLE_OPTIONS.find(item => item.id === member.role) ?? ACCESS_ROLE_OPTIONS[1]).hint),
+              ),
+              h('div', { className: 'ds-listrow-actions' },
+                h(SelectField, {
+                  className: 'ds-select', value: member.role, disabled: busy,
+                  onChange: event => void act('/access/save', { member: { name: member.name, role: event.target.value } }),
+                }, ACCESS_ROLE_OPTIONS.map(option => h('option', { key: option.id, value: option.id }, option.label))),
+                h('button', { className: 'ds-btn ds-btn-ghost', disabled: busy, onClick: () => void act('/access/delete', { name: member.name }) }, '移除'),
+              ),
+            )),
+            (access.members ?? []).length === 0 ? h('div', { className: 'ds-empty' }, '还没有成员。') : null,
+            h('div', { className: 'ds-row', style: { gap: 8, flexWrap: 'wrap' } },
+              h(TextField, {
+                className: 'ds-input', placeholder: '成员名字（和页头「👤 我是…」一致）', value: draft.name,
+                style: { flex: '1 1 200px' },
+                onChange: event => setDraft({ ...draft, name: event.target.value }),
+              }),
+              h(SelectField, {
+                className: 'ds-select', value: draft.role, style: { flex: '0 0 130px' },
+                onChange: event => setDraft({ ...draft, role: event.target.value }),
+              }, ACCESS_ROLE_OPTIONS.map(option => h('option', { key: option.id, value: option.id }, option.label))),
+              h('button', { className: 'ds-btn ds-btn-primary', disabled: busy || draft.name.trim() === '', onClick: () => void addMember() }, '加成员'),
+            ),
+            note !== null ? h('div', { className: 'ds-error' }, note) : null,
+          ),
+        ),
+        h('div', { className: 'ds-panel' },
+          h('div', { className: 'ds-panel-head' },
+            h('span', null, `审计日志（显示 ${rows.length} / 命中 ${matched.length} / 共 ${audit.length} 条）`),
+            h('div', { className: 'ds-row', style: { gap: 8, marginLeft: 'auto' } },
+              h(TextField, {
+                className: 'ds-input', placeholder: '搜动作 / 人 / 详情',
+                value: queryText, style: { width: 170 },
+                onChange: event => setQueryText(event.target.value),
+              }),
+              h(SelectField, {
+                className: 'ds-select', value: onlyBy === '' ? '__all__' : onlyBy, style: { minWidth: 150 },
+                onChange: event => setOnlyBy(event.target.value === '__all__' ? '' : event.target.value),
+              },
+              h('option', { value: '__all__' }, '所有人'),
+              people.map(name => h('option', { key: name, value: name }, name))),
+              h('label', { className: 'ds-check' },
+                h(CheckField, { checked: onlyFailed, onChange: event => setOnlyFailed(event.target.checked) }),
+                h('span', null, '只看失败'),
+              ),
+              h('button', {
+                className: 'ds-btn ds-btn-ghost', disabled: busy,
+                onClick: async () => { if (await confirmDialog('清空审计日志？清掉之后所有操作记录都没了。', { title: '清空审计日志', danger: true, okText: '清空' })) void act('/audit/clear', {}) },
+              }, '清空'),
+              h('button', {
+                className: 'ds-btn ds-btn-ghost', disabled: matched.length === 0, onClick: exportCsv,
+                title: '把当前筛选结果导出为 CSV（Excel 可直接打开）',
+              }, '导出 CSV'),
+            ),
+          ),
+          h('div', { className: 'ds-panel-body' },
+            rows.length === 0
+              ? h('div', { className: 'ds-empty' }, audit.length === 0
+                ? '还没有记录。做一次写操作就会出现在这里。'
+                : '没有符合筛选条件的记录。把关键字清空或换个人试试。')
+              : rows.map(item => h('div', { key: item.id, className: 'ds-audit-row', 'data-ok': item.ok ? '1' : '0' },
+                h('span', { className: 'ds-audit-time' }, fmtTime(item.at)),
+                h('span', { className: 'ds-audit-by' }, item.by),
+                h('span', { className: 'ds-audit-what' }, ROUTE_LABEL[item.route] ?? item.route),
+                h('span', { className: 'ds-audit-detail' }, item.summary),
+                h('span', { className: 'ds-audit-status', 'data-ok': item.ok ? '1' : '0' }, item.ok ? '成功' : `失败 ${item.status}`),
+              )),
+          ),
+        ),
+      )
+    }
+
+    function ColumnsPanel({ state, onChanged }) {
+      const config = state.config
+      const [error, setError] = React.useState(null)
+      const [busy, setBusy] = React.useState(false)
+      const [openFor, setOpenFor] = React.useState(null)
+      const [query, setQuery] = React.useState('')
+      const statuses = state.statuses ?? []
+      const roster = React.useMemo(() => buildRoster(config), [config])
+
+      const membersOf = status => {
+        const owner = config.columns?.[status]
+        if (owner === undefined || owner === null) return []
+        if (Array.isArray(owner.members)) return owner.members
+        if (owner.kind === 'none') return []
+        return [{ kind: owner.kind, id: owner.id }]
+      }
+      const strategyOf = status => config.columns?.[status]?.strategy ?? 'round_robin'
+      const labelOf = member => {
+        if (member.kind === 'role') return '🎯 ' + (ROLE_LABEL[member.id] ?? member.id)
+        if (member.kind === 'team') {
+          const team = (config.teams ?? []).find(entry => entry.id === member.id)
+          return team === undefined ? `👥 ${member.id}` : `${team.emoji ?? '👥'} ${team.name}`
+        }
+        const expert = (config.experts ?? []).find(entry => entry.id === member.id)
+        return expert === undefined ? member.id : `${expert.emoji} ${expert.name}`
+      }
+      const save = async (status, members, strategy) => {
+        setBusy(true); setError(null)
+        try {
+          await api('/columns/save', { status, members, strategy })
+          await onChanged()
+        } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)) } finally { setBusy(false) }
+      }
+      const add = (status, item) => {
+        const kind = item.key.startsWith('t:') ? 'team' : item.key.startsWith('r:') ? 'role' : 'expert'
+        const id = item.key.slice(2)
+        const current = membersOf(status)
+        if (current.some(member => member.kind === kind && member.id === id)) { return }
+        setQuery('')
+        void save(status, [...current, { kind, id }], strategyOf(status))
+      }
+      const remove = (status, index) => void save(status, membersOf(status).filter((_, i) => i !== index), strategyOf(status))
+
+      return h('div', { className: 'ds-panel' },
+        h('div', { className: 'ds-panel-head' }, '每一列由谁负责'),
+        h('div', { className: 'ds-panel-body' },
+          h('div', { className: 'ds-hint' }, '推荐挂「角色位」：澄清/验收挂产品经理、开发挂研发工程师、测试挂测试工程师——派单时会按卡片的业务领域自动挑对应领域专家（如支付产品经理）；也可以直接指定某位专家或专家团。一列可挂多人（候选池），一个都不挂就只把卡停在原地等人认领。'),
+          statuses.map(column => {
+            const members = membersOf(column.id)
+            const strategy = strategyOf(column.id)
+            return h('div', { className: 'ds-colrow', key: column.id },
+              h('div', { className: 'ds-colrow-head' },
+                h('span', { className: 'ds-colrow-name' }, column.label ?? column.id),
+                members.length === 0
+                  ? h('span', { className: 'ds-hint' }, '👤 等人认领（不自动派）')
+                  : members.map((member, index) => h(ChipField, { className: 'ds-chip ds-chip-owner', key: `${member.kind}:${member.id}` },
+                    labelOf(member),
+                    h('button', {
+                      className: 'ds-chip-x', title: '从候选里去掉', disabled: busy,
+                      onClick: () => remove(column.id, index),
+                    }, '×'),
+                  )),
+                h('button', {
+                  className: 'ds-btn', style: { marginLeft: 'auto' }, disabled: busy,
+                  onClick: () => { setQuery(''); setOpenFor(current => current === column.id ? null : column.id) },
+                }, openFor === column.id ? '收起' : '＋ 加候选'),
+                members.length >= 2
+                  ? h(SelectField, {
+                    className: 'ds-input', style: { width: 240 }, value: strategy, disabled: busy,
+                    onChange: e => void save(column.id, members, e.target.value),
+                  }, STRATEGIES.map(entry => h('option', { key: entry.id, value: entry.id }, entry.label)))
+                  : null,
+              ),
+              openFor === column.id
+                ? h('div', { className: 'ds-colpick' },
+                  h(TextField, {
+                    className: 'ds-mention-search', autoFocus: true, value: query,
+                    placeholder: '搜专家或专家团，点一下加进候选',
+                    onChange: e => setQuery(e.target.value),
+                  }),
+                  h('div', { className: 'ds-colpick-list' },
+                    filterRoster(roster, query).length === 0
+                      ? h('div', { className: 'ds-mention-empty' }, '没有匹配的专家或专家团')
+                      : filterRoster(roster, query).map(item => h('button', {
+                        key: item.key, className: 'ds-mention-item', onClick: () => add(column.id, item),
+                      }, h('span', null, item.emoji), h('span', null, item.name), h('span', { className: 'ds-hint' }, item.hint))),
+                  ),
+                )
+                : null,
+            )
+          }),
+          error !== null ? h('div', { className: 'ds-error' }, error) : null,
+        ),
+      )
+    }
+
+    /** 数据与备份：看台账存在哪、密钥在哪，以及回滚到某个快照。 */
+    function StoragePanel({ state, onChanged }) {
+      const [info, setInfo] = React.useState(state.storage ?? null)
+      const [snapshots, setSnapshots] = React.useState([])
+      const [error, setError] = React.useState(null)
+      const [notice, setNotice] = React.useState(null)
+      const [busy, setBusy] = React.useState(false)
+
+      const load = React.useCallback(() => {
+        api('/snapshots')
+          .then(out => {
+            setInfo(out.storage ?? null)
+            setSnapshots(out.snapshots ?? [])
+            setError(null)
+          })
+          .catch(cause => setError(cause instanceof Error ? cause.message : String(cause)))
+      }, [])
+
+      React.useEffect(() => { load() }, [load, state.revision])
+
+      const restore = async id => {
+        if (!(await confirmDialog(`把看板回滚到快照 #${id}？当前的这一版会先另存一份，不会丢。`, { title: '回滚快照', okText: '回滚' }))) return
+        setBusy(true)
+        setNotice(null)
+        api('/snapshot/restore', { id })
+          .then(() => { setNotice(`已回滚到快照 #${id}`); load(); onChanged?.() })
+          .catch(cause => setError(cause instanceof Error ? cause.message : String(cause)))
+          .finally(() => setBusy(false))
+      }
+
+      const when = at => {
+        const date = new Date(Number(at) || 0)
+        return `${date.getMonth() + 1}-${String(date.getDate()).padStart(2, '0')} ${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}:${String(date.getSeconds()).padStart(2, '0')}`
+      }
+
+      return h('div', { className: 'ds-pane-stack' },
+        h('div', { className: 'ds-panel ds-form-panel' },
+          h('div', { className: 'ds-panel-head' }, '台账存储', h(ChipField, { className: 'ds-chip', 'data-on': info?.engine === 'sqlite' ? '1' : '0' }, info?.engine === 'sqlite' ? 'SQLite' : '单文件')),
+          h('div', { className: 'ds-panel-body' },
+            h('div', { className: 'ds-an-kv' }, h('span', {}, '数据文件'), h('b', {}, info?.db ?? '—')),
+            h('div', { className: 'ds-an-kv' }, h('span', {}, '密钥文件（600 权限，明文不进台账）'), h('b', {}, info?.secretsFile ?? '—')),
+            h('div', { className: 'ds-an-kv' }, h('span', {}, '保留快照'), h('b', {}, `${info?.snapshots ?? 0} / ${info?.snapshotLimit ?? 0}`)),
+            h('div', { className: 'ds-hint' }, '每次写操作都会在同一个事务里先存一份快照，再更新台账；多进程同时写会排队（busy_timeout 5s），不会互相覆盖。'),
+          ),
+        ),
+        h('div', { className: 'ds-panel' },
+          h('div', { className: 'ds-panel-head' },
+            '快照',
+            h('button', { className: 'ds-btn ds-btn-ghost', style: { marginLeft: 'auto' }, onClick: load, disabled: busy }, '刷新'),
+          ),
+          h('div', { className: 'ds-panel-body' },
+            notice !== null ? h('div', { className: 'ds-ok' }, notice) : null,
+            error !== null ? h('div', { className: 'ds-error' }, error) : null,
+            snapshots.length === 0
+              ? h('div', { className: 'ds-hint' }, info?.engine === 'sqlite' ? '还没有快照。' : '单文件模式没有快照（这台机器的 node 不支持 node:sqlite 时会退回单文件）。')
+              : snapshots.map(item => h('div', { key: item.id, className: 'ds-listrow' },
+                h('div', { className: 'ds-listrow-main' },
+                  h('div', null, `#${item.id} · rev ${item.revision}`),
+                  h('div', { className: 'ds-hint' }, `${when(item.at)} · ${(item.bytes / 1024).toFixed(1)} KB`),
+                ),
+                h('div', { className: 'ds-listrow-actions' },
+                  h('button', { className: 'ds-btn ds-btn-ghost', disabled: busy, onClick: () => restore(item.id) }, '回滚到这版'),
+                ),
+              )),
+          ),
+        ),
+      )
+    }
+
+    /** 集成健康：哪条通道在掉、什么时候掉的、还能不能补一次。 */
+    function HealthPanel({ state, config, onChanged }) {
+      const health = state.integrations ?? { channels: [], broken: 0 }
+      const [busy, setBusy] = React.useState('')
+      const [note, setNote] = React.useState(null)
+      const firstRequirement = (state.requirements ?? []).find(item => (item.folder?.token ?? '') !== '')
+      const agents = state.agents ?? {}
+      const lock = agents.lock ?? null
+      const lockAge = lock === null ? 0 : Math.max(0, Date.now() - (Number(lock.at) || 0))
+      const [logQuery, setLogQuery] = React.useState('')
+      const [logFailed, setLogFailed] = React.useState(false)
+      const logKeyword = logQuery.trim().toLowerCase()
+      const logRows = (agents.log ?? []).filter(entry => {
+        const line = String(entry?.line ?? '')
+        if (logFailed && !/失败|错误|异常|拦|拒绝/.test(line)) return false
+        return logKeyword === '' || line.toLowerCase().includes(logKeyword)
+      })
+      const logShown = logRows.slice(0, 12)
+      const exportLogCsv = () => {
+        const params = new URLSearchParams({
+          q: logQuery.trim(), failed: logFailed ? '1' : '0', token: sessionToken() ?? '',
+        })
+        const anchor = document.createElement('a')
+        anchor.href = `${API}/export/dispatch.csv?${params.toString()}`
+        anchor.rel = 'noopener'
+        document.body.appendChild(anchor)
+        anchor.click()
+        document.body.removeChild(anchor)
+        toast(`正在导出 ${logRows.length} 条派单日志`)
+      }
+
+      const retry = async channel => {
+        setBusy(channel); setNote(null)
+        try {
+          if (channel === 'gitlab') {
+            const out = await api('/gitlab/sync', {})
+            setNote(out.report === undefined ? '已触发 GitLab 同步' : `已同步：${(out.report.projects ?? []).map(item => `${item.name} +${item.created}`).join('，') || '无新卡'}`)
+          } else if (channel === 'drive') {
+            if (firstRequirement === undefined) {
+              setNote('还没有带云盘文件夹的需求，先建一条需求并归档一次。')
+            } else {
+              const out = await api('/requirement/sync', { id: firstRequirement.id })
+              setNote(`已归档 ${out.report?.written ?? 0} / ${out.report?.total ?? 0} 件`); toast(`已归档 ${out.report?.written ?? 0} / ${out.report?.total ?? 0} 件`)
+            }
+          } else if (channel === 'feishu') {
+            const out = await api('/feishu/test', {})
+            setNote(out.ok === true ? '测试消息已发出' : `发送失败：${out.result?.error ?? '没配置机器人'}`)
+          } else {
+            setNote('代码隔离没有独立的重试入口，下一张卡派单时会自动重试。')
+          }
+          await onChanged()
+        } catch (cause) {
+          { const detail = cause instanceof Error ? cause.message : String(cause); setNote(detail); toast(detail, 'error') }
+        } finally {
+          setBusy('')
+        }
+      }
+
+      const when = at => {
+        const value = Number(at) || 0
+        if (value === 0) return '—'
+        const date = new Date(value)
+        return `${date.getMonth() + 1}-${String(date.getDate()).padStart(2, '0')} ${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`
+      }
+
+      const LABEL = { ok: '正常', error: '异常', idle: '还没用过' }
+      const COLOR = { ok: '#0f9d58', error: '#e5484d', idle: '#8a8f98' }
+
+      return h('div', { className: 'ds-pane-stack' },
+        h('div', { className: 'ds-panel' },
+          h('div', { className: 'ds-panel-head' },
+            '派单运行状态',
+            h(ChipField, { className: 'ds-chip', 'data-on': agents.enabled === true ? '1' : '0' },
+              agents.enabled === true ? '运行中' : '已停用'),
+            h('div', { className: 'ds-row', style: { gap: 8, marginLeft: 'auto' } },
+              h(TextField, {
+                className: 'ds-input', placeholder: '搜派单日志',
+                value: logQuery, style: { width: 150 },
+                onChange: event => setLogQuery(event.target.value),
+              }),
+              h('label', { className: 'ds-check' },
+                h(CheckField, { checked: logFailed, onChange: event => setLogFailed(event.target.checked) }),
+                h('span', null, '只看失败'),
+              ),
+              h('button', {
+                className: 'ds-btn ds-btn-ghost', disabled: logRows.length === 0, onClick: exportLogCsv,
+                title: '把当前筛选结果导出为 CSV',
+              }, '导出 CSV'),
+            ),
+          ),
+          h('div', { className: 'ds-panel-body' },
+            h('div', { className: 'ds-kv' },
+              h('dt', {}, '实例'), h('dd', {}, String(agents.instance ?? '—')),
+              h('dt', {}, '派单锁'),
+              h('dd', {}, lock === null
+                ? '还没抢到过（可能是内存模式）'
+                : `${lock.mine === true ? '本进程持有' : '其他实例持有'} · ${Math.round(lockAge / 1000)} 秒前续租`),
+              h('dt', {}, '并发占用'), h('dd', {}, `${(agents.running ?? []).length} / ${agents.maxConcurrent ?? '—'}`),
+              h('dt', {}, '最近一轮'), h('dd', {}, when(agents.lastTickAt)),
+              h('dt', {}, '最近错误'), h('dd', {}, String(agents.lastError ?? '') === '' ? '无' : String(agents.lastError)),
+            ),
+            (agents.log ?? []).length === 0
+              ? h('div', { className: 'ds-empty' }, '还没有派单日志。卡进入自动列后，这里会出现派单、空闲、失败记录。')
+              : logShown.length === 0
+                ? h('div', { className: 'ds-empty' }, '没有符合筛选条件的派单日志。')
+                : h('div', { className: 'ds-log' },
+                  logShown.map((entry, index) => h('div', {
+                    key: String(index),
+                    className: 'ds-log-line',
+                  }, `${when(entry.at)} · ${String(entry.line ?? '')}`)),
+                ),
+            (agents.log ?? []).length > 0 && logRows.length > logShown.length
+              ? h('div', { className: 'ds-hint' }, `只显示最近 ${logShown.length} / 命中 ${logRows.length} 条，导出可看全量`)
+              : null,
+          ),
+        ),
+        h('div', { className: 'ds-panel' },
+          h('div', { className: 'ds-panel-head' },
+            '集成状态',
+            h(ChipField, { className: 'ds-chip', 'data-on': health.broken === 0 ? '1' : '0' },
+              health.broken === 0 ? '全部正常' : `${health.broken} 条异常`),
+            h('button', { className: 'ds-btn ds-btn-ghost', style: { marginLeft: 'auto' }, onClick: () => void onChanged() }, '刷新'),
+          ),
+          h('div', { className: 'ds-panel-body' },
+            note !== null ? h('div', { className: 'ds-hint' }, note) : null,
+            health.channels.length === 0
+              ? h('div', { className: 'ds-empty' }, '还没有调用过任何外部集成。配好 GitLab / 飞书机器人 / 云盘文件夹后，第一次成功或失败就会出现在这里。')
+              : health.channels.map(item => h('div', { key: item.channel, className: 'ds-listrow' },
+                  h('div', { className: 'ds-listrow-main' },
+                    h('div', null,
+                      h('span', { style: { color: COLOR[item.state], fontWeight: 700 } }, '● '),
+                      item.label,
+                      h(ChipField, { className: 'ds-chip ds-chip-soft', style: { marginLeft: 6 } }, LABEL[item.state])),
+                    h('div', { className: 'ds-hint' }, item.hint),
+                    h('div', { className: 'ds-hint' },
+                      `最近一次：${when(item.at)} · 成功 ${when(item.lastOkAt)} · 失败 ${when(item.lastErrorAt)}${item.attempts > 0 ? ` · 试着调了 ${item.attempts} 次，连挂 ${item.failures} 次` : ''}`),
+                    item.lastError === '' ? null : h('div', { className: 'ds-error' }, item.lastError),
+                  ),
+                  h('div', { className: 'ds-listrow-actions' },
+                    h('button', {
+                      className: 'ds-btn ds-btn-ghost', disabled: busy !== '',
+                      onClick: () => void retry(item.channel),
+                    }, busy === item.channel ? '重试中…' : '再试一次'),
+                  ),
+                )),
+          ),
+        ),
+        h('div', { className: 'ds-panel ds-form-panel' },
+          h('div', { className: 'ds-panel-head' }, '失败了会怎样'),
+          h('div', { className: 'ds-panel-body' },
+            h('div', { className: 'ds-hint' }, '· 飞书通知：同一条消息会自动重发一次，两次都失败才记异常（飞书 200 但 body 里 code≠0 也算失败）。'),
+            h('div', { className: 'ds-hint' }, '· GitLab：拉 Issue、回写评论、对 MR 失败会记在这里；同步定时器仍会自动重试下一轮。'),
+            h('div', { className: 'ds-hint' }, '· 飞书云盘：归档失败会挂在交付物自身的 doc.error 上，这里再汇总一份。'),
+            h('div', { className: 'ds-hint' }, '· 代码隔离：worktree 建失败只影响这一张卡（退回普通工作区），不影响别的卡。'),
+          ),
+        ),
+      )
+    }
+
+    function Settings({ state, onChanged, initialSection, onSection }) {
+      const config = state.config
+      const [form, setForm] = React.useState({
+        boardTitle: config.board.title,
+        gitlabUrl: config.gitlab.url,
+        gitlabGroup: config.gitlab.group,
+        gitlabProject: config.gitlab.project,
+        gitlabToken: '',
+        feishuAppId: config.feishu.appId,
+        feishuAppSecret: '',
+        feishuChatId: config.feishu.chatId,
+        feishuBaseToken: config.feishu.baseToken,
+        feishuTableId: config.feishu.tableId,
+        feishuWebhook: '',
+        feishuNotify: config.feishu.notifyOnChange !== false,
+        gitlabSyncEnabled: config.gitlab.syncEnabled === true,
+        gitlabSyncLabel: config.gitlab.syncLabel ?? '',
+        roles: JSON.parse(JSON.stringify(config.roles)),
+        agentsEnabled: config.agents?.enabled === true,
+        agentsMaxConcurrent: String(config.agents?.maxConcurrent ?? 2),
+        agentsPreset: config.agents?.agentPreset ?? 'standard',
+        agentsWorkspace: config.agents?.workspaceDir ?? '',
+        agentsSandbox: config.agents?.sandbox ?? 'workspace-write',
+        agentsIsolation: config.agents?.isolation ?? 'none',
+        agentsWorktreeRoot: config.agents?.worktreeRoot ?? '',
+        agentsCleanup: config.agents?.cleanupWorktree ?? 'manual',
+        agentsAuto: Array.isArray(config.agents?.autoStatuses) ? config.agents.autoStatuses : ['design', 'dev_ready', 'test'],
+      })
+      const [status, setStatus] = React.useState(null)
+      const [error, setError] = React.useState(null)
+      const [busy, setBusy] = React.useState(false)
+
+      const save = async () => {
+        setBusy(true); setError(null); setStatus(null)
+        try {
+          await api('/config', {
+            board: { title: form.boardTitle },
+            roles: form.roles,
+            agents: {
+              enabled: form.agentsEnabled,
+              maxConcurrent: Number(form.agentsMaxConcurrent) || 2,
+              agentPreset: form.agentsPreset,
+              workspaceDir: form.agentsWorkspace,
+              sandbox: form.agentsSandbox,
+              isolation: form.agentsIsolation,
+              worktreeRoot: form.agentsWorktreeRoot,
+              cleanupWorktree: form.agentsCleanup,
+              autoStatuses: form.agentsAuto,
+            },
+          })
+          setStatus('已保存')
+          await onChanged()
+        } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)) } finally { setBusy(false) }
+      }
+
+      const field = (key, label, hint, type) => h('div', { className: 'ds-field', key },
+        h('div', { className: 'ds-label' }, label),
+        h(TextField, {
+          className: 'ds-input',
+          type: type ?? 'text',
+          value: form[key],
+          placeholder: hint ?? '',
+          onChange: e => setForm({ ...form, [key]: e.target.value }),
+        }),
+      )
+
+      const roleKeys = Object.keys(form.roles)
+      const [section, setSection] = React.useState(initialSection ?? 'experts')
+
+      React.useEffect(() => {
+        if (typeof initialSection === 'string' && initialSection !== '') setSection(initialSection)
+      }, [initialSection])
+
+      const pickSection = next => {
+        setSection(next)
+        onSection?.(next)
+      }
+
+      const PANE_META = {
+        projects: ['项目与迭代', '项目是看板的第一层分组：卡片挂项目、项目下面划迭代，之后按项目/迭代筛选和考核。'],
+        experts: ['专家', '每个专家是一个能独立接活的工作单元。角色位决定它接哪一列，业务领域决定它懂哪块业务，角色提示词和技能决定它怎么做。'],
+        teams: ['专家团', '团长负责拆活和汇总，成员各自干活；评论里 @团名 就交给团长。'],
+        skills: ['技能库', '技能是一段可复用的做法。写进技能库后会落成 SKILL.md，专家在需要时自己加载，也可以自己新增。'],
+        columns: ['列的负责人', '看板每一列默认派给谁。选「默认」用系统自带的那一位。'],
+        gitlab: ['代码仓库', '一个仓库一条记录：地址、路径、令牌各自独立，同步时互不干扰。'],
+        feishu: ['飞书机器人', '卡片状态变化时往群里发消息。可以按团队或项目建多个机器人。'],
+        agents: ['自动派单', '卡片进入勾选的列时，自动把活派给该列的负责人；这里是全局开关与并发上限。'],
+        models: ['模型', '每个角色位用哪个模型。单个专家还能在「专家」里单独覆盖。'],
+        testing: ['测试执行', '接口用例跑在哪、能访问哪些域名、超时多少。执行器就跑在这台机器上（.218），不依赖外部 CI。'],
+        costs: ['成本与预算', '一个月允许派多少次活、跑多少小时，超了在效能页亮黄亮红。'],
+        environments: ['部署环境', '版本可以登记「上过哪个环境」，只留痕：平台不接 CD，不会触发任何部署。'],
+        board: ['看板外观', '看板顶部显示的标题。'],
+        access: ['权限与审计', '启用成员名单后，每个写操作都要认人：只读不能改，成员能推进卡，管理员才能改配置、删数据、发布版本。所有写操作都会进下面的审计日志。'],
+        ldap: ['统一登录（LDAP）', '用公司账号登录平台：登录成功后服务端记住这个人，写操作和审计都挂在他的名字下。密码只存服务端密钥文件，不回显。'],
+        storage: ['数据与备份', '台账存在哪、密钥存在哪，以及每次写操作留下的快照。改坏了可以回滚到上一版。'],
+        health: ['集成健康', '飞书通知、GitLab、飞书云盘、代码隔离四条外部通道最近一次是成功还是失败。以前这些失败只写进日志，现在会在这里亮出来，坏了能看见、能补一次。'],
+      }
+
+      const saveBar = h('div', { className: 'ds-row', style: { gap: 10, marginTop: 2 } },
+        h('button', { className: 'ds-btn ds-btn-primary', disabled: busy, onClick: () => void save() }, busy ? '保存中…' : '保存'),
+        status !== null ? h('span', { className: 'ds-ok' }, status) : null,
+        error !== null ? h('span', { className: 'ds-err' }, error) : null,
+      )
+
+      const nav = [
+        { group: '团队' },
+        { id: 'projects', label: '项目与迭代', count: (config.projects ?? []).length },
+        { id: 'experts', label: '专家', count: (config.experts ?? []).length },
+        { id: 'teams', label: '专家团', count: (config.teams ?? []).length },
+        { id: 'skills', label: '技能库' },
+        { id: 'columns', label: '列的负责人' },
+        { group: '接入' },
+        { id: 'gitlab', label: '代码仓库', count: (config.gitlab.projects ?? []).length },
+        { id: 'feishu', label: '飞书机器人', count: (config.feishu.bots ?? []).length },
+        { id: 'health', label: '集成健康', count: state.integrations?.broken ?? 0 },
+        { group: '运行' },
+        { id: 'agents', label: '自动派单' },
+        { id: 'testing', label: '测试执行', count: (config.testing?.envs ?? []).length },
+        { id: 'costs', label: '成本与预算' },
+        { id: 'environments', label: '部署环境', count: (config.environments ?? []).length },
+        { id: 'board', label: '看板外观' },
+        { group: '安全' },
+        { id: 'ldap', label: '统一登录（LDAP）', count: config.ldap?.enabled === true ? (config.ldap?.requireLogin === true ? '必须' : '开') : 0 },
+        { id: 'access', label: '权限与审计', count: (config.access?.members ?? []).length },
+        { id: 'storage', label: '数据与备份', count: state.storage?.snapshots ?? 0 },
+      ]
+
+      const paneFor = id => {
+        if (id === 'projects') return h(BusinessPanel, { config, onChanged })
+        if (id === 'experts') return h(ExpertsPanel, { config, onChanged })
+        if (id === 'teams') return h(TeamsPanel, { config, onChanged })
+        if (id === 'skills') return h(SkillsPanel, { config, onChanged })
+        if (id === 'columns') return h(ColumnsPanel, { state, onChanged })
+        if (id === 'testing') return h(TestingPanel, { config, onChanged })
+        if (id === 'costs') return h(CostsPanel, { config, onChanged })
+        if (id === 'environments') return h(EnvironmentsPanel, { config, onChanged })
+        if (id === 'access') return h(AccessPanel, { state, config, onChanged })
+        if (id === 'ldap') return h(LdapPanel, { config, onChanged })
+        if (id === 'storage') return h(StoragePanel, { state, onChanged })
+        if (id === 'gitlab') return h(ReposPanel, { config, onChanged })
+        if (id === 'feishu') return h('div', null, h(BotsPanel, { config, onChanged }), h(EscalatePanel, { config, onChanged }))
+        if (id === 'health') return h(HealthPanel, { state, config, onChanged })
+        if (id === 'board') {
+          return h('div', null,
+            h('div', { className: 'ds-panel ds-form-panel' },
+              h('div', { className: 'ds-panel-head' }, '看板'),
+              h('div', { className: 'ds-panel-body' }, field('boardTitle', '看板标题', '需求&任务工作空间')),
+            ),
+            saveBar,
+          )
+        }
+        if (id === 'models') {
+          return h('div', null,
+            h('div', { className: 'ds-panel ds-form-panel' },
+              h('div', { className: 'ds-panel-head' }, '角色与模型'),
+              h('div', { className: 'ds-panel-body ds-grid2' },
+                roleKeys.map(role => h('div', { className: 'ds-field', key: role },
+                  h('div', { className: 'ds-label' }, `${ROLE_LABEL[role] ?? role}`),
+                  h(TextField, {
+                    className: 'ds-input',
+                    value: form.roles[role].model,
+                    placeholder: 'deepseek-v4.1-flash',
+                    onChange: e => setForm({ ...form, roles: { ...form.roles, [role]: { ...form.roles[role], model: e.target.value } } }),
+                  }),
+                )),
+              ),
+            ),
+            h('div', { className: 'ds-hint', style: { margin: '-6px 0 12px' } }, '单个专家可以在「专家」里单独指定模型，优先级：专家模型 → 这里的角色模型 → 宿主默认。'),
+            saveBar,
+          )
+        }
+        // agents
+        return h('div', null,
+          h('div', { className: 'ds-panel ds-form-panel' },
+            h('div', { className: 'ds-panel-head' }, '自动派单（专家 agent）'),
+            h('div', { className: 'ds-panel-body' },
+              h('div', { className: 'ds-field', style: { gridColumn: '1 / -1' } },
+                h('label', { className: 'ds-row', style: { alignItems: 'center', gap: 8, cursor: 'pointer' } },
+                  h(CheckField, { checked: form.agentsEnabled,
+                    onChange: e => setForm({ ...form, agentsEnabled: e.target.checked }),
+                  }),
+                  h('span', {}, '卡片进入勾选的列时，自动派给该列的负责人'),
+                ),
+                h('div', { className: 'ds-hint' }, '关闭后仍可在卡片抽屉里点「马上处理」手动派单；派单结果会写回评论并推进卡片。'),
+              ),
+              h('div', { className: 'ds-field', style: { gridColumn: '1 / -1' } },
+                h('div', { className: 'ds-label' }, '哪些列自动派单'),
+                h('div', { className: 'ds-row', style: { flexWrap: 'wrap', gap: 14 } },
+                  [['design', '待方案'], ['dev_ready', '待开发'], ['dev', '开发中'], ['test', '待测试']].map(([id, label]) =>
+                    h('label', { className: 'ds-row', key: id, style: { alignItems: 'center', gap: 6, cursor: 'pointer' } },
+                      h(CheckField, { checked: form.agentsAuto.includes(id),
+                        onChange: e => setForm({
+                          ...form,
+                          agentsAuto: e.target.checked
+                            ? [...form.agentsAuto, id]
+                            : form.agentsAuto.filter(entry => entry !== id),
+                        }),
+                      }),
+                      h('span', {}, label),
+                    )),
+                ),
+                h('div', { className: 'ds-hint' }, '勾选的列在卡片进入时自动派给该列对应的负责人；其余列只能手动「马上处理」。'),
+              ),
+              field('agentsMaxConcurrent', '同时最多几个 agent', '2'),
+              field('agentsPreset', 'Agent 预设', 'standard'),
+              field('agentsWorkspace', '工作区目录', '/home/lyf/dsh-workspace'),
+              h('div', { className: 'ds-hint', style: { gridColumn: '1 / -1' } }, '预设决定 agent 手里有哪些工具：standard 带 shell 与文件读写，minimal 只有基础工具。'),
+              h('div', { className: 'ds-field', key: 'agentsSandbox' },
+                h('div', { className: 'ds-label' }, '沙箱档位（这个会话能写哪、能跑什么）'),
+                h(SelectField, {
+                  className: 'ds-input',
+                  value: form.agentsSandbox,
+                  onChange: e => setForm({ ...form, agentsSandbox: e.target.value }),
+                },
+                  [['read-only', '只读：能看不能改'],
+                    ['workspace-write', '只写工作区（推荐）：能改自己的目录，改不到系统别处'],
+                    ['danger-full-access', '无沙箱：可以写任何地方（危险）']].map(([id, label]) =>
+                    h('option', { key: id, value: id }, label)),
+                ),
+                h('div', { className: 'ds-hint' }, '由 DSH 的 permission preset 执行：read-only / workspace-write 走 bwrap 或 Landlock 隔离。单个专家可以在「专家」里覆盖。'),
+              ),
+              h('div', { className: 'ds-field', key: 'agentsIsolation' },
+                h('div', { className: 'ds-label' }, '代码隔离'),
+                h(SelectField, {
+                  className: 'ds-input',
+                  value: form.agentsIsolation,
+                  onChange: e => setForm({ ...form, agentsIsolation: e.target.value }),
+                },
+                  [['none', '不隔离：所有卡共用一个工作区'],
+                    ['worktree', '一卡一个 git worktree（推荐给多卡并行）']].map(([id, label]) =>
+                    h('option', { key: id, value: id }, label)),
+                ),
+                h('div', { className: 'ds-hint' }, '开启后，卡要挂在配了「本机代码目录」的项目上，派单时会为它切一条 task/<编号> 分支。'),
+              ),
+              field('agentsWorktreeRoot', 'worktree 根目录', '留空 = 工作区同级的 dsh-worktrees'),
+              h('div', { className: 'ds-field', key: 'agentsCleanup' },
+                h('div', { className: 'ds-label' }, '卡完成时'),
+                h(SelectField, {
+                  className: 'ds-input',
+                  value: form.agentsCleanup,
+                  onChange: e => setForm({ ...form, agentsCleanup: e.target.value }),
+                },
+                  [['manual', '保留 worktree 和分支，等人看 diff'],
+                    ['on_done', '自动删掉 worktree 和分支']].map(([id, label]) =>
+                    h('option', { key: id, value: id }, label)),
+                ),
+              ),
+            ),
+          ),
+          saveBar,
+        )
+      }
+
+      return h('div', { className: 'ds-settings' },
+        h('div', { className: 'ds-settings-nav' },
+          nav.map((item, index) => item.group !== undefined
+            ? h('div', { className: 'ds-settings-nav-group', key: `group-${index}` }, item.group)
+            : tipOf(
+              (PANE_META[item.id] ?? [item.label, ''])[1] || item.label,
+              h('button', {
+                key: item.id,
+                className: 'ds-nav-item',
+                'data-active': section === item.id ? '1' : '0',
+                onClick: () => pickSection(item.id),
+              },
+                h('span', {}, item.label),
+                item.count === undefined ? null : h('span', { className: 'ds-nav-count' }, String(item.count))))),
+        ),
+        h('div', { className: 'ds-settings-pane' },
+          h('div', { className: 'ds-pane-head' },
+            h('div', null,
+              h('div', { className: 'ds-pane-title' }, (PANE_META[section] ?? ['设置'])[0]),
+              h('div', { className: 'ds-pane-desc' }, (PANE_META[section] ?? ['', ''])[1]),
+            ),
+          ),
+          paneFor(section)),
+      )
+    }
+
+    // ------------------------------------------------------------------ page
+
+    function NewTaskDialog({ state, onClose, onCreated }) {
+      const projects = state?.config?.projects ?? []
+      const [title, setTitle] = React.useState('')
+      const [requirement, setRequirement] = React.useState('')
+      const [type, setType] = React.useState('requirement')
+      const [priority, setPriority] = React.useState('normal')
+      const [severity, setSeverity] = React.useState('p2')
+      const [domain, setDomain] = React.useState('')
+      const requirements = state?.requirements ?? []
+      const [requirementId, setRequirementId] = React.useState('')
+      const [project, setProject] = React.useState(projects.length === 1 ? projects[0].id : '')
+      const [iteration, setIteration] = React.useState('')
+      const [owner, setOwner] = React.useState('')
+      const [due, setDue] = React.useState('')
+      const [error, setError] = React.useState(null)
+      const [busy, setBusy] = React.useState(false)
+      const isBug = type === 'bug'
+      const projectIterations = (projects.find(item => item.id === project)?.iterations ?? [])
+      const submit = async () => {
+        setBusy(true); setError(null)
+        try {
+          await api('/task/create', {
+            title, requirement, type, priority, domain,
+            severity: isBug ? severity : '',
+            role: isBug ? 'dev' : 'product',
+            status: isBug ? 'dev_ready' : 'clarify',
+            project, iteration: project === '' ? '' : iteration,
+            owner: owner.trim(), dueAt: fromDateInput(due),
+            requirementId,
+          })
+          await onCreated()
+          onClose()
+        } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)) } finally { setBusy(false) }
+      }
+      return h('div', { className: 'ds-modal-wrap', onClick: e => { if (e.target === e.currentTarget) onClose() } },
+        h('div', { className: 'ds-modal' },
+          h('h3', {}, isBug ? '登记缺陷' : '新建任务'),
+          h('div', { className: 'ds-field' },
+            h('div', { className: 'ds-label' }, '标题'),
+            h(TextField, {
+              className: 'ds-input', autoFocus: true,
+              placeholder: isBug ? '一句话说清什么坏了，例如「优惠券叠加后金额算错」' : '一句话说清要做什么',
+              value: title,
+              onChange: e => setTitle(e.target.value),
+              onKeyDown: e => { if (e.key === 'Enter' && !e.isComposing) void submit() },
+            }),
+          ),
+          h('div', { className: 'ds-field' },
+            h('div', { className: 'ds-label' }, isBug ? '复现步骤 / 现象' : '需求 / 背景'),
+            h(MdField, {
+              className: 'ds-textarea', rows: 5,
+              placeholder: isBug
+                ? '复现步骤：1… 2…\n实际结果：\n期望结果：\n影响范围 / 环境（版本、账号、数据条件）：'
+                : '背景、期望结果、验收口径。专家会照这段去开工。',
+              value: requirement, onChange: e => setRequirement(e.target.value),
+            }),
+          ),
+          h('div', { className: 'ds-modal-grid' },
+            h('div', { className: 'ds-field' },
+              h('div', { className: 'ds-label' }, '类型'),
+              h(SelectField, { className: 'ds-select', value: type, onChange: e => setType(e.target.value) },
+                Object.keys(TYPE_LABEL).map(v => h('option', { key: v, value: v }, TYPE_LABEL[v]))),
+            ),
+            isBug
+              ? h('div', { className: 'ds-field' },
+                h('div', { className: 'ds-label' }, '严重级别'),
+                h(SelectField, { className: 'ds-select', value: severity, onChange: e => setSeverity(e.target.value) },
+                  Object.keys(SEVERITY_LABEL).map(v => h('option', { key: v, value: v }, SEVERITY_LABEL[v]))),
+              )
+              : h('div', { className: 'ds-field' },
+                h('div', { className: 'ds-label' }, '优先级'),
+                h(SelectField, { className: 'ds-select', value: priority, onChange: e => setPriority(e.target.value) },
+                  Object.keys(PRIORITY_LABEL).map(v => h('option', { key: v, value: v }, PRIORITY_LABEL[v]))),
+              ),
+            isBug
+              ? h('div', { className: 'ds-field' },
+                h('div', { className: 'ds-label' }, '优先级'),
+                h(SelectField, { className: 'ds-select', value: priority, onChange: e => setPriority(e.target.value) },
+                  Object.keys(PRIORITY_LABEL).map(v => h('option', { key: v, value: v }, PRIORITY_LABEL[v]))),
+              )
+              : null,
+            h('div', { className: 'ds-field', style: { gridColumn: '1 / -1' } },
+              h('div', { className: 'ds-label' }, '挂在哪个需求下'),
+              requirements.length === 0
+                ? h('div', { className: 'ds-hint', style: { fontSize: 11.5 } }, '还没有需求。到「需求」页先建一条，这张卡就能拿到 DEV-001 这样的编号。')
+                : h(SelectField, { className: 'ds-select', value: requirementId, onChange: e => setRequirementId(e.target.value) },
+                  h('option', { value: '' }, '暂不挂需求（编号留空）'),
+                  requirements.map(item => h('option', { key: item.id, value: item.id }, `${item.code || item.id} · ${item.title}`)),
+                ),
+            ),
+            h('div', { className: 'ds-field', style: { gridColumn: '1 / -1' } },
+              h('div', { className: 'ds-label' }, '业务领域（选填）'),
+              h(TextField, {
+                className: 'ds-input', placeholder: '例如 支付 / 会员 / 履约，填了会自动派给同领域的专家',
+                value: domain, onChange: e => setDomain(e.target.value),
+              }),
+            ),
+            projects.length === 0
+              ? null
+              : h('div', { className: 'ds-field' },
+                h('div', { className: 'ds-label' }, '业务项目'),
+                h(SelectField, {
+                  className: 'ds-select', value: project,
+                  onChange: e => { setProject(e.target.value); setIteration('') },
+                },
+                  h('option', { value: '' }, '不属于任何项目'),
+                  projects.map(item => h('option', { key: item.id, value: item.id }, `${item.key ? `${item.key} · ` : ''}${item.name}`)),
+                ),
+              ),
+            projects.length === 0 || projectIterations.length === 0
+              ? null
+              : h('div', { className: 'ds-field' },
+                h('div', { className: 'ds-label' }, '迭代'),
+                h(SelectField, { className: 'ds-select', value: iteration, onChange: e => setIteration(e.target.value) },
+                  h('option', { value: '' }, '不指定迭代'),
+                  projectIterations.map(item => h('option', { key: item.id, value: item.id }, item.name))),
+              ),
+            h('div', { className: 'ds-field' },
+              h('div', { className: 'ds-label' }, '业务负责人（选填）'),
+              h(TextField, {
+                className: 'ds-input', placeholder: '提需求的人，例如 张伟',
+                value: owner, onChange: e => setOwner(e.target.value),
+              }),
+            ),
+            h('div', { className: 'ds-field' },
+              h('div', { className: 'ds-label' }, '期望完成（选填）'),
+              h(TextField, { className: 'ds-input', type: 'date', value: due, onChange: e => setDue(e.target.value) }),
+            ),
+          ),
+          isBug
+            ? h('div', { className: 'ds-hint', style: { fontSize: 11.5 } },
+              '缺陷卡会直接落到「待开发」，由研发先复现、定位根因再修，修完自动交给测试验证。')
+            : null,
+          h('div', { className: 'ds-modal-foot' },
+            error !== null ? h('span', { className: 'ds-err' }, error) : null,
+            h('div', { className: 'ds-grow' }),
+            h('button', { className: 'ds-btn', onClick: onClose }, '取消'),
+            h('button', { className: 'ds-btn ds-btn-primary', disabled: busy || title.trim() === '', onClick: () => void submit() },
+              busy ? '创建中…' : (isBug ? '登记缺陷' : '创建')),
+          ),
+        ),
+      )
+    }
+
+    function ProjectsOverview({ state, onOpenBoard }) {
+      const [metrics, setMetrics] = React.useState(null)
+      const [error, setError] = React.useState(null)
+      React.useEffect(() => {
+        let alive = true
+        api('/metrics')
+          .then(out => { if (alive) setMetrics(out.metrics) })
+          .catch(cause => { if (alive) setError(cause instanceof Error ? cause.message : String(cause)) })
+        return () => { alive = false }
+      }, [state.revision])
+
+      if (error !== null) return h('div', { className: 'ds-body' }, h('div', { className: 'ds-err' }, error))
+      if (metrics === null) return h('div', { className: 'ds-loading' }, '正在统计…')
+
+      const card = (title, subtitle, data, key) => h('div', { className: 'ds-proj-card', key },
+        h('div', { className: 'ds-proj-head' },
+          h('div', null,
+            h('div', { className: 'ds-proj-name' }, title),
+            h('div', { className: 'ds-hint' }, subtitle),
+          ),
+          h('button', { className: 'ds-btn', onClick: () => onOpenBoard(key) }, '看这些卡'),
+        ),
+        h('div', { className: 'ds-proj-stats' },
+          h('div', null, h('b', {}, data.inProgress), h('span', {}, '进行中')),
+          h('div', null, h('b', { 'data-warn': data.blocked > 0 ? '1' : '0' }, data.blocked), h('span', {}, '阻塞')),
+          h('div', null, h('b', { 'data-warn': data.overdue > 0 ? '1' : '0' }, data.overdue), h('span', {}, '逾期')),
+          h('div', null, h('b', {}, data.done), h('span', {}, '已完成')),
+          h('div', null, h('b', {}, `${data.checklistRate}%`), h('span', {}, '清单完成')),
+          h('div', null, h('b', {}, data.artifacts), h('span', {}, '交付物')),
+        ),
+        h('div', { className: 'ds-proj-bar' },
+          h('div', { className: 'ds-check-bar', 'data-full': data.checklistRate === 100 ? '1' : '0' },
+            h('span', { style: { width: `${data.checklistRate}%` } }),
+          ),
+        ),
+        data.cycleDays > 0 ? h('div', { className: 'ds-hint' }, `平均周期 ${data.cycleDays} 天 · 近 7 天完成 ${data.throughput7d} 张`) : h('div', { className: 'ds-hint' }, `近 7 天完成 ${data.throughput7d} 张`),
+      )
+
+      return h('div', { className: 'ds-body' },
+        h('div', { className: 'ds-proj-grid' },
+          (metrics.projects ?? []).map(project => card(
+            `${project.key ? `[${project.key}] ` : ''}${project.name}`,
+            `${(project.iterations ?? []).length} 个迭代`,
+            project.metrics,
+            project.id,
+          )),
+          metrics.unassigned !== null && metrics.unassigned.total > 0
+            ? card('未归属项目', '还没挂到项目上的卡', metrics.unassigned, '')
+            : null,
+        ),
+        (metrics.projects ?? []).length === 0 && (metrics.unassigned === null || metrics.unassigned.total === 0)
+          ? h('div', { className: 'ds-empty' }, '还没有卡片。先去「设置 → 项目与迭代」建一个项目，再新建任务。')
+          : null,
+      )
+    }
+
+    const RELEASE_STATUS_LABEL = { draft: '草稿', candidate: '待发布', approved: '已审批', released: '已发布', rolled_back: '已回滚' }
+    const RELEASE_STATUS_ORDER = ['draft', 'candidate', 'approved', 'released', 'rolled_back']
+
+    /** 效能页：一次通过率、返工率、周期分布、每列停留、AI 采纳情况。 */
+    /* 燃尽用折线 + 面积：柱状图在「剩余 0–2」时全被压成 2px 小横线，看不出趋势。 */
+    function BurnChart({ series }) {
+      const points = Array.isArray(series) ? series : []
+      if (points.length === 0) return h('div', { className: 'ds-empty' }, '还没有数据。')
+      const values = points.map(item => Math.max(0, Number(item.remaining) || 0))
+      const max = Math.max(1, ...values)
+      const step = points.length === 1 ? 100 : 100 / (points.length - 1)
+      const coords = points.map((item, index) => ({
+        x: index * step,
+        y: 38 - (values[index] / max) * 32,
+        remaining: values[index],
+        day: String(item.day ?? ''),
+      }))
+      const line = coords.map((point, index) => `${index === 0 ? 'M' : 'L'}${point.x.toFixed(2)},${point.y.toFixed(2)}`).join(' ')
+      const area = `${line} L100,40 L0,40 Z`
+      return h('div', { className: 'ds-burn' },
+        h('svg', { viewBox: '0 0 100 40', preserveAspectRatio: 'none', className: 'ds-burn-svg', role: 'img', 'aria-label': '燃尽趋势' },
+          h('path', { d: area, className: 'ds-burn-area' }),
+          h('path', { d: line, className: 'ds-burn-line', vectorEffect: 'non-scaling-stroke' }),
+          coords.map(point => h('circle', { key: point.day, cx: point.x, cy: point.y, r: 1.1, className: 'ds-burn-dot' },
+            h('title', {}, `${point.day}：还剩 ${point.remaining} 张`))),
+        ),
+        h('div', { className: 'ds-burn-axis' },
+          h('span', {}, coords[0].day),
+          h('span', {}, coords[coords.length - 1].day),
+        ),
+      )
+    }
+
+    function AnalyticsPage({ state, onOpenTask }) {
+      const [days, setDays] = React.useState(30)
+      const [project, setProject] = React.useState('')
+      const [data, setData] = React.useState(null)
+      const [error, setError] = React.useState(null)
+      const [load, setLoad] = React.useState(null)
+      const [burn, setBurn] = React.useState(null)
+      const [costs, setCosts] = React.useState(null)
+
+      React.useEffect(() => {
+        let alive = true
+        const query = `/analytics?days=${days}${project === '' ? '' : `&project=${encodeURIComponent(project)}`}`
+        api(query)
+          .then(out => { if (alive) { setData(out.analytics); setError(null) } })
+          .catch(cause => { if (alive) setError(cause instanceof Error ? cause.message : String(cause)) })
+        const suffix = project === '' ? '' : `&project=${encodeURIComponent(project)}`
+        Promise.all([api('/workload'), api(`/burndown?days=14${suffix}`), api('/costs')])
+          .then(([loadOut, burnOut, costOut]) => {
+            if (!alive) return
+            setLoad(loadOut.workload ?? null)
+            setBurn(burnOut.burndown ?? null)
+            setCosts({ ...(costOut.costs ?? {}), budget: costOut.budget ?? null })
+          })
+          .catch(() => {})
+        return () => { alive = false }
+      }, [days, project, state.revision])
+
+      if (error !== null) return h('div', { className: 'ds-body' }, h('div', { className: 'ds-err' }, error))
+      if (data === null) return h('div', { className: 'ds-loading' }, '正在统计…')
+
+      const pct = value => `${Math.round((value ?? 0) * 100)}%`
+      const fmtSpan = value => {
+        const days = Number(value) || 0
+        if (days <= 0) return '0'
+        if (days * 1440 < 60) return `${Math.max(1, Math.round(days * 1440))} 分钟`
+        if (days < 1) return `${(days * 24).toFixed(1)} 小时`
+        return `${days.toFixed(1)} 天`
+      }
+      // 多步用例的简易写法：每行「METHOD url | 期望状态码 | 提取变量路径」，空行忽略。
+      const parseSteps = text => String(text ?? '')
+        .split('\n')
+        .map(line => line.trim())
+        .filter(line => line !== '')
+        .map(line => {
+          const [head, expectRaw, extractRaw] = line.split('|').map(part => part.trim())
+          const space = head.indexOf(' ')
+          const method = space > 0 ? head.slice(0, space).toUpperCase() : 'GET'
+          const url = space > 0 ? head.slice(space + 1).trim() : head
+          const step = { method, url }
+          if (expectRaw !== undefined && /^\d{3}$/.test(expectRaw)) step.expectStatus = Number(expectRaw)
+          if (extractRaw !== undefined && extractRaw !== '') {
+            // 提取变量：写 data.token 就自动叫 token；写 token=data.token 可以自己命名。
+            const eq = extractRaw.indexOf('=')
+            const name = eq > 0
+              ? extractRaw.slice(0, eq).trim()
+              : (extractRaw.split('.').pop() ?? '').trim()
+            const path = eq > 0 ? extractRaw.slice(eq + 1).trim() : extractRaw
+            if (name !== '' && path !== '') step.extract = { [name]: path }
+          }
+          return step
+        })
+        .filter(step => step.url !== '')
+        .slice(0, 20)
+      const kpi = (label, value, hint, warn) => h('div', { className: 'ds-kpi', 'data-warn': warn === true ? '1' : '0' },
+        h('div', { className: 'ds-kpi-value' }, value),
+        h('div', { className: 'ds-kpi-label' }, label),
+        h('div', { className: 'ds-kpi-hint' }, hint),
+      )
+
+      const cycleTotal = (data.cycle.buckets ?? []).reduce((sum, bucket) => sum + bucket.count, 0)
+      const peak = Math.max(1, ...(data.throughput ?? []).map(point => point.count), ...(data.cycle.buckets ?? []).map(bucket => bucket.count))
+      const maxDwell = Math.max(0.001, ...(data.columns ?? []).map(column => column.avgDays))
+      // 面板底部的小注：把每块面板补满（等高栅格里不会被撑出一片空白），顺带给一句「所以呢」
+      const slowestColumn = (data.columns ?? []).reduce((best, column) => (best === null || column.avgDays > best.avgDays ? column : best), null)
+      const done14 = (data.throughput ?? []).reduce((sum, point) => sum + point.count, 0)
+      const enabledExperts = (load?.experts ?? []).filter(item => item.enabled)
+      const loadOpen = enabledExperts.reduce((sum, item) => sum + item.open, 0)
+      const loadOverdue = enabledExperts.reduce((sum, item) => sum + (item.overdue ?? 0), 0)
+      const burnSeries = burn?.series ?? []
+      const burnTail = burnSeries.length === 0 ? null : burnSeries[burnSeries.length - 1]
+
+      return h('div', { className: 'ds-body' },
+        h('div', { className: 'ds-board-bar' },
+          h('span', { className: 'ds-hint' }, `统计口径：最近 ${data.days} 天 · ${data.scope.tasks} 张卡（${data.scope.done} 张已完成）`),
+          h(SelectField, {
+            className: 'ds-select', value: project, style: { width: 'auto', minWidth: 130 },
+            onChange: event => setProject(event.target.value),
+          },
+          h('option', { value: '' }, '全部项目'),
+          (state.config.projects ?? []).map(item => h('option', { key: item.id, value: item.id }, `${item.key ? `[${item.key}] ` : ''}${item.name}`))),
+          h(SelectField, {
+            className: 'ds-select', value: String(days), style: { width: 'auto', minWidth: 96 },
+            onChange: event => setDays(Number(event.target.value)),
+          },
+          h('option', { value: '7' }, '近 7 天'),
+          h('option', { value: '30' }, '近 30 天'),
+          h('option', { value: '90' }, '近 90 天')),
+        ),
+        h('div', { className: 'ds-an-sec' },
+          '质量',
+          h('span', { className: 'ds-hint' }, '先看这四个数：返工多不多、多久能做完、AI 交的东西有多少被人验收'),
+        ),
+        h('div', { className: 'ds-kpi-grid' },
+          kpi('一次通过率', pct(data.rework.firstPassRate), '完成的卡里，从没被退回过的比例', data.rework.firstPassRate < 0.6),
+          kpi('返工率', pct(data.rework.rate), `${data.rework.reworked}/${data.rework.moved} 张卡倒退过`, data.rework.rate > 0.3),
+          kpi('中位周期', fmtSpan(data.cycle.medianDays), `平均 ${fmtSpan(data.cycle.avgDays)} · P90 ${fmtSpan(data.cycle.p90Days)}`),
+          kpi('AI 交付物采纳率', pct(data.ai.acceptedRate), `${data.ai.accepted}/${data.ai.artifactsAi} 件已被验收 · 占全部交付物 ${pct(data.ai.aiShare)}`),
+        ),
+        h('div', { className: 'ds-an-sec' },
+          '流程与产能',
+          h('span', { className: 'ds-hint' }, '完成的卡各花了多久 · 时间都卡在哪一列 · 最近每天完成几张'),
+        ),
+        h('div', { className: 'ds-an-grid' },
+          h('div', { className: 'ds-span-4', style: { display: 'grid', gap: 12, gridTemplateRows: 'auto 1fr', alignContent: 'stretch' } },
+            h('div', { className: 'ds-panel' },
+              h('div', { className: 'ds-panel-head' }, '周期分布', h('span', { className: 'ds-hint', style: { marginLeft: 'auto' } }, `${cycleTotal} 张已完成`)),
+              h('div', { className: 'ds-panel-body' },
+                (data.cycle.buckets ?? []).map(bucket => h('div', { key: bucket.id, className: 'ds-an-row' },
+                  h('span', { className: 'ds-an-name' }, bucket.label),
+                  h('div', { className: 'ds-an-track', 'data-empty': (bucket.count === 0 ? '1' : '0') }, h('div', { className: 'ds-an-fill', style: { width: `${Math.round((bucket.count / peak) * 100)}%` } })),
+                  h('span', { className: 'ds-an-num' }, `${bucket.count}`),
+                )),
+                cycleTotal === 0 ? h('div', { className: 'ds-hint' }, '这个区间里还没有完成的卡。') : null,
+                h('div', { className: 'ds-an-foot' }, `平均 ${fmtSpan(data.cycle.avgDays)} · 中位 ${fmtSpan(data.cycle.medianDays)} · P90 ${fmtSpan(data.cycle.p90Days)}`),
+              ),
+            ),
+            h('div', { className: 'ds-panel' },
+              h('div', { className: 'ds-panel-head' }, '近 14 天完成'),
+              h('div', { className: 'ds-panel-body' },
+                h('div', { className: 'ds-spark' },
+                  (data.throughput ?? []).map((point, index) => h('div', { key: point.day, className: 'ds-spark-col', title: `${point.day}：完成 ${point.count} 张` },
+                    h('div', { className: 'ds-spark-bar', style: { height: `${Math.round((point.count / Math.max(1, Math.max(...data.throughput.map(item => item.count)))) * 100)}%` } }),
+                    h('span', { className: 'ds-spark-day' }, index % 2 === 0 ? point.day : ''),
+                  )),
+                ),
+                h('div', { className: 'ds-an-foot' }, `近 14 天合计 ${done14} 张 · 日均 ${(done14 / 14).toFixed(1)} 张 · 空着的日子是没卡完成，不是没数据`),
+              ),
+            ),
+          ),
+          h('div', { className: 'ds-panel ds-span-8' },
+            h('div', { className: 'ds-panel-head' }, '每列停留（平均）'),
+            h('div', { className: 'ds-panel-body' },
+              (data.columns ?? []).map(column => h('div', { key: column.status, className: 'ds-an-row' },
+                h('span', { className: 'ds-an-name' }, column.label),
+                h('div', { className: 'ds-an-track', 'data-empty': (column.avgDays === 0 ? '1' : '0') }, h('div', { className: 'ds-an-fill ds-an-fill-warn', style: { width: `${Math.round((column.avgDays / maxDwell) * 100)}%` } })),
+                h('span', { className: 'ds-an-num' }, fmtSpan(column.avgDays)),
+              )),
+              h('div', { className: 'ds-an-foot' },
+                slowestColumn === null ? '还没有数据。' : `最慢的是「${slowestColumn.label}」：平均 ${fmtSpan(slowestColumn.avgDays)}，时间主要压在这一列。`),
+            ),
+          ),
+        ),
+        h('div', { className: 'ds-an-sec' },
+          '交付、成本与返工',
+          h('span', { className: 'ds-hint' }, 'AI 交的东西被验收多少 · 谁手上压得最多 · 派单花了多少 · 哪些卡来回折腾'),
+        ),
+        h('div', { className: 'ds-an-grid' },
+          h('div', { className: 'ds-panel ds-span-4' },
+            h('div', { className: 'ds-panel-head' }, 'AI 产出质量'),
+            h('div', { className: 'ds-panel-body' },
+              h('div', { className: 'ds-an-kv' }, h('span', {}, '交付物由专家登记'), h('b', {}, `${data.ai.artifactsAi} / ${data.ai.artifactsTotal}`)),
+              h('div', { className: 'ds-an-kv' }, h('span', {}, '其中被人验收'), h('b', {}, `${data.ai.accepted}（${pct(data.ai.acceptedRate)}）`)),
+              h('div', { className: 'ds-an-kv' }, h('span', {}, '缺正文（只有标题）'), h('b', { 'data-warn': data.ai.emptyBody > 0 ? '1' : '0' }, `${data.ai.emptyBody}`)),
+              h('div', { className: 'ds-an-kv' }, h('span', {}, '写码卡有执行记录'), h('b', {}, `${data.ai.codingTasks}`)),
+              h('div', { className: 'ds-an-kv' }, h('span', {}, '评审通过 / 要求修改'), h('b', {}, `${data.ai.codingApproved} / ${data.ai.codingChanges}`)),
+              h('div', { className: 'ds-an-kv' }, h('span', {}, '单测通过'), h('b', {}, `${data.ai.unitPassed}/${data.ai.unitTests}（${pct(data.ai.unitPassRate)}）`)),
+              h('div', { className: 'ds-an-kv' }, h('span', {}, '已合并'), h('b', {}, `${data.ai.merged}`)),
+            ),
+          ),
+          h('div', { className: 'ds-panel ds-span-4' },
+            h('div', { className: 'ds-panel-head' }, '团队负载', h('span', { className: 'ds-hint', style: { marginLeft: 'auto' } }, `${load?.busy ?? 0} 位在跑`)),
+            h('div', { className: 'ds-panel-body' },
+              (load?.experts ?? []).filter(item => item.enabled).length === 0
+                ? h('div', { className: 'ds-empty' }, '还没有启用的专家。')
+                : (load?.experts ?? []).filter(item => item.enabled).map(item => h('div', { key: item.id, className: 'ds-an-row' },
+                  h('span', { className: 'ds-an-name' }, `${item.emoji} ${item.name}`),
+                  h('div', { className: 'ds-an-track' },
+                    h('div', {
+                      className: 'ds-an-fill',
+                      style: { width: `${Math.round((item.open / Math.max(1, ...(load.experts ?? []).map(entry => entry.open))) * 100)}%` },
+                    })),
+                  h('span', { className: 'ds-an-num' }, `在办 ${item.open}${item.running > 0 ? ` · 跑 ${item.running}` : ''}${item.overdue > 0 ? ` · 逾期 ${item.overdue}` : ''}`),
+                )),
+              h('div', { className: 'ds-an-foot' },
+                `${enabledExperts.length} 位在岗，手上合计 ${loadOpen} 张${loadOverdue > 0 ? `，其中 ${loadOverdue} 张逾期` : '，没有逾期的'}`),
+            ),
+          ),
+          h('div', { className: 'ds-panel ds-span-4' },
+            h('div', { className: 'ds-panel-head' }, '燃尽（近 14 天剩余）', h('span', { className: 'ds-hint', style: { marginLeft: 'auto' } }, `现在还剩 ${burn?.now?.remaining ?? 0} 张`)),
+            h('div', { className: 'ds-panel-body' },
+              h(BurnChart, { series: burn?.series ?? [] }),
+              h('div', { className: 'ds-an-foot' },
+                burnTail === null
+                  ? '还没有数据。'
+                  : `累计建 ${burnTail.created} · 累计完成 ${burnTail.done} · 现在还剩 ${burnTail.remaining} 张`),
+            ),
+          ),
+          h('div', { className: 'ds-panel ds-span-4' },
+            h('div', { className: 'ds-panel-head' }, 'AI 执行成本', h('span', { className: 'ds-hint', style: { marginLeft: 'auto' } }, `${costs?.total ?? 0} 次派单`)),
+            h('div', { className: 'ds-panel-body' },
+              h('div', { className: 'ds-an-kv' }, h('span', {}, '平均执行时长'), h('b', {}, `${Math.round((costs?.avgMs ?? 0) / 1000)} 秒`)),
+              (costs?.byModel ?? []).slice(0, 3).map(item => h('div', { key: `m-${item.key}`, className: 'ds-an-kv' }, h('span', {}, `模型 ${item.key}`), h('b', {}, `${item.runs} 次`))),
+              (costs?.byPromptVersion ?? []).slice(0, 3).map(item => h('div', { key: `p-${item.key}`, className: 'ds-an-kv' }, h('span', {}, `提示词 ${item.key}`), h('b', {}, `${item.runs} 次`))),
+              h('div', { className: 'ds-hint' }, costs?.note ?? ''),
+              costs?.budget === null || costs?.budget === undefined
+                ? null
+                : h('div', { style: { marginTop: 8 } },
+                  h('div', { className: 'ds-an-kv' },
+                    h('span', {}, '预算使用'),
+                    h('b', { style: { color: costs.budget.level === 'over' ? '#e5484d' : costs.budget.level === 'warn' ? '#d97706' : undefined } },
+                      `${Math.max(costs.budget.runRate, costs.budget.hourRate)}%`),
+                  ),
+                  h(ProgressField, {
+                    value: Math.min(100, Math.max(costs.budget.runRate, costs.budget.hourRate)),
+                    tone: costs.budget.level,
+                  }),
+                  h('div', { className: 'ds-hint' },
+                    `${costs.budget.runs}/${costs.budget.budgetRuns} 次 · ${costs.budget.hours}/${costs.budget.budgetHours} 小时 · ${costs.budget.hint}`),
+                ),
+            ),
+          ),
+          h('div', { className: 'ds-panel ds-span-8' },
+          h('div', { className: 'ds-panel-head' },
+            '返工最多的卡',
+            h('span', { className: 'ds-hint', style: { marginLeft: 'auto' } }, `评审打回 ${data.rework.reviewRework} 次 · 测试打回 ${data.rework.testRework} 次`),
+          ),
+          h('div', { className: 'ds-panel-body' },
+            (data.rework.worst ?? []).length === 0
+              ? h('div', { className: 'ds-hint' }, '没有卡倒退过，挺好。')
+              : data.rework.worst.map(item => h('div', { key: item.id, className: 'ds-listrow' },
+                h('div', { className: 'ds-listrow-main' },
+                  h('div', null, `${item.code === '' ? '' : `${item.code} `}${item.title}`),
+                  h('div', { className: 'ds-hint' }, `倒退 ${item.backward} 次 · 现在在「${(state.statuses.find(entry => entry.id === item.status) ?? {}).label ?? item.status}」`),
+                ),
+                h('div', { className: 'ds-listrow-actions' },
+                  h('button', { className: 'ds-btn ds-btn-ghost', onClick: () => onOpenTask(item.id) }, '打开'),
+                ),
+              )),
+            ),
+          ),
+        ),
+      )
+    }
+
+    /** 发布页：版本 = 一批卡 + 门禁 + 发布说明。 */
+    function ReleasesPage({ state, onOpenTask }) {
+      const [items, setItems] = React.useState([])
+      const [selected, setSelected] = React.useState(null)
+      const [detail, setDetail] = React.useState(null)
+      const [form, setForm] = React.useState(null)
+      const [notes, setNotes] = React.useState('')
+      const [error, setError] = React.useState(null)
+      const [notice, setNotice] = React.useState('')
+      const [busy, setBusy] = React.useState(false)
+      const [picker, setPicker] = React.useState('')
+      const [smokeText, setSmokeText] = React.useState('')
+      const [grayName, setGrayName] = React.useState('')
+      const [grayPercent, setGrayPercent] = React.useState('10')
+      // 部署环境：只登记「这个版本上过哪个环境」，平台不触发部署。
+      const [deployEnv, setDeployEnv] = React.useState('')
+      const [deployNote, setDeployNote] = React.useState('')
+
+      const refresh = React.useCallback(async (keepId) => {
+        const out = await api('/releases')
+        const list = out.releases ?? []
+        setItems(list)
+        const wanted = keepId ?? (list.some(item => item.id === selected) ? selected : (list[0]?.id ?? null))
+        setSelected(wanted)
+        if (wanted === null) {
+          setDetail(null)
+          return
+        }
+        const one = await api('/release/get', { id: wanted })
+        setDetail(one)
+        setForm({
+          id: one.release.id,
+          version: one.release.version,
+          name: one.release.name,
+          project: one.release.project,
+          owner: one.release.owner,
+          status: one.release.status,
+          plannedAt: one.release.plannedAt,
+          tagName: one.release.tagName ?? '',
+          commitSha: one.release.commitSha ?? '',
+        })
+        setNotes(one.release.notes ?? '')
+      }, [selected])
+
+      React.useEffect(() => {
+        let alive = true
+        refresh()
+          .then(() => { if (alive) setError(null) })
+          .catch(cause => { if (alive) setError(cause instanceof Error ? cause.message : String(cause)) })
+        return () => { alive = false }
+      }, [state.revision, refresh])
+
+      async function pick(id) {
+        setSelected(id)
+        setBusy(true)
+        try {
+          const one = await api('/release/get', { id })
+          setDetail(one)
+          setForm({
+            id: one.release.id,
+            version: one.release.version,
+            name: one.release.name,
+            project: one.release.project,
+            owner: one.release.owner,
+            status: one.release.status,
+            plannedAt: one.release.plannedAt,
+            tagName: one.release.tagName ?? '',
+            commitSha: one.release.commitSha ?? '',
+          })
+          setNotes(one.release.notes ?? '')
+          setNotice('')
+        } catch (cause) {
+          setError(cause instanceof Error ? cause.message : String(cause))
+        } finally {
+          setBusy(false)
+        }
+      }
+
+      function createNew() {
+        setSelected(null)
+        setDetail(null)
+        setForm({ id: '', version: '', name: '', project: '', owner: '', status: 'draft', plannedAt: 0, tagName: '', commitSha: '' })
+        setNotes('')
+        setNotice('')
+      }
+
+      async function act(path, body, done) {
+        setBusy(true)
+        setError(null)
+        try {
+          const out = await api(path, body)
+          setNotice(done ?? '已保存')
+          toast(done ?? '已保存')
+          toast(done ?? '已保存')
+          await refresh(out.release?.id ?? selected)
+        } catch (cause) {
+          const verb = cause instanceof Error ? cause.message : String(cause)
+          setError(verb)
+          toast(verb, 'error')
+        } finally {
+          setBusy(false)
+        }
+      }
+
+      if (error !== null && items.length === 0) return h('div', { className: 'ds-body' }, h('div', { className: 'ds-err' }, error))
+
+      const gate = detail?.gate
+      const release = detail?.release
+      const tasks = detail?.tasks ?? []
+      const candidates = state.tasks.filter(task => task.releaseId === '' || task.releaseId === undefined)
+
+      const listPane = h('div', { className: 'ds-req-list' },
+          
+        h('div', { className: 'ds-row', style: { justifyContent: 'space-between', marginBottom: 6 } },
+          h('span', { className: 'ds-hint' }, `${items.length} 个版本`),
+          h('button', { className: 'ds-btn', onClick: createNew }, '＋ 新建版本'),
+        ),
+        items.length === 0
+          ? h('div', { className: 'ds-empty' }, '还没有版本。先建一个版本，再把卡挂上来。')
+          : items.map(item => h('div', {
+            key: item.id,
+            className: 'ds-req-item',
+            'data-on': selected === item.id ? '1' : '0',
+            onClick: () => void pick(item.id),
+          },
+            h('div', { className: 'ds-req-item-title' }, `${item.version || item.id} ${item.name}`.trim()),
+            h('div', { className: 'ds-req-item-meta' },
+              h(ChipField, { className: 'ds-chip', 'data-kind': item.status }, RELEASE_STATUS_LABEL[item.status] ?? item.status),
+              h(ChipField, { className: 'ds-chip' }, `${item.gate.stats.done}/${item.gate.stats.tasks} 卡`),
+              item.gate.blockers.length === 0
+                ? h(ChipField, { className: 'ds-chip', style: { color: '#0f9d58', borderColor: '#0f9d5855' } }, '门禁通过')
+                : h(ChipField, { className: 'ds-chip ds-chip-blocked' }, `${item.gate.blockers.length} 项拦着`),
+            ),
+          )),
+      )
+
+      const detailPane = form === null
+        ? h('div', { className: 'ds-hint' }, '左边选一个版本，或者新建一个。')
+        : h('div', { className: 'ds-req-detail' },
+          // 版本 ↔ 需求：卡上挂着哪条需求，这里就列哪条，不用人再维护一遍。
+          (release?.requirements ?? []).length === 0 ? null : h('div', { className: 'ds-row', style: { flexWrap: 'wrap', gap: 6, marginBottom: 8 } },
+            h('span', { className: 'ds-hint' }, `这个版本涉及 ${release.requirements.length} 条需求：`),
+            release.requirements.map(req => h('span', {
+              key: req.id, className: 'ds-chip', title: req.title,
+            }, `${req.code || req.id} ${req.title}（${REQ_STATUS_LABEL[req.derived] ?? req.derived}）`)),
+          ),
+          h('div', { className: 'ds-req-headline' },
+            h('div', null,
+              h('div', { className: 'ds-req-name' }, `${form.version || '未编号'} ${form.name}`.trim()),
+              h('div', { className: 'ds-hint' }, release === undefined || release === null
+                ? '新版本：先填版本号与名字，保存后可以把卡挂进来'
+                : `创建于 ${fmtDate(release.createdAt)}${release.releasedAt > 0 ? ` · 发布于 ${fmtDate(release.releasedAt)}` : ''}${release.approveBy !== '' ? ` · 审批人 ${release.approveBy}` : ''}`),
+            ),
+            h('div', { className: 'ds-req-actions' },
+              h(SelectField, {
+                className: 'ds-select', style: { width: 108 }, value: form.status,
+                onChange: event => setForm({ ...form, status: event.target.value }),
+              }, RELEASE_STATUS_ORDER.map(value => h('option', { key: value, value }, RELEASE_STATUS_LABEL[value]))),
+            ),
+          ),
+          h('div', { className: 'ds-panel', style: { marginTop: 4 } },
+            h('div', { className: 'ds-panel-head' }, '版本信息'),
+            h('div', { className: 'ds-panel-body ds-grid2' },
+              h('label', { className: 'ds-field' }, h('span', {}, '版本号'),
+                h(TextField, { className: 'ds-input', value: form.version, placeholder: 'v1.3.0', disabled: release?.status === 'released', onChange: event => setForm({ ...form, version: event.target.value }) })),
+              h('label', { className: 'ds-field' }, h('span', {}, '版本名'),
+                h(TextField, { className: 'ds-input', value: form.name, placeholder: '积分抵扣首个版本', onChange: event => setForm({ ...form, name: event.target.value }) })),
+              h('label', { className: 'ds-field' }, h('span', {}, '业务项目'),
+                h(SelectField, { className: 'ds-select', value: form.project, onChange: event => setForm({ ...form, project: event.target.value }) },
+                  h('option', { value: '' }, '不属于任何项目'),
+                  (state.config.projects ?? []).map(item => h('option', { key: item.id, value: item.id }, item.name)))),
+              h('label', { className: 'ds-field' }, h('span', {}, '发布负责人'),
+                h(TextField, { className: 'ds-input', value: form.owner, onChange: event => setForm({ ...form, owner: event.target.value }) })),
+              h('label', { className: 'ds-field' }, h('span', {}, '计划发布时间'),
+                h(TextField, {
+                  className: 'ds-input', type: 'date', value: toDateInput(form.plannedAt),
+                  onChange: event => setForm({ ...form, plannedAt: fromDateInput(event.target.value) }),
+                })),
+              h('label', { className: 'ds-field' }, h('span', {}, '发布标签（tag）'),
+                h(TextField, { className: 'ds-input', value: form.tagName ?? '', placeholder: 'v1.0.0', onChange: event => setForm({ ...form, tagName: event.target.value }) })),
+              h('label', { className: 'ds-field' }, h('span', {}, '对应提交（sha，选填）'),
+                h(TextField, { className: 'ds-input', value: form.commitSha ?? '', placeholder: 'a1b2c3d', onChange: event => setForm({ ...form, commitSha: event.target.value }) })),
+              h('div', { className: 'ds-row', style: { alignItems: 'flex-end', justifyContent: 'flex-end', gap: 8 } },
+                h('button', { className: 'ds-btn ds-btn-primary', disabled: busy, onClick: () => void act('/release/save', { release: form }, '版本已保存') }, '保存'),
+                form.id === ''
+                  ? null
+                  : h('button', {
+                    className: 'ds-btn ds-btn-ghost',
+                    disabled: busy,
+                    style: { color: 'var(--destructive)' },
+                    onClick: async () => {
+                      const ok = await confirmDialog('删除这个版本？卡会保留，只是脱离版本。', { title: '删除版本', danger: true, okText: '删除' })
+                      if (ok) void act('/release/delete', { id: form.id }, '版本已删除')
+                    },
+                  }, '删除')),
+            ),
+          ),
+          release === null || release === undefined
+            ? null
+            : h('div', { className: 'ds-panel', style: { marginTop: 12 } },
+              h('div', { className: 'ds-panel-head' }, '发布门禁',
+                h('span', { className: 'ds-hint' }, '卡全做完、没阻塞、缺陷关闭、用例没有失败，才算能发')),
+              h('div', { className: 'ds-panel-body' },
+                h('div', { className: 'ds-req-stats' },
+                  h('div', { className: 'ds-stat-box' }, h('b', {}, String(gate?.stats.done ?? 0)), h('span', {}, '已完成卡')),
+                  h('div', { className: 'ds-stat-box' }, h('b', { 'data-warn': (gate?.stats.open ?? 0) > 0 ? '1' : '0' }, String(gate?.stats.open ?? 0)), h('span', {}, '未完成')),
+                  h('div', { className: 'ds-stat-box' }, h('b', { 'data-warn': (gate?.stats.blocked ?? 0) > 0 ? '1' : '0' }, String(gate?.stats.blocked ?? 0)), h('span', {}, '阻塞')),
+                  h('div', { className: 'ds-stat-box' }, h('b', { 'data-warn': (gate?.stats.bugs ?? 0) > 0 ? '1' : '0' }, String(gate?.stats.bugs ?? 0)), h('span', {}, '未结缺陷')),
+                  h('div', { className: 'ds-stat-box' }, h('b', { 'data-warn': (gate?.stats.failing ?? 0) > 0 ? '1' : '0' }, String(gate?.stats.failing ?? 0)), h('span', {}, '失败用例')),
+                  h('div', { className: 'ds-stat-box' }, h('b', {}, String(gate?.stats.artifacts ?? 0)), h('span', {}, '交付物')),
+                ),
+                (gate?.blockers ?? []).map((line, index) => h('div', { key: `b${index}`, className: 'ds-error' }, `⛔ ${line}`)),
+                (gate?.warnings ?? []).map((line, index) => h('div', { key: `w${index}`, className: 'ds-hint' }, `⚠ ${line}`)),
+                h('div', { className: 'ds-action-bar' },
+                  h('div', { className: 'ds-action-bar-left' },
+                    h('button', { className: 'ds-btn ds-btn-ghost', disabled: busy, onClick: () => void act('/release/notes', { id: form.id }, '发布说明已生成') }, '生成发布说明'),
+                    h('button', { className: 'ds-btn', disabled: busy || !gate?.ready, onClick: () => void act('/release/approve', { id: form.id, by: '人' }, '已审批，可以发布了') }, '审批通过'),
+                  ),
+                  h('div', { className: 'ds-action-bar-right' },
+                  h('button', { className: 'ds-btn ds-btn-primary', disabled: busy || !gate?.ready || release.status === 'released', onClick: () => void act('/release/publish', { id: form.id, by: '人' }, '已发布') }, release.status === 'released' ? '已发布' : '发布'),
+                  tipOf('发布准入（预发部署 / 需求签字）没过时也要发：必须写原因，会记进部署日志', h('button', {
+                    className: 'ds-btn ds-btn-ghost',
+                    disabled: busy || !gate?.ready || release.status === 'released',
+                    'data-force': '1',
+                    onClick: async () => {
+                      const reason = await promptDialog('强制发布的原因（会记进部署日志，便于复盘）：', { title: '强制发布', okText: '强制发布', placeholder: '为什么不等预发部署 / 需求签字？' })
+                      if (reason === null) return
+                      if (String(reason).trim() === '') { setNotice('强制发布必须写原因'); return }
+                      void act('/release/publish', { id: form.id, by: '人', force: true, forceNote: String(reason).trim() }, '已强制发布（原因已记入部署日志）')
+                    },
+                  }, '强制发布')),
+                  release.status === 'released'
+                    ? h('button', {
+                      className: 'ds-btn ds-btn-ghost', disabled: busy,
+                      onClick: async () => {
+                        const reason = await promptDialog('回滚原因（要进复盘记录）：', { title: '回滚这个版本', danger: true, okText: '回滚' })
+                        if (reason !== null && reason.trim() !== '') void act('/release/rollback', { id: form.id, reason }, '已回滚')
+                      },
+                    }, '回滚')
+                    : null,
+                  ),
+                ),
+                release.rollbackReason === '' ? null : h('div', { className: 'ds-error' }, `回滚原因：${release.rollbackReason}`),
+              ),
+            ),
+          release === null || release === undefined
+            ? null
+            : h('div', { className: 'ds-panel', style: { marginTop: 12 } },
+              h('div', { className: 'ds-panel-head' }, '发布冒烟清单',
+                h('span', { className: 'ds-hint' }, `${(release.smoke ?? []).filter(item => item.done).length}/${(release.smoke ?? []).length} 项已过 · 发布前逐条点过，门禁才算过`)),
+              h('div', { className: 'ds-panel-body' },
+                (release.smoke ?? []).length === 0
+                  ? h('div', { className: 'ds-empty' }, '还没有冒烟项：把发布前必验的几条写在这里，比如「能登录」「下单支付成功」「首页不报错」。')
+                  : null,
+                (release.smoke ?? []).map(item => h('div', { key: item.id, className: 'ds-listrow' },
+                  h('label', { className: 'ds-row', style: { gap: 8, alignItems: 'center', flex: 1, cursor: 'pointer' } },
+                    h(CheckField, { checked: item.done === true,
+                      onChange: () => void act('/release/smoke', { id: form.id, action: 'toggle', itemId: item.id, done: item.done !== true, by: '人' }, item.done ? '已取消' : '冒烟项已过'),
+                    }),
+                    h('span', { className: item.done ? 'ds-smoke-done' : '' }, item.text),
+                  ),
+                  item.done && item.by !== '' ? h('span', { className: 'ds-hint' }, `${item.by} · ${fmtDate(item.at)}`) : null,
+                  h('div', { className: 'ds-listrow-actions' },
+                    h('button', { className: 'ds-btn ds-btn-ghost', disabled: busy, onClick: () => void act('/release/smoke', { id: form.id, action: 'remove', itemId: item.id }, '已删除') }, '×')),
+                )),
+                h('div', { className: 'ds-row', style: { gap: 8, marginTop: 8 } },
+                  h(TextField, {
+                    className: 'ds-input', style: { flex: 1 }, value: smokeText,
+                    placeholder: '发布前必须验证什么？', onChange: event => setSmokeText(event.target.value),
+                  }),
+                  h('button', {
+                    className: 'ds-btn', disabled: busy || smokeText.trim() === '',
+                    onClick: () => {
+                      const label = smokeText.trim()
+                      if (label === '') return
+                      setSmokeText('')
+                      void act('/release/smoke', { id: form.id, action: 'add', text: label }, '已加冒烟项')
+                    },
+                  }, '＋ 加一条')),
+              ),
+            ),
+          release === null || release === undefined
+            ? null
+            : h('div', { className: 'ds-panel', style: { marginTop: 12 } },
+              h('div', { className: 'ds-panel-head' }, '审批、灰度与部署记录',
+                h('span', { className: 'ds-hint' }, `审批 ${(release.approvals ?? []).length} 条 · 灰度 ${(release.grayBatches ?? []).length} 批`)),
+              h('div', { className: 'ds-panel-body' },
+                (release.approvals ?? []).length === 0
+                  ? h('div', { className: 'ds-empty' }, '还没有审批记录：点上面的「审批通过」，系统会把谁批的、什么结论记在这里。')
+                  : (release.approvals ?? []).map(item => h('div', { key: item.id, className: 'ds-listrow' },
+                    h('div', { className: 'ds-listrow-main' },
+                      h('div', null, `${item.by} 审批通过`),
+                      h('div', { className: 'ds-hint' }, item.note || '（没写结论）'),
+                    ),
+                    h('span', { className: 'ds-hint' }, fmtDate(item.at)),
+                  )),
+                h('div', { style: { borderTop: '1px solid var(--ds-line)', margin: '10px 0' } }),
+                (release.grayBatches ?? []).length === 0
+                  ? h('div', { className: 'ds-hint' }, '没有灰度批次：发布就是一次性全量。先加一批 10% 跑一轮再全量，出事好收。')
+                  : (release.grayBatches ?? []).map(item => h('div', { key: item.id, className: 'ds-listrow' },
+                    h('div', { className: 'ds-listrow-main' },
+                      h('div', null, `${item.name} · ${item.percent}%`),
+                      h('div', { className: 'ds-hint' }, `${({ pending: '待开始', running: '灰度中', passed: '已通过', rolled_back: '已回滚' })[item.status] ?? item.status}${item.note === '' ? '' : ` · ${item.note}`}`),
+                    ),
+                    h('div', { className: 'ds-listrow-actions' },
+                      item.status === 'pending' ? h('button', { className: 'ds-btn ds-btn-ghost', disabled: busy, onClick: () => void act('/release/gray', { id: form.id, action: 'start', batchId: item.id, by: '人' }, '已开始灰度') }, '开始') : null,
+                      item.status === 'running' ? h('button', { className: 'ds-btn ds-btn-ghost', disabled: busy, onClick: () => void act('/release/gray', { id: form.id, action: 'advance', batchId: item.id, by: '人' }, '这一批已通过') }, '通过') : null,
+                      item.status === 'passed' ? h(ChipField, { className: 'ds-chip', 'data-on': '1' }, '已通过') : null,
+                      item.status === 'rolled_back' ? h(ChipField, { className: 'ds-chip', 'data-sla': 'overdue' }, '已回滚') : null,
+                    ),
+                  )),
+                h('div', { className: 'ds-row', style: { gap: 8, marginTop: 8 } },
+                  h(TextField, {
+                    className: 'ds-input', style: { flex: 2 }, value: grayName,
+                    placeholder: '批次名，例如 内测用户', onChange: event => setGrayName(event.target.value),
+                  }),
+                  h(TextField, {
+                    className: 'ds-input', style: { flex: '0 0 88px' }, type: 'number', min: 1, max: 100,
+                    value: grayPercent, onChange: event => setGrayPercent(event.target.value),
+                  }),
+                  h('button', {
+                    className: 'ds-btn', disabled: busy || Number(grayPercent) <= 0,
+                    onClick: async () => {
+                      await act('/release/gray', { id: form.id, action: 'add', name: grayName, percent: Number(grayPercent), by: '人' }, '已加一批灰度')
+                      setGrayName('')
+                      setGrayPercent('10')
+                    },
+                  }, '＋ 加一批'),
+                ),
+                h('div', { style: { borderTop: '1px solid var(--ds-line)', margin: '10px 0' } }),
+                // 部署环境：这里只留痕，平台不接 CD，也不会去调任何部署脚本。
+                h('div', { className: 'ds-hint' }, '上过哪些环境（只登记，不触发部署）'),
+                (release.deploys ?? []).length === 0 ? null : h('div', { className: 'ds-row', style: { flexWrap: 'wrap', gap: 6, marginTop: 6 } },
+                  release.deploys.map(item => h('span', {
+                    key: item.id,
+                    className: 'ds-chip',
+                    'data-env': item.kind,
+                    'data-on': item.at === 0 ? '0' : '1',
+                    title: item.at === 0 ? `还没登记部署到「${item.name}」` : `${item.name}：${fmtDate(item.at)} ${item.action} · ${item.by}`,
+                  }, item.at === 0 ? `${item.name} —` : `${item.name} ✓`)),
+                ),
+                h('div', { className: 'ds-row', style: { gap: 8, marginTop: 8 } },
+                  h(SelectField, {
+                    className: 'ds-input', style: { flex: '0 0 148px' }, value: deployEnv,
+                    onChange: event => setDeployEnv(event.target.value),
+                  },
+                    h('option', { value: '' }, '选环境…'),
+                    (state.config?.environments ?? []).map(env => h('option', { key: env.id, value: env.id }, env.name)),
+                  ),
+                  h(TextField, {
+                    className: 'ds-input', style: { flex: 1 }, value: deployNote,
+                    placeholder: '备注：谁发的、发了什么（可留空）',
+                    onChange: event => setDeployNote(event.target.value),
+                  }),
+                  h('button', {
+                    className: 'ds-btn', disabled: busy || deployEnv === '',
+                    onClick: async () => {
+                      await act('/release/deploy', { id: form.id, env: deployEnv, note: deployNote, by: '人' }, '已登记部署（没有触发任何部署）')
+                      setDeployNote('')
+                    },
+                  }, '登记部署'),
+                ),
+                h('div', { className: 'ds-hint', style: { marginTop: 10 } }, '部署与灰度记录（最近 8 条）'),
+                (() => {
+                  const GRAY = { pending: '待开始', running: '灰度中', passed: '已通过', rolled_back: '已回滚' }
+                  const rows = [
+                    ...(release.deployLog ?? []).map(item => ({ at: item.at, kind: 'deploy', by: item.by, text: `${item.action}${item.env === '' ? '' : ` · ${(state.config?.environments ?? []).find(env => env.id === item.env)?.name ?? item.env}`}`, note: item.note })),
+                    ...(release.grayBatches ?? []).map(item => ({ at: item.at ?? item.createdAt ?? 0, kind: 'gray', by: item.by ?? '人', text: `灰度 ${item.name} ${item.percent}%`, note: GRAY[item.status] ?? item.status })),
+                  ].filter(entry => entry.at).sort((a, b) => a.at - b.at).slice(-8).reverse()
+                  if (rows.length === 0) return h('div', { className: 'ds-empty' }, '还没有部署或灰度记录。')
+                  return rows.map(entry => h('div', { key: `${entry.at}-${entry.kind}-${entry.text}`, className: 'ds-hint' },
+                    h('span', { className: 'ds-chip', style: { marginRight: 6 } }, entry.kind === 'gray' ? '灰度' : '部署'),
+                    `${fmtDate(entry.at)} · ${entry.text} · ${entry.by}${entry.note === '' || entry.note === undefined ? '' : `：${entry.note}`}`))
+                })(),
+              ),
+            ),
+          release === null || release === undefined
+            ? null
+            : h('div', { className: 'ds-panel', style: { marginTop: 12 } },
+              h('div', { className: 'ds-panel-head' }, '这个版本里的卡', h('span', { className: 'ds-hint' }, `${tasks.length} 张`)),
+              h('div', { className: 'ds-panel-body' },
+                tasks.length === 0
+                  ? h('div', { className: 'ds-empty' }, '还没有卡。从下面挑，或者在卡片详情里选「所属版本」。')
+                  : tasks.map(task => h('div', { key: task.id, className: 'ds-listrow' },
+                    h('div', { className: 'ds-listrow-main' },
+                      h('div', null, `${task.code ? `${task.code} ` : ''}${task.title}`),
+                      h('div', { className: 'ds-hint' }, `${(state.statuses ?? []).find(entry => entry.id === task.status)?.label ?? task.status}${task.blocked !== null && task.blocked !== undefined ? ' · 阻塞' : ''}${task.type === 'bug' ? ' · 缺陷' : ''}`),
+                    ),
+                    h('div', { className: 'ds-listrow-actions' },
+                      h('button', { className: 'ds-btn ds-btn-ghost', onClick: () => onOpenTask(task.id) }, '打开'),
+                      h('button', { className: 'ds-btn ds-btn-ghost', disabled: busy, onClick: () => void act('/release/link', { id: form.id, taskId: task.id, action: 'remove' }, '已从版本移除') }, '移除'),
+                    ),
+                  )),
+                h('div', { className: 'ds-row', style: { marginTop: 8 } },
+                  h(SelectField, {
+                    className: 'ds-select', style: { flex: 1 }, value: picker,
+                    onChange: event => setPicker(event.target.value),
+                  },
+                    h('option', { value: '' }, `挑一张卡挂进来（${candidates.length} 张可选）`),
+                    candidates.map(task => h('option', { key: task.id, value: task.id }, `${task.code ? `${task.code} ` : ''}${task.title}`)),
+                  ),
+                  h('button', {
+                    className: 'ds-btn', disabled: busy || picker === '',
+                    onClick: async () => {
+                      await act('/release/link', { id: form.id, taskId: picker, action: 'add' }, '已挂到这个版本')
+                      setPicker('')
+                    },
+                  }, '挂进来'),
+                ),
+              ),
+            ),
+          release === null || release === undefined
+            ? null
+            : h('div', { className: 'ds-panel', style: { marginTop: 12 } },
+              h('div', { className: 'ds-panel-head' }, '发布说明',
+                h('button', {
+                  className: 'ds-btn ds-btn-ghost', disabled: busy,
+                  onClick: () => void navigator.clipboard?.writeText(notes).then(() => setNotice('发布说明已复制'), () => undefined),
+                }, '复制')),
+              h('div', { className: 'ds-panel-body' },
+                h(MdField, {
+                  className: 'ds-input', rows: 12, value: notes,
+                  placeholder: '点「生成发布说明」按类型自动汇总；之后可以在这里手动补充',
+                  onChange: event => setNotes(event.target.value),
+                  onBlur: () => { if (notes !== (release.notes ?? '')) void act('/release/save', { release: { ...form, notes } }, '发布说明已保存') },
+                })),
+            ),
+          error === null ? null : h('div', { className: 'ds-error', style: { marginTop: 8 } }, error),
+          notice === '' ? null : h('div', { className: 'ds-hint', style: { marginTop: 8 } }, notice),
+        )
+
+      return h('div', { className: 'ds-body' },
+        h('div', { className: 'ds-req-grid' }, listPane, detailPane),
+      )
+    }
+
+    const REQ_STATUS_LABEL = { draft: '草稿', review: '待评审', active: '进行中', delivered: '已交付', closed: '已关闭' }
+    const REQ_STATUS_ORDER = ['draft', 'review', 'active', 'delivered', 'closed']
+    const DOC_KIND_LABEL = { prd: 'PRD', proto: '原型', acceptance: '验收标准', other: '其它' }
+    const DOC_KIND_ORDER = ['prd', 'proto', 'acceptance', 'other']
+    const DOC_STATUS_LABEL = { draft: '草稿', review: '评审中', baseline: '已生效' }
+
+    /** 需求页：左侧需求清单，右侧一条需求的完整链路（卡 / 清单 / 用例 / 产物 / MR）。 */
+    function IntakePage({ state, onChanged, mode }) {
+      const business = (state.requirements ?? []).filter(item => item.source === 'business')
+      const [note, setNote] = React.useState('')
+      const [result, setResult] = React.useState('')
+      const [busy, setBusy] = React.useState(false)
+      const [src, setSrc] = React.useState('business')
+      const val = id => (document.getElementById(id)?.value ?? '').trim()
+      const submit = async () => {
+        setBusy(true)
+        try {
+          const reporter = val('ip-name')
+        const extra = { project: val('ip-project'), iteration: val('ip-iteration'), priority: val('ip-priority') || 'normal', links: { prd: val('ip-prd'), proto: val('ip-proto'), acceptance: val('ip-acceptance') } }
+          const out = reporter !== ''
+            ? await api('/intake/requirement', Object.assign({ title: val('ip-title'), description: val('ip-desc'), requester: reporter, dept: val('ip-dept'), contact: val('ip-contact') }, extra))
+            : await api('/requirement/save', { requirement: Object.assign({ title: val('ip-title'), description: val('ip-desc'), source: 'internal', status: 'draft' }, extra) })
+          setNote('已提交：' + (out.code ?? ''))
+          onChanged()
+        } catch (error) { setNote(error.message ?? String(error)) }
+        setBusy(false)
+      }
+      const query = async () => {
+        try {
+          const out = await api('/intake/query', { code: val('ip-qcode'), contact: val('ip-qcc') })
+          setResult([out.code, out.title || '', out.statusLabel || '', '待确认 ' + (out.openQuestions ?? 0), '卡片 ' + (out.doneCards ?? 0) + '/' + (out.cards ?? 0)].filter(part => part !== '').join('｜'))
+        } catch (error) { setResult(error.message ?? String(error)) }
+      }
+      const convert = async id => {
+        try { await api('/requirement/request-prd', { id, by: currentUser() }); toast('已转产品：待评审'); onChanged() }
+        catch (error) { toast(error.message ?? String(error), 'error') }
+      }
+      const panel = (title, hint, body) => h('div', { 'data-panel': title === '业务提单' ? 'form' : (title.startsWith('业务提单 ') ? 'list' : 'status'), style: { border: '1px solid var(--border)', borderRadius: 10, background: 'var(--card)', display: 'flex', flexDirection: 'column', minWidth: 0 } },
+        h('div', { style: { padding: '10px 14px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'baseline', gap: 8 } },
+          h('div', { style: { fontSize: 13, fontWeight: 600 } }, title),
+          h('span', { style: { fontSize: 11.5, color: 'var(--muted-foreground)' } }, hint),
+        ),
+        h('div', { style: { padding: '12px 14px', display: 'flex', flexDirection: 'column', gap: 10, minWidth: 0 } }, body),
+      )
+      return h('div', { className: 'ds-body', 'data-mode': mode ?? '', style: { overflowY: 'auto' } },
+        h('div', { style: { display: 'grid', gridTemplateColumns: 'minmax(0,1.15fr) minmax(0,.85fr)', gap: 12, padding: '14px 16px 20px', alignItems: 'start' } },
+          panel('业务提单', '提交后进入「草稿」，等产品补 PRD', [
+            h('div', { className: 'ds-field' }, h('div', { className: 'ds-label' }, '标题'), h(TextField, { id: 'ip-title', placeholder: '一句话说清要做什么' })),
+            h('div', { className: 'ds-field' }, h('div', { className: 'ds-label' }, '描述（至少 10 字）'), h(TextAreaField, { id: 'ip-desc', rows: 4, placeholder: '现状、期望、影响范围' })),
+h('div', { style: { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 } },
+h('div', { className: 'ds-field' }, h('div', { className: 'ds-label' }, '项目'), h('select', { id: 'ip-project', className: 'ds-input' }, h('option', { value: '' }, '不指定（先进需求池）'), ((state.config && state.config.projects) || state.projects || []).map(item => h('option', { key: item.id, value: item.id }, item.name)))),
+h('div', { className: 'ds-field' }, h('div', { className: 'ds-label' }, '迭代'), h(TextField, { id: 'ip-iteration', placeholder: '如 2026-11' })),
+),
+h('div', { className: 'ds-field' }, h('div', { className: 'ds-label' }, '优先级'), h('select', { id: 'ip-priority', className: 'ds-input' }, h('option', { value: 'normal' }, '普通'), h('option', { value: 'urgent' }, '紧急'), h('option', { value: 'relaxed' }, '不急'))),
+h('div', { className: 'ds-field' }, h('div', { className: 'ds-label' }, 'PRD 链接'), h(TextField, { id: 'ip-prd', placeholder: 'https://…' })),
+h('div', { className: 'ds-field' }, h('div', { className: 'ds-label' }, '原型链接'), h(TextField, { id: 'ip-proto', placeholder: 'https://…' })),
+h('div', { className: 'ds-field' }, h('div', { className: 'ds-label' }, '验收标准链接'), h(TextField, { id: 'ip-acceptance', placeholder: 'https://…' })),
+            h('div', { style: { display: 'flex', gap: 10, flexWrap: 'wrap' } },
+              h('div', { className: 'ds-field', style: { flex: '1 1 140px' } }, h('div', { className: 'ds-label' }, '姓名'), h(TextField, { id: 'ip-name' })),
+              h('div', { className: 'ds-field', style: { flex: '1 1 140px' } }, h('div', { className: 'ds-label' }, '部门'), h(TextField, { id: 'ip-dept' })),
+              h('div', { className: 'ds-field', style: { flex: '1 1 140px' } }, h('div', { className: 'ds-label' }, '联系方式'), h(TextField, { id: 'ip-contact' })),
+            ),
+            h('div', { style: { display: 'flex', alignItems: 'center', gap: 10 } },
+              h('button', { className: 'ds-btn ds-btn-primary', disabled: busy, onClick: submit }, busy ? '提交中…' : '提交需求'),
+              note === '' ? null : h('span', { style: { fontSize: 12, color: 'var(--muted-foreground)' } }, note),
+            ),
+          ]),
+          panel('查进度', '编号 + 联系方式后四位', [
+            h('div', { className: 'ds-field' }, h('div', { className: 'ds-label' }, '需求编号'), h(TextField, { id: 'ip-qcode', placeholder: 'REQ-2026-001' })),
+            h('div', { className: 'ds-field' }, h('div', { className: 'ds-label' }, '联系方式后四位'), h(TextField, { id: 'ip-qcc' })),
+            h('div', null, h('button', { className: 'ds-btn', onClick: query }, '查询')),
+            result === '' ? null : h('div', { style: { padding: '8px 10px', border: '1px solid var(--border)', borderRadius: 8, background: 'var(--muted)', fontSize: 12, lineHeight: 1.6 } }, result),
+          ]),
+          h('div', { style: { gridColumn: '1 / -1' } },
+            panel('业务提单 ' + business.length + ' 条', '转产品 = 送进待评审；产品补 PRD 后才能拆卡', [
+              business.length === 0
+                ? h('div', { className: 'ds-empty' }, '还没有业务提单。')
+                : business.map(item => h('div', { key: item.id, style: { display: 'flex', alignItems: 'center', gap: 10, padding: '8px 10px', border: '1px solid var(--border)', borderRadius: 8, background: 'var(--card)' } },
+                  h('div', { style: { minWidth: 0, flex: '1 1 auto', display: 'flex', flexDirection: 'column', gap: 2 } },
+                    h('div', { style: { fontSize: 12.5, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }, (item.code || '未编号') + '　' + item.title),
+                    h('div', { style: { fontSize: 11.5, color: 'var(--muted-foreground)' } }, (REQ_STATUS_LABEL[item.status] ?? item.status) + ' · ' + (item.requester?.name ?? '') + (item.requester?.dept ? '（' + item.requester.dept + '）' : '')),
+                  ),
+                  h('button', { className: 'ds-btn ds-btn-ghost', onClick: () => convert(item.id) }, '转产品'),
+                )),
+            ]),
+          ),
+        ),
+      )
+    }
+
+    function RequirementsPage({ state, onOpenTask, onChanged, createSignal }) {
+      const requirements = state.requirements ?? []
+      const projects = state.config.projects ?? []
+      const [selected, setSelected] = React.useState(requirements.length > 0 ? requirements[0].id : null)
+      // 从顶部「＋ 新建 → 新建需求」进来时，展开新建表单（form 为 null 时不显示面板）。
+      const openNew = () => {
+        setForm({ title: '', description: '', project: '', iteration: '', owner: '', priority: 'normal', status: 'draft', links: {} })
+        setError(null)
+      }
+      React.useEffect(() => { if (Number(createSignal) > 0) openNew() }, [createSignal])
+      const [form, setForm] = React.useState(null)
+      const [error, setError] = React.useState(null)
+      const [busy, setBusy] = React.useState(false)
+      const [docForm, setDocForm] = React.useState(null)
+      const [docNote, setDocNote] = React.useState(null)
+      const [docReader, setDocReader] = React.useState(null)
+      const [docAll, setDocAll] = React.useState(null)
+      const [docBusy, setDocBusy] = React.useState(false)
+      const [driveNote, setDriveNote] = React.useState(null)
+      const [driveBusy, setDriveBusy] = React.useState(false)
+      // ---- 功能点与可追溯矩阵：需求结构化之后，能查到「每条验收标准被谁做、被哪条用例验」
+      const [matrix, setMatrix] = React.useState(null)
+      const [matrixNote, setMatrixNote] = React.useState(null)
+      const [pointForm, setPointForm] = React.useState(null)
+      // ---- 需求准出与验收签字
+      const [reqSign, setReqSign] = React.useState('')
+      const [reqNote, setReqNote] = React.useState(null)
+      // ---- 依赖与排序
+      const [reqOrder, setReqOrder] = React.useState('0')
+      const [reqDeps, setReqDeps] = React.useState([])
+      const [depNote, setDepNote] = React.useState(null)
+
+      const currentForDeps = requirements.find(item => item.id === selected) ?? null
+      React.useEffect(() => {
+        setReqOrder(String(currentForDeps?.order ?? 0))
+        setReqDeps(Array.isArray(currentForDeps?.dependsOn) ? currentForDeps.dependsOn : [])
+        setDepNote(null)
+      }, [selected, currentForDeps?.updatedAt])
+
+      const saveDeps = async () => {
+        if (currentForDeps === null) return
+        try {
+          await api('/requirement/save', {
+            requirement: {
+              id: currentForDeps.id,
+              title: currentForDeps.title,
+              description: currentForDeps.description ?? '',
+              project: currentForDeps.project ?? '',
+              iteration: currentForDeps.iteration ?? '',
+              owner: currentForDeps.owner ?? '',
+              priority: currentForDeps.priority ?? 'normal',
+              status: currentForDeps.status ?? 'draft',
+              links: currentForDeps.links ?? {},
+              order: Number(reqOrder) || 0,
+              dependsOn: reqDeps,
+            },
+          })
+          setDepNote('已保存：排序与依赖'); toast('排序与依赖已保存')
+          if (onChanged !== undefined) onChanged()
+        } catch (cause) { setDepNote(cause instanceof Error ? cause.message : String(cause)) }
+      }
+
+      const signRequirement = async (action) => {
+        if (current === null) return
+        const note = String(reqSign ?? '').trim()
+        if (action === 'sign' && note === '') { setReqNote('签字要写一句结论：交付了什么、遗留什么'); return }
+        try {
+          await api('/requirement/signoff', { id: current.id, action, note, by: currentUser() })
+          setReqNote(action === 'sign' ? '已签字' : '已取消签字'); toast(action === 'sign' ? '需求已签字' : '已取消需求签字')
+          setReqSign('')
+          if (onChanged !== undefined) onChanged()
+        } catch (err) {
+          setReqNote(err.message)
+        }
+      }
+
+      const loadMatrix = React.useCallback(async (id) => {
+        if (id === undefined || id === null || id === '') { setMatrix(null); return }
+        try {
+          const json = await api('/requirement/matrix', { id })
+          setMatrix(json.matrix)
+        } catch (err) {
+          setMatrixNote(err.message)
+        }
+      }, [])
+
+      const savePoints = async (points) => {
+        if (current === null) return
+        try {
+          await api('/requirement/save', { requirement: { ...current, links: current.links ?? {}, points } })
+          await loadMatrix(current.id)
+          setMatrixNote('功能点已保存')
+          setPointForm(null)
+        } catch (err) {
+          setMatrixNote(err.message)
+        }
+      }
+
+      const blankPoint = () => ({ title: '', description: '', priority: 'normal', status: 'draft', acceptance: [] })
+
+      const savePoint = async () => {
+        if (pointForm === null || current === null) return
+        if (String(pointForm.title ?? '').trim() === '') { setMatrixNote('功能点要有标题'); return }
+        const acceptance = String(pointForm.acceptanceText ?? '').split('\n').map(line => line.trim()).filter(line => line !== '')
+        const entry = {
+          id: pointForm.id ?? `p${(current.points ?? []).length + 1}`,
+          title: pointForm.title,
+          description: pointForm.description ?? '',
+          priority: pointForm.priority ?? 'normal',
+          status: pointForm.status ?? 'draft',
+          acceptance: acceptance.map((line, index) => ({ id: `a${index + 1}`, text: line, done: false })),
+        }
+        const existing = (current.points ?? []).filter(item => item.id !== entry.id)
+        await savePoints([...existing, entry])
+      }
+
+      const removePoint = async (pointId) => {
+        if (current === null) return
+        if (!(await confirmDialog('删除这个功能点？挂在上面的卡会变成「未归功能点」。', { title: '删除功能点', danger: true, okText: '删除' }))) return
+        await savePoints((current.points ?? []).filter(item => item.id !== pointId))
+      }
+
+      const assignLoose = async (taskId, pointId) => {
+        try {
+          await api('/task/update', { id: taskId, pointId })
+          if (current !== null) await loadMatrix(current.id)
+        } catch (err) {
+          setMatrixNote(err.message)
+        }
+      }
+
+      const current = requirements.find(item => item.id === selected) ?? null
+      const tasksOf = id => state.tasks.filter(task => task.requirementId === id)
+      const statusLabel = id => (state.statuses.find(column => column.id === id)?.label ?? id)
+
+      React.useEffect(() => {
+        setMatrix(null)
+        setMatrixNote(null)
+        if (current !== null) void loadMatrix(current.id)
+      }, [current === null ? '' : current.id, loadMatrix])
+
+      const save = async () => {
+        if (form === null) return
+        if (String(form.title ?? '').trim() === '') { setError('需求标题不能为空'); return }
+        setBusy(true)
+        try {
+          const payload = await api('/requirement/save', {
+            requirement: {
+              id: form.id,
+              title: form.title,
+              description: form.description,
+              project: form.project,
+              owner: form.owner,
+              domain: form.domain ?? '',
+              priority: form.priority,
+              status: form.status,
+              links: { prd: form.prd, proto: form.proto, acceptance: form.acceptance },
+            },
+          })
+          setSelected(payload.requirement.id)
+          setForm(null)
+          setError(null)
+          toast(payload.created === true ? '需求已创建' : '需求已保存')
+        } catch (err) {
+          setError(err.message)
+        } finally {
+          setBusy(false)
+        }
+      }
+
+      const setStatus = async (status) => {
+        if (current === null) return
+        try {
+          await api('/requirement/save', { requirement: { ...current, links: current.links ?? {}, status } })
+          toast('需求状态已更新')
+        } catch (err) {
+          setError(err.message)
+        }
+      }
+
+      const remove = async (id) => {
+        if (!(await confirmDialog('删除这条需求？它下面的卡会保留，只是不再挂需求。', { title: '删除需求', danger: true, okText: '删除' }))) return
+        try {
+          await api('/requirement/delete', { id })
+          setSelected(null)
+        } catch (err) {
+          setError(err.message)
+        }
+      }
+
+      // ---- 评审：提交评审 → 通过 / 打回（打回必须写意见，需求退回草稿）
+      const REVIEW_LABEL = { pending: '待评审', approved: '评审通过', changes_requested: '评审打回' }
+      const [reviewBusy, setReviewBusy] = React.useState(false)
+      const [reviewNote, setReviewNote] = React.useState(null)
+      const reviewRequirement = async (decision, note) => {
+        if (current === null) return
+        setReviewBusy(true)
+        setReviewNote(null)
+        try {
+          const json = await api('/requirement/review', { id: current.id, decision, note: note ?? '', by: currentUser(), operator: currentUser() })
+          setReviewNote(`已${decision === 'approve' ? '通过' : decision === 'reject' ? '打回' : '提交'}评审：${REVIEW_LABEL[json.review?.status] ?? ''}`)
+          if (typeof onChanged === 'function') onChanged()
+        } catch (err) {
+          setReviewNote(err.message)
+        } finally {
+          setReviewBusy(false)
+        }
+      }
+      const rejectReview = async () => {
+        const note = await promptDialog('打回要给意见（会记在评审记录里）：', { title: '评审打回', danger: true, okText: '打回', placeholder: '写清楚哪里不满足，之后要据此改' })
+        if (note === null) return
+        if (String(note).trim() === '') { setReviewNote('打回必须写意见'); return }
+        void reviewRequirement('reject', String(note).trim().slice(0, 600))
+      }
+
+      // ---- 按未覆盖的功能点批量拆卡：一条功能点一张卡，挂好 pointId，直接出现在看板
+      const [splitBusy, setSplitBusy] = React.useState(false)
+      const [splitNote, setSplitNote] = React.useState(null)
+      const splitPoints = async () => {
+        if (current === null) return
+        setSplitBusy(true)
+        setSplitNote(null)
+        try {
+          const json = await api('/requirement/split', { id: current.id })
+          const created = json.created ?? []
+          setSplitNote(created.length === 0
+            ? '没有可拆的功能点：要么都覆盖了，要么还没加功能点。'
+            : `已建 ${created.length} 张卡：${created.map(item => item.code || item.id).join('、')}`)
+          if (typeof onChanged === 'function') onChanged()
+        } catch (err) {
+          setSplitNote(err.message)
+        } finally {
+          setSplitBusy(false)
+        }
+      }
+
+      // ---- 文档与基线：链路上「研发拿的是哪一版」的唯一答案
+      const blankDoc = () => ({ kind: 'prd', title: '', url: current?.links?.prd ?? '', version: 'v1.0', content: '', status: 'draft' })
+      const openDoc = async (docId) => {
+        setDocNote(null)
+        if (docId === null) { setDocForm(blankDoc()); return }
+        try {
+          const json = await api('/requirement/get', { id: current.id })
+          const doc = (json.requirement?.docs ?? []).find(item => item.id === docId)
+          setDocForm(doc === undefined ? blankDoc() : { ...doc })
+        } catch (err) {
+          setError(err.message)
+        }
+      }
+      const readDoc = async (docId) => {
+      if (docReader !== null && docReader.id === docId) { setDocReader(null); return }
+      setDocReader({ id: docId, content: '', busy: true })
+      try {
+        const json = await api('/requirement/get', { id: current.id })
+        const doc = (json.requirement?.docs ?? []).find(item => item.id === docId)
+        setDocReader({ id: docId, content: String(doc?.content ?? ''), busy: false })
+      } catch (err) {
+        setError(err.message)
+        setDocReader(null)
+      }
+    }
+    const expandAllDocs = async () => {
+      if (docAll !== null) { setDocAll(null); return }
+      try {
+        const json = await api('/requirement/get', { id: current.id })
+        const map = {}
+        for (const item of json.requirement?.docs ?? []) map[item.id] = String(item.content ?? '')
+        setDocAll(map)
+      } catch (err) { setError(err.message) }
+    }
+    const saveDoc = async () => {
+        if (docForm === null) return
+        if (String(docForm.title ?? '').trim() === '') { setDocNote('文档要有标题'); return }
+        setDocBusy(true)
+        try {
+          const json = await api('/requirement/doc', {
+            id: current.id,
+            action: docForm.id === undefined ? 'add' : 'update',
+            docId: docForm.id,
+            doc: {
+              kind: docForm.kind, title: docForm.title, url: docForm.url,
+              version: docForm.version, content: docForm.content, status: docForm.status,
+            },
+          })
+          setDocForm(null)
+          setDocNote(null)
+          void json
+        } catch (err) {
+          setDocNote(err.message)
+        } finally {
+          setDocBusy(false)
+        }
+      }
+      const createFolder = async () => {
+        setDriveBusy(true); setDriveNote(null)
+        try {
+          const json = await api('/requirement/folder', { id: current.id })
+          setDriveNote(json.ok ? `云盘文件夹已就绪：${json.folder?.url ?? ''}` : `创建失败：${json.error || json.folder?.error || '未知原因'}`)
+        } catch (err) { setDriveNote(err.message) } finally { setDriveBusy(false) }
+      }
+      const syncReqArtifacts = async () => {
+        setDriveBusy(true); setDriveNote(null)
+        try {
+          const json = await api('/requirement/sync', { id: current.id })
+          const report = json.report ?? {}
+          const bad = Number(report.failed ?? 0)
+          setDriveNote(`归档完成：共 ${report.total ?? 0} 件，成功 ${report.written ?? 0} 件${bad > 0 ? `，失败 ${bad} 件（${report.errors?.[0] ?? ''}）` : '。'}`)
+        } catch (err) { setDriveNote(err.message) } finally { setDriveBusy(false) }
+      }
+      const baselineDoc = async (docId) => {        try {
+          await api('/requirement/doc', { id: current.id, action: 'baseline', docId, by: '人' })
+          setDocNote('这一版已生效，之后新建的卡都会记下它。')
+        } catch (err) {
+          setDocNote(err.message)
+        }
+      }
+      const clearBaseline = async () => {
+        try {
+          await api('/requirement/doc', { id: current.id, action: 'clear-baseline' })
+          setDocNote('基线已取消，需求回到「评审中」。')
+        } catch (err) {
+          setDocNote(err.message)
+        }
+      }
+      const removeDoc = async (docId) => {
+        if (!(await confirmDialog('删除这份文档？', { title: '删除文档', danger: true, okText: '删除' }))) return
+        try {
+          await api('/requirement/doc', { id: current.id, action: 'remove', docId })
+        } catch (err) {
+          setDocNote(err.message)
+        }
+      }
+      const pullDoc = async () => {
+        setDocBusy(true)
+        setDocNote(null)
+        try {
+          const json = await api('/requirement/pull', { url: docForm?.url ?? '' })
+          if (json.ok === true) {
+            const pulled = String(json.text ?? '')
+            setDocForm(current => ({
+              ...current,
+              title: String(current?.title ?? '').trim() === '' ? String(json.title ?? '') : current.title,
+              content: pulled,
+            }))
+            setDocNote(`已拉取 ${pulled.length} 字正文${json.title ? `，标题取自文档「${json.title}」` : ''}。`)
+          } else {
+            setDocNote(json.error ?? '拉取失败')
+          }
+        } catch (err) {
+          setDocNote(err.message)
+        } finally {
+          setDocBusy(false)
+        }
+      }
+
+      const formPanel = form === null ? null : h('div', { className: 'ds-panel ds-form-panel' },
+        h('div', { className: 'ds-panel-head' }, form.id === undefined ? '新建需求' : `编辑 ${current?.code ?? ''}`),
+        h('div', { className: 'ds-panel-body' },
+          h('div', { className: 'ds-field' },
+            h('div', { className: 'ds-label' }, '需求标题'),
+            h(TextField, { className: 'ds-input', value: form.title, onChange: e => setForm({ ...form, title: e.target.value }) }),
+          ),
+          h('div', { className: 'ds-row' },
+            h('div', { className: 'ds-field', style: { flex: 1 } },
+              h('div', { className: 'ds-label' }, '业务项目'),
+              h(SelectField, { className: 'ds-select', value: form.project, onChange: e => setForm({ ...form, project: e.target.value }) },
+                h('option', { value: '' }, '不指定'),
+                projects.map(project => h('option', { key: project.id, value: project.id }, project.name)),
+              ),
+            ),
+            h('div', { className: 'ds-field', style: { flex: 1 } },
+              h('div', { className: 'ds-label' }, '状态'),
+              h(SelectField, { className: 'ds-select', value: form.status, onChange: e => setForm({ ...form, status: e.target.value }) },
+                REQ_STATUS_ORDER.map(id => h('option', { key: id, value: id }, REQ_STATUS_LABEL[id])),
+              ),
+            ),
+            h('div', { className: 'ds-field', style: { flex: 1 } },
+              h('div', { className: 'ds-label' }, '业务负责人'),
+              h(TextField, { className: 'ds-input', value: form.owner, onChange: e => setForm({ ...form, owner: e.target.value }) }),
+            ),
+            h('div', { className: 'ds-field', style: { flex: 1 } },
+              h('div', { className: 'ds-label' }, '业务领域'),
+              h(TextField, { className: 'ds-input', placeholder: '支付 / 风控 / 会员（决定派给哪位领域专家）', value: form.domain ?? '', onChange: e => setForm({ ...form, domain: e.target.value }) }),
+            ),
+          ),
+          h('div', { className: 'ds-field' },
+            h('div', { className: 'ds-label' }, 'PRD 链接'),
+            h(TextField, { className: 'ds-input', placeholder: 'https://…（飞书云文档）', value: form.prd, onChange: e => setForm({ ...form, prd: e.target.value }) }),
+          ),
+          h('div', { className: 'ds-row' },
+            h('div', { className: 'ds-field', style: { flex: 1 } },
+              h('div', { className: 'ds-label' }, '原型链接'),
+              h(TextField, { className: 'ds-input', value: form.proto, onChange: e => setForm({ ...form, proto: e.target.value }) }),
+            ),
+            h('div', { className: 'ds-field', style: { flex: 1 } },
+              h('div', { className: 'ds-label' }, '验收标准链接'),
+              h(TextField, { className: 'ds-input', value: form.acceptance, onChange: e => setForm({ ...form, acceptance: e.target.value }) }),
+            ),
+          ),
+          h('div', { className: 'ds-field' },
+            h('div', { className: 'ds-label' }, '需求正文 / PRD 摘要'),
+            h(MdField, {
+              className: 'ds-textarea',
+              rows: 10,
+              style: { minHeight: 180 },
+              placeholder: '支持 Markdown：`# 背景`、`- 列表`、`**重点**`、`` `代码` ``、`| 表格 |`；保存后在「需求明细」里按 Markdown 渲染，不再截断。',
+              value: form.description,
+              onChange: e => setForm({ ...form, description: e.target.value }),
+            }),
+          ),
+          h('div', { className: 'ds-row', style: { justifyContent: 'flex-end', gap: 8 } },
+            h('button', { className: 'ds-btn', onClick: () => { setForm(null); setError(null) } }, '取消'),
+            h('button', { className: 'ds-btn ds-btn-primary', disabled: busy, onClick: () => void save() }, busy ? '保存中…' : '保存需求'),
+          ),
+        ),
+      )
+
+      const detail = current === null ? h('div', { className: 'ds-empty' }, '左边选一条需求，或先新建一条。') : (() => {
+        const tasks = tasksOf(current.id)
+        const done = tasks.filter(task => task.status === 'done').length
+        const blocked = tasks.filter(task => task.blocked !== undefined && task.blocked !== null).length
+        const bugs = tasks.filter(task => task.type === 'bug' && task.status !== 'done').length
+        const checklist = tasks.flatMap(task => task.checklist ?? [])
+        const cases = tasks.flatMap(task => task.cases ?? [])
+        const artifacts = tasks.flatMap(task => (task.artifacts ?? []).map(item => ({ ...item, task })))
+        const mrs = tasks.filter(task => (task.gitlabMR?.iid ?? 0) > 0)
+        const passed = cases.filter(item => item.result === 'pass').length
+        const links = current.links ?? {}
+        const folder = current.folder ?? {}
+        const link = (label, url) => url === '' ? null : h('a', { className: 'ds-link', href: url, target: '_blank', rel: 'noreferrer' }, label)
+        return h('div', { className: 'ds-req-body' },
+          h('div', { className: 'ds-req-headline' },
+            h('div', null,
+              h('div', { className: 'ds-req-code' }, current.code || current.id),
+              h('div', { className: 'ds-req-name' }, current.title),
+            ),
+            h('div', { className: 'ds-req-actions' },
+              h(SelectField, { className: 'ds-select', value: current.status, onChange: e => void setStatus(e.target.value) },
+                REQ_STATUS_ORDER.map(id => h('option', { key: id, value: id }, REQ_STATUS_LABEL[id])),
+              ),
+              h('button', { className: 'ds-btn', onClick: () => setForm({ ...current, ...links }) }, '编辑'),
+              h('button', { className: 'ds-btn ds-btn-ghost', onClick: () => void remove(current.id), 'data-danger': '1' }, '删除'),
+            ),
+          ),
+          (() => {
+            // 评审：草稿要先过评审才能拆卡；打回会退回草稿并留意见。
+            const review = current.review ?? null
+            const stateLabel = review === null ? '还没提交评审' : (REVIEW_LABEL[review.status] ?? review.status)
+            const canSubmit = review === null || review.status === 'changes_requested'
+            const canDecide = review !== null && review.status === 'pending'
+            return h('div', { className: 'ds-panel', 'data-review': review === null ? 'none' : review.status, style: { marginTop: 14 } },
+              h('div', { className: 'ds-panel-head' },
+                h('span', null, '需求评审'),
+                h(ChipField, { className: 'ds-chip', 'data-on': review?.status === 'approved' ? '1' : '0', style: { marginLeft: 8 } }, stateLabel),
+                review === null || review.at === 0 ? null : h('span', { className: 'ds-hint', style: { marginLeft: 'auto' } }, `${fmtTime(review.at)}${review.by === '' ? '' : ` · ${review.by}`}`),
+              ),
+              h('div', { className: 'ds-panel-body' },
+                review !== null && String(review.note ?? '') !== ''
+                  ? h('div', { className: 'ds-hint', style: { marginBottom: 8 } }, `评审意见：${review.note}`)
+                  : null,
+                h('div', { className: 'ds-row', style: { flexWrap: 'wrap', gap: 8 } },
+                  canSubmit ? h('button', { className: 'ds-btn ds-btn-primary', disabled: reviewBusy, onClick: () => void reviewRequirement('submit') }, reviewBusy ? '提交中…' : '提交评审') : null,
+                  canDecide ? h('button', { className: 'ds-btn ds-btn-primary', disabled: reviewBusy, onClick: () => void reviewRequirement('approve') }, '评审通过') : null,
+                  canDecide ? h('button', { className: 'ds-btn ds-btn-ghost', disabled: reviewBusy, onClick: rejectReview, 'data-danger': '1' }, '打回') : null,
+                  review?.status === 'approved' ? h('span', { className: 'ds-hint' }, '评审已通过，可以拆卡和派活了。') : null,
+                ),
+                reviewNote === null ? null : h('div', { className: 'ds-hint', style: { marginTop: 8 } }, reviewNote),
+              ),
+            )
+          })(),
+          (link('PRD', links.prd) || link('原型', links.proto) || link('验收标准', links.acceptance))
+            ? h('div', { className: 'ds-req-links' }, link('PRD 文档', links.prd), link('原型', links.proto), link('验收标准', links.acceptance))
+            : h('div', { className: 'ds-empty' }, [h('span', null, '还没有登记 PRD / 原型 / 验收标准链接；PRD 与原型由产品在澄清后输出，可在这里补，或点右边「让产品补 PRD」。'), h('button', { className: 'ds-btn ds-btn-ghost', style: { marginLeft: 8 }, onClick: async () => { const note = await promptDialog('想请产品补什么？', { title: '申请产品补 PRD', defaultValue: '需要产品输出 PRD 与原型' }); if (note === null) return; try { await api('/requirement/request-prd', { id: current.id, by: currentUser(), note }); toast('已申请产品补 PRD'); onChanged() } catch (error) { toast(error.message ?? String(error), 'error') } } }, '让产品补 PRD')]),
+          current.description
+            ? h('div', { className: 'ds-panel ds-req-desc-panel', style: { marginTop: 14 } },
+              h('div', { className: 'ds-panel-head' },
+                h('span', null, '需求明细'), current.source === 'business' ? h('span', { className: 'ds-hint', 'data-src': 'business' }, `业务提单 · ${current.requester?.name || '未署名'}${current.requester?.dept ? '（' + current.requester.dept + '）' : ''} · ${fmtTime(current.requester?.at || current.createdAt)}`) : null,
+                h('span', { className: 'ds-hint', style: { marginLeft: 'auto' } }, '支持 Markdown'),
+              ),
+              h('div', { className: 'ds-panel-body' },
+                h('div', { className: 'ds-req-desc ds-md' }, renderMarkdown(current.description)),
+              ),
+            )
+            : h('div', { className: 'ds-req-desc ds-hint' }, '还没有写需求描述：产品背景、要解决的问题、验收口径都建议写在这里，点右侧「编辑」补上。'),
+(() => {
+            // 变更记录：字段级 diff，谁在什么时候把标题/正文/优先级/状态/负责人/项目/迭代改了。
+            const history = (current.history ?? []).slice().reverse()
+            if (history.length === 0 || (current.change ?? null) !== null) return null
+            const label = { title: '标题', description: '需求明细', priority: '优先级', status: '状态', owner: '负责人', project: '项目', iteration: '迭代' }
+            return h('div', { className: 'ds-panel ds-history-panel', style: { marginTop: 14 } },
+              h('div', { className: 'ds-panel-head' },
+                h('span', null, '变更记录'),
+                h('span', { className: 'ds-hint', style: { marginLeft: 'auto' } }, `最近 ${history.length} 条`),
+              ),
+              h('div', { className: 'ds-panel-body' },
+                h('div', { style: { display: 'flex', flexDirection: 'column', gap: 6, maxHeight: 260, overflowY: 'auto' } },
+                  history.map((item, index) => h('div', { key: `${item.at}-${index}`, style: { display: 'flex', gap: 8, alignItems: 'baseline', fontSize: 12 } },
+                    h('span', { className: 'ds-hint', style: { flex: '0 0 auto', fontVariantNumeric: 'tabular-nums' } }, fmtTime(item.at)),
+                    h('span', { style: { flex: '0 0 auto' } }, item.by === '' ? '人' : item.by),
+                    h('span', { className: 'ds-chip', style: { flex: '0 0 auto' } }, label[item.field] ?? item.field),
+                    h('span', { className: 'ds-hint', style: { minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } },
+                      `${item.from === '' ? '（空）' : item.from} → ${item.to === '' ? '（空）' : item.to}`),
+                  )),
+                ),
+              ),
+            )
+          })(),
+          (() => {
+            // 需求池打分：RICE，影响面 × 影响度 × 置信度 / 成本，用来给需求排序。
+            const pool = current.pool ?? { reach: 0, impact: 0, confidence: 0, effort: 0, score: 0 }
+            const ask = async (label, hint, currentValue) => {
+              const raw = await promptDialog(hint, { title: label, defaultValue: String(currentValue ?? 0) })
+              if (raw === null) return null
+              const value = Number(String(raw).trim())
+              return Number.isFinite(value) && value >= 0 ? value : null
+            }
+            const score = async () => {
+              const reach = await ask('影响面 Reach', '影响多少用户或多少笔交易？估算依据写进正文', pool.reach); if (reach === null) return
+              const impact = await ask('影响度 Impact', '3 显著 / 2 高 / 1 中 / 0.5 低', pool.impact); if (impact === null) return
+              const confidence = await ask('置信度 Confidence', '100 有数据 / 80 有访谈 / 50 只有猜测（百分数）', pool.confidence); if (confidence === null) return
+              const effort = await ask('成本 Effort', '人日（研发+测试+联调）', pool.effort); if (effort === null) return
+              try { await api('/requirement/pool', { id: current.id, pool: { reach, impact, confidence, effort } }); toast('需求池评分已更新'); await onChanged() }
+              catch (cause) { toast(cause instanceof Error ? cause.message : String(cause), 'error') }
+            }
+            return h('div', { className: 'ds-panel ds-pool-panel', style: { marginTop: 14 } },
+              h('div', { className: 'ds-panel-head' },
+                h('span', null, '需求池评分（RICE）'),
+                h('span', { className: 'ds-hint', style: { marginLeft: 'auto' } }, pool.score > 0 ? `得分 ${pool.score}` : '还没打分：不打分就没法和别的需求比优先级'),
+                h('button', { className: 'ds-btn ds-btn-ghost', style: { marginLeft: 8 }, onClick: () => void score() }, pool.score > 0 ? '重新打分' : '打分'),
+              ),
+              pool.score > 0 ? h('div', { className: 'ds-panel-body' }, h('div', { className: 'ds-row', style: { flexWrap: 'wrap', gap: 8 } },
+                h('span', { className: 'ds-chip' }, `影响面 ${pool.reach}`),
+                h('span', { className: 'ds-chip' }, `影响度 ${pool.impact}`),
+                h('span', { className: 'ds-chip' }, `置信度 ${pool.confidence}%`),
+                h('span', { className: 'ds-chip' }, `成本 ${pool.effort} 人日`),
+                h('span', { className: 'ds-chip', 'data-on': '1' }, `得分 ${pool.score}`),
+              )) : null,
+            )
+          })(),
+                    (() => {
+            // 待确认清单：澄清阶段没定下来的问题，回答完才允许拆卡。
+            const questions = current.questions ?? []
+            const openCount = questions.filter(item => item.status === 'open').length
+            const call = async (body, done) => {
+              try { await api('/requirement/questions', { id: current.id, ...body }); if (done) toast(done); await onChanged() }
+              catch (cause) { toast(cause instanceof Error ? cause.message : String(cause), 'error') }
+            }
+            const addQuestion = async () => {
+              const text = await promptDialog('还没确认清楚的问题是什么？', { title: '加一个待确认问题', placeholder: '例如：退款失败时是否允许人工补发？' })
+              if (text === null || text.trim() === '') return
+              await call({ action: 'add', text }, '已加入待确认清单')
+            }
+            const answerQuestion = async item => {
+              const answer = await promptDialog(item.text, { title: '回答这个问题', defaultValue: item.answer ?? '', placeholder: '写清结论与依据' })
+              if (answer === null || answer.trim() === '') return
+              await call({ action: 'answer', questionId: item.id, answer }, '已回答')
+            }
+            const removeQuestion = async item => {
+              const ok = await confirmDialog('删掉这个问题？', { title: '删除待确认项', danger: true, okText: '删除' })
+              if (ok !== true) return
+              await call({ action: 'delete', questionId: item.id }, '已删除')
+            }
+            return h('div', { className: 'ds-panel ds-question-panel', 'data-open': openCount > 0 ? '1' : '0', style: { marginTop: 14 } },
+              h('div', { className: 'ds-panel-head' },
+                h('span', null, '待确认清单'),
+                h('span', { className: 'ds-hint', style: { marginLeft: 'auto' } }, openCount > 0 ? `${openCount} 个没回答，回答完才能拆卡` : (questions.length === 0 ? '澄清阶段把不确定的先记在这里' : '全部已回答')),
+                h('button', { className: 'ds-btn ds-btn-ghost', style: { marginLeft: 8 }, onClick: () => void addQuestion() }, '＋ 加问题'),
+              ),
+              h('div', { className: 'ds-panel-body' },
+                questions.length === 0
+                  ? h('div', { className: 'ds-empty' }, '还没有待确认的问题。产品澄清时把「需要业务拍板」的点写在这里，避免猜业务规则。')
+                  : h('div', { style: { display: 'flex', flexDirection: 'column', gap: 8 } }, questions.map(item => h('div', {
+                    key: item.id,
+                    className: 'ds-question-row',
+                    'data-status': item.status,
+                    style: { display: 'flex', gap: 10, alignItems: 'flex-start', padding: '8px 10px', border: '1px solid var(--border)', borderRadius: 8, background: 'var(--card)' },
+                  },
+                    h('span', { className: 'ds-chip', 'data-on': item.status === 'answered' ? '1' : '0' }, item.status === 'answered' ? '已回答' : '待回答'),
+                    h('div', { style: { flex: '1 1 auto', minWidth: 0 } },
+                      h('div', { style: { fontSize: 13 } }, item.text),
+                      item.answer === '' || item.answer === undefined ? null : h('div', { className: 'ds-hint', style: { marginTop: 4 } }, `答：${item.answer}`),
+                    ),
+                    h('div', { style: { display: 'flex', gap: 6, flex: '0 0 auto' } },
+                      h('button', { className: 'ds-btn ds-btn-ghost', onClick: () => void answerQuestion(item) }, item.status === 'answered' ? '改答案' : '回答'),
+                      h('button', { className: 'ds-btn ds-btn-ghost', 'data-danger': '1', onClick: () => void removeQuestion(item) }, '删除'),
+                    ),
+                  ))),
+              ),
+            )
+          })(),
+          (() => {
+            // 变更影响：需求改过之后，已经产出过东西的卡要按新版复核，签过的字已经作废。
+            const change = current.change ?? null
+            if (change === null) return null
+            const affected = change.affected ?? []
+            const byId = new Map(tasks.map(task => [task.id, task]))
+            const statusLabel = id => (state.statuses.find(entry => entry.id === id)?.label) ?? id
+            return h('div', { className: 'ds-panel ds-change-panel', 'data-invalidated': change.invalidated ? '1' : '0', style: { marginTop: 14 } },
+              h('div', { className: 'ds-panel-head' },
+                h('span', null, change.invalidated ? '变更影响（签字已作废）' : '变更影响'),
+                h('span', { className: 'ds-hint', style: { marginLeft: 'auto' } },
+                  `${fmtTime(change.at)}${change.by === '' ? '' : ` · ${change.by}`}`),
+              ),
+              h('div', { className: 'ds-panel-body' },
+                (function () {
+                  const rows = (current.history ?? []).slice().reverse()
+                  if (rows.length === 0) return null
+                  const label = { title: '标题', description: '需求明细', priority: '优先级', status: '状态', owner: '负责人', project: '项目', iteration: '迭代' }
+                  return h('div', { style: { display: 'flex', flexDirection: 'column', gap: 6, maxHeight: 220, overflowY: 'auto', marginBottom: 8, paddingBottom: 8, borderBottom: '1px dashed var(--border)' } },
+                    h('div', { className: 'ds-hint', style: { fontWeight: 600 } }, `变更记录 · 最近 ${rows.length} 条`),
+                    rows.map((item, index) => h('div', { key: `${item.at}-${index}`, style: { display: 'flex', gap: 8, alignItems: 'baseline', fontSize: 12 } },
+                      h('span', { className: 'ds-hint' }, fmtTime(item.at)),
+                      h('span', null, item.by === '' ? '人' : item.by),
+                      h('span', { className: 'ds-chip' }, label[item.field] ?? item.field),
+                      h('span', { className: 'ds-hint' }, `${item.from === '' ? '（空）' : item.from} → ${item.to === '' ? '（空）' : item.to}`),
+                    )),
+                  )
+                })(),
+                h('div', { className: 'ds-hint' },
+                  `改了：${(change.parts ?? []).join('、')}。${affected.length === 0
+                    ? '当时没有已产出的卡受影响，不用返工。'
+                    : `${affected.length} 张卡已经产出过东西，要按新版复核：`}`),
+                affected.length === 0 ? null : h('div', { className: 'ds-row', style: { flexWrap: 'wrap', gap: 8, marginTop: 8 } },
+                  affected.map(item => h('span', {
+                    key: item.id,
+                    className: 'ds-chip',
+                    'data-pt': 'open',
+                    style: { cursor: 'pointer' },
+                    title: item.title,
+                    onClick: () => {
+                      const task = byId.get(item.id)
+                      if (task !== undefined && typeof onOpenTask === 'function') onOpenTask(task)
+                    },
+                  }, `${item.code || item.id} ${statusLabel(item.status)}`)),
+                ),
+                change.invalidated ? h('div', { className: 'ds-hint', style: { marginTop: 8 } }, '验收签字已清空：这些卡是按旧版做的，复核完重新签一次。') : null,
+              ),
+            )
+          })(),
+          // 上线足迹：这条需求对应的版本上过哪些环境（部署记录是人工登记的，平台不触发部署）。
+          (() => {
+            const deploys = current.deploys ?? []
+            if (deploys.length === 0) return null
+            return h('div', { className: 'ds-panel', style: { marginTop: 14 } },
+              h('div', { className: 'ds-panel-head' },
+                h('span', null, '上线足迹'),
+                h('span', { className: 'ds-hint', style: { marginLeft: 'auto' } }, '来自版本的部署记录，只留痕不触发'),
+              ),
+              h('div', { className: 'ds-panel-body' },
+                h('div', { className: 'ds-row', style: { flexWrap: 'wrap', gap: 8 } },
+                  deploys.map(item => h('span', {
+                    key: item.id,
+                    className: 'ds-chip',
+                    'data-env': item.kind,
+                    title: `${item.releaseName ?? ''} · ${fmtTime(item.at)} · ${item.by}`,
+                  }, `${item.name} · ${fmtDate(item.at)}`)),
+                ),
+              ),
+            )
+          })(),
+          h('div', { className: 'ds-panel', style: { marginTop: 14 } },
+            h('div', { className: 'ds-panel-head' }, h('span', null, '依赖与排序')),
+            h('div', { className: 'ds-panel-body' },
+              h('div', { className: 'ds-row' },
+                h('span', { className: 'ds-hint' }, '排序号'),
+                h(TextField, { className: 'ds-input', style: { width: 90 }, value: reqOrder, onChange: e => setReqOrder(e.target.value) }),
+                h('span', { className: 'ds-hint' }, '被依赖的需求没交付，这条需求的准出会被拦'),
+              ),
+              h('div', { className: 'ds-row', style: { flexWrap: 'wrap', gap: 10 } },
+                requirements.filter(item => item.id !== current.id).map(item => h('label', { key: item.id, className: 'ds-check-row' },
+                  h(CheckField, { checked: reqDeps.includes(item.id),
+                    onChange: event => setReqDeps(done => event.target.checked ? [...done, item.id] : done.filter(id => id !== item.id)),
+                  }),
+                  h('span', { className: 'ds-check-text' }, `${item.code || item.id} ${item.title}（${REQ_STATUS_LABEL[item.status] ?? item.status}）`),
+                )),
+                requirements.length <= 1 ? h('span', { className: 'ds-hint' }, '只有这一条需求，暂时没有可依赖的对象。') : null,
+              ),
+              h('div', { className: 'ds-row' },
+                h('button', { className: 'ds-btn ds-btn-primary', onClick: () => void saveDeps() }, '保存排序与依赖'),
+                depNote === null ? null : h('span', { className: 'ds-hint' }, depNote),
+              ),
+            ),
+          ),
+          (() => {
+            // 需求级门禁：卡全完成 + 功能点全覆盖 + 无阻塞/未结缺陷/失败用例 + 人工签字
+            const progress = current.progress ?? null
+            const gate = progress?.gate ?? { ready: false, blockers: ['还没有加载出准出状态，稍后自动刷新'], warnings: [] }
+            const stats = gate.stats ?? {}
+            const signoff = current.signoff ?? null
+            const pct = progress?.progress ?? (tasks.length === 0 ? 0 : Math.round((done / tasks.length) * 100))
+            const covered = stats.coveredPoints ?? 0
+            const pointTotal = stats.points ?? (current.points ?? []).length
+            const casePass = stats.pass ?? passed
+            const caseTotal = stats.cases ?? cases.length
+            return h('div', { className: 'ds-panel', style: { marginTop: 14 } },
+              h('div', { className: 'ds-panel-head' },
+                h('span', null, '需求准出与验收签字'),
+                h(ChipField, { className: 'ds-chip', 'data-pt': gate.ready ? 'covered' : 'open', style: { marginLeft: 'auto' } },
+                  gate.ready ? '可以交付' : `还差 ${gate.blockers.length} 项`),
+              ),
+              h('div', { className: 'ds-panel-body' },
+                h('div', { className: 'ds-check-progress' },
+                  h('div', { className: 'ds-check-bar', 'data-full': pct === 100 ? '1' : '0' },
+                    h('span', { style: { width: `${pct}%` } })),
+                  h('div', { className: 'ds-hint' },
+                    `${pct}% · ${done}/${tasks.length} 张卡完成 · 功能点覆盖 ${covered}/${pointTotal} · 用例通过 ${casePass}/${caseTotal}`),
+                ),
+                (gate.blockers ?? []).map(line => h('div', { key: line, className: 'ds-gate-item', 'data-kind': 'block' }, `⛔ ${line}`)),
+                (gate.warnings ?? []).map(line => h('div', { key: line, className: 'ds-gate-item', 'data-kind': 'warn' }, `⚠ ${line}`)),
+                gate.ready ? h('div', { className: 'ds-hint' }, '门禁已通过：签完字这条需求就算交付。') : null,
+                signoff === null
+                  ? h('div', { className: 'ds-gate-sign' },
+                    h(TextField, {
+                      className: 'ds-input', style: { flex: 1, minWidth: 220 },
+                      placeholder: '验收结论：交付了什么、遗留什么',
+                      value: reqSign, onChange: e => setReqSign(e.target.value),
+                    }),
+                    h('button', { className: 'ds-btn ds-btn-primary', onClick: () => void signRequirement('sign') }, '需求验收签字'),
+                  )
+                  : h('div', { className: 'ds-gate-sign' },
+                    h('div', { className: 'ds-hint', style: { flex: 1 } }, `✍ ${signoff.by} 于 ${fmtTime(signoff.at)} 签字：${signoff.note}`),
+                    h('button', { className: 'ds-btn ds-btn-ghost', onClick: () => void signRequirement('clear') }, '取消签字'),
+                  ),
+                reqNote === null ? null : h('div', { className: 'ds-hint' }, reqNote),
+              ),
+            )
+          })(),
+          h('div', { className: 'ds-sec-head', style: { marginTop: 16 } }, '交付物归档（飞书云盘）',
+            h('div', { className: 'ds-req-actions' },
+              folder.url ? h('a', { className: 'ds-link', href: folder.url, target: '_blank', rel: 'noreferrer' }, '打开文件夹') : null,
+              h('button', { className: 'ds-btn ds-btn-ghost', disabled: driveBusy, onClick: () => void createFolder() }, folder.url ? '校验文件夹' : '创建文件夹'),
+              h('button', {
+                className: 'ds-btn', disabled: driveBusy || artifacts.length === 0,
+                onClick: () => void syncReqArtifacts(),
+              }, driveBusy ? '归档中…' : `归档 ${artifacts.length} 件交付物`),
+            )),
+          h('div', { className: 'ds-hint' }, folder.url
+            ? `文件夹：${folder.name || folder.token}　已归档 ${artifacts.filter(item => item.doc?.url).length}/${artifacts.length} 件交付物`
+            : (folder.error ? `上次创建失败：${folder.error}` : '还没有云盘文件夹；建好后，这条需求下每件交付物都会写成文件夹里的一份 Markdown 文档。')),
+          driveNote ? h('div', { className: 'ds-hint' }, driveNote) : null,
+          h('div', { className: 'ds-sec-head', style: { marginTop: 16 } }, '文档与基线',
+            h('button', { className: 'ds-btn ds-btn-ghost', onClick: () => void openDoc(null) }, '＋ 添加文档'),
+          ),
+          current.baseline
+            ? h('div', { className: 'ds-base-box' },
+              h('div', { className: 'ds-base-main' },
+                h('b', null, `当前基线 ${current.baseline.version}`),
+                h('span', null, `${current.baseline.title} · 生效于 ${fmtTime(current.baseline.at)} · ${current.baseline.by || '人'} · 正文 ${current.baseline.contentLength ?? 0} 字`),
+              ),
+              h('button', { className: 'ds-btn ds-btn-ghost', onClick: () => void clearBaseline() }, '取消基线'),
+            )
+            : h('div', { className: 'ds-base-box', 'data-empty': '1' },
+              h('div', { className: 'ds-base-main' },
+                h('b', null, '还没有基线'),
+                h('span', null, 'PRD 评审通过后点「设为基线」，之后建的卡都会记下用的是哪一版。'),
+              ),
+            ),
+          (current.docs ?? []).length === 0
+            ? h('div', { className: 'ds-hint', style: { marginTop: 8 } }, '还没有登记文档。可以先加 PRD 链接，把正文粘进来，评审通过后设为基线。')
+            : h('div', null,
+              h('div', { className: 'ds-row', style: { marginTop: 8, gap: 8, alignItems: 'center' } },
+                h('button', { className: 'ds-btn ds-btn-ghost', onClick: () => void expandAllDocs() }, docAll === null ? '全部展开' : '全部收起'),
+                h('span', { className: 'ds-hint' }, `共 ${(current.docs ?? []).length} 篇，展开后可直接读 Markdown 正文`)),
+              h('div', { className: 'ds-doc-list' }, (current.docs ?? []).map(doc => h('div', { key: doc.id, className: 'ds-doc-wrap' }, h('div', { className: 'ds-doc-row' },
+              h(ChipField, { className: 'ds-chip', 'data-doc': doc.kind }, DOC_KIND_LABEL[doc.kind] ?? doc.kind),
+              h('div', { className: 'ds-doc-main' },
+                h('div', { className: 'ds-doc-title' },
+                  doc.url === '' ? doc.title : h('a', { className: 'ds-link', href: doc.url, target: '_blank', rel: 'noreferrer' }, doc.title),
+                  h('span', { className: 'ds-chip-code' }, doc.version),
+                  h(ChipField, { className: 'ds-chip', 'data-docstatus': doc.status }, DOC_STATUS_LABEL[doc.status] ?? doc.status),
+                ),
+                h('div', { className: 'ds-doc-meta' }, `正文 ${doc.contentLength ?? 0} 字 · ${doc.by || '—'} · ${doc.at > 0 ? fmtTime(doc.at) : '—'}`),
+              ),
+              h('div', { className: 'ds-listrow-actions' },
+                doc.status === 'baseline' ? null : h('button', { className: 'ds-btn ds-btn-ghost', onClick: () => void baselineDoc(doc.id) }, '设为基线'),
+                h('button', { className: 'ds-btn ds-btn-ghost', title: '直接读正文（Markdown 渲染）', onClick: () => void readDoc(doc.id) }, docReader !== null && docReader.id === doc.id ? '收起' : '阅读'),
+                h('button', { className: 'ds-btn ds-btn-ghost', onClick: () => void openDoc(doc.id) }, '编辑'),
+                h('button', { className: 'ds-btn ds-btn-ghost', onClick: () => void removeDoc(doc.id), 'data-danger': '1' }, '删除'),
+              ),
+            ),
+            docReader !== null && docReader.id === doc.id
+              ? h('div', { className: 'ds-md-preview ds-reader' }, docReader.busy
+                ? h('span', { className: 'ds-hint' }, '读取中…')
+                : (docReader.content.trim() === '' ? h('span', { className: 'ds-hint' }, '这条文档还没有正文。') : renderMarkdown(docReader.content)))
+              : (docAll !== null && docAll[doc.id] !== undefined
+                ? h('div', { className: 'ds-md-preview ds-reader' }, docAll[doc.id].trim() === ''
+                  ? h('span', { className: 'ds-hint' }, '这条文档还没有正文。')
+                  : renderMarkdown(docAll[doc.id]))
+                : null),
+            )))),
+          docNote === null ? null : h('div', { className: 'ds-hint', style: { marginTop: 6 } }, docNote),
+          docForm === null ? null : h('div', { className: 'ds-panel ds-form-panel', style: { marginTop: 10 } },
+            h('div', { className: 'ds-panel-head' }, docForm.id === undefined ? '添加文档' : `编辑 ${docForm.title}`),
+            h('div', { className: 'ds-panel-body' },
+              h('div', { className: 'ds-row', style: { gap: 10 } },
+                h('div', { className: 'ds-field', style: { flex: '0 0 150px' } },
+                  h('div', { className: 'ds-label' }, '类型'),
+                  h(SelectField, { className: 'ds-select', value: docForm.kind, onChange: e => setDocForm({ ...docForm, kind: e.target.value }) },
+                    DOC_KIND_ORDER.map(id => h('option', { key: id, value: id }, DOC_KIND_LABEL[id]))),
+                ),
+                h('div', { className: 'ds-field', style: { flex: '1 1 220px' } },
+                  h('div', { className: 'ds-label' }, '标题'),
+                  h(TextField, { className: 'ds-input', value: docForm.title, placeholder: '例如 会员积分抵扣 PRD', onChange: e => setDocForm({ ...docForm, title: e.target.value }) }),
+                ),
+                h('div', { className: 'ds-field', style: { flex: '0 0 110px' } },
+                  h('div', { className: 'ds-label' }, '版本'),
+                  h(TextField, { className: 'ds-input', value: docForm.version, placeholder: 'v1.0', onChange: e => setDocForm({ ...docForm, version: e.target.value }) }),
+                ),
+              ),
+              h('div', { className: 'ds-row', style: { gap: 10 } },
+                h('div', { className: 'ds-field', style: { flex: '1 1 auto' } },
+                  h('div', { className: 'ds-label' }, '飞书文档链接'),
+                  h(TextField, { className: 'ds-input', value: docForm.url, placeholder: 'https://laiyifen.feishu.cn/wiki/…', onChange: e => setDocForm({ ...docForm, url: e.target.value }) }),
+                ),
+                h('div', { className: 'ds-field', style: { flex: '0 0 auto', justifyContent: 'flex-end' } },
+                  h('div', { className: 'ds-label' }, ' '),
+                  h('button', { className: 'ds-btn', disabled: docBusy, onClick: () => void pullDoc() }, docBusy ? '拉取中…' : '从链接拉正文'),
+                ),
+              ),
+              h('div', { className: 'ds-field' },
+                h('div', { className: 'ds-label' }, '文档正文（拉不到就自己粘，研发和测试都读这一份）'),
+                h(MdField, { className: 'ds-textarea', rows: 8, value: docForm.content, onChange: e => setDocForm({ ...docForm, content: e.target.value }) }),
+              ),
+              h('div', { className: 'ds-row', style: { justifyContent: 'flex-end', gap: 8 } },
+                h('button', { className: 'ds-btn', onClick: () => { setDocForm(null); setDocNote(null) } }, '取消'),
+                h('button', { className: 'ds-btn ds-btn-primary', disabled: docBusy, onClick: () => void saveDoc() }, '保存文档'),
+              ),
+            ),
+          ),
+          h('div', { className: 'ds-pane-head', style: { marginTop: 16 } },
+            h('div', { className: 'ds-pane-title' }, '功能点与可追溯矩阵'),
+            h('div', { className: 'ds-pane-desc' }, '功能点是需求的骨架：一条功能点对若干张卡、若干条用例。卡和用例上都挂 pointId，这里就能看出哪条没人做、哪条没被验证。'),
+          ),
+          matrix === null
+            ? h('div', { className: 'ds-hint', style: { padding: '6px 0' } }, '还没有功能点。点「＋ 加功能点」把需求拆成可交付、可验证的条目。')
+            : h('div', { className: 'ds-matrix' },
+              h('div', { className: 'ds-matrix-sum' },
+                `功能点 ${matrix.summary.points} · 已覆盖 ${matrix.summary.coveredPoints}${matrix.summary.pointsWithoutCases > 0 ? `（${matrix.summary.pointsWithoutCases} 条还没有用例，覆盖率 ${matrix.summary.coverageRate}%）` : ''} · 卡 ${matrix.summary.cards}（未归点 ${matrix.summary.looseCards}）· 用例 ${matrix.summary.cases}（通过 ${matrix.summary.pass}${matrix.summary.fail > 0 ? `，失败 ${matrix.summary.fail}` : ''}）· 通过率 ${matrix.summary.passRate}%`,
+              ),
+              (matrix.points ?? []).map(point => h('div', { key: point.id, className: 'ds-pt-row', 'data-covered': point.covered ? '1' : '0' },
+                h('div', { className: 'ds-pt-main' },
+                  h('div', { className: 'ds-pt-title' },
+                    h('span', { className: 'ds-chip-code' }, point.id),
+                    h('b', null, point.title),
+                    h(ChipField, { className: 'ds-chip', 'data-pt': point.covered ? 'covered' : 'open' }, point.covered ? '已覆盖' : '未覆盖'),
+                  ),
+                  String(point.description ?? '') === '' ? null : h('div', { className: 'ds-req-desc ds-md' }, renderMarkdown(point.description)),
+                  h('div', { className: 'ds-pt-meta' },
+                    `卡 ${point.cards.length}${point.cards.length === 0 ? '（还没人做）' : '：' + point.cards.map(card => card.code || card.id).join('、')}`,
+                    ` · 用例 ${point.cases.total}（通过 ${point.cases.pass}${point.cases.fail > 0 ? `，失败 ${point.cases.fail}` : ''}${point.cases.pending > 0 ? `，没跑 ${point.cases.pending}` : ''}）`,
+                    point.acceptance.length === 0 ? '' : ` · 验收条件 ${point.acceptance.filter(item => item.covered).length}/${point.acceptance.length}`,
+                  ),
+                ),
+                h('div', { className: 'ds-listrow-actions' },
+                  h('button', { className: 'ds-btn ds-btn-ghost', onClick: () => setPointForm({ ...point, acceptanceText: (point.acceptance ?? []).map(item => item.text).join('\n') }) }, '编辑'),
+                  h('button', { className: 'ds-btn ds-btn-ghost', onClick: () => void removePoint(point.id), 'data-danger': '1' }, '删除'),
+                ),
+              )),
+              (matrix.loose ?? []).length === 0 ? null : h('div', { className: 'ds-pt-loose' },
+                h('div', { className: 'ds-hint', style: { marginBottom: 6 } }, `还有 ${matrix.loose.length} 张卡没归到功能点，选一个挂上去，矩阵才算完整：`),
+                matrix.loose.map(card => h('div', { key: card.id, className: 'ds-pt-loose-row' },
+                  h('span', { className: 'ds-chip-code' }, card.code || card.id),
+                  h('span', { className: 'ds-pt-loose-title' }, card.title),
+                  h(SelectField, {
+                    className: 'ds-select',
+                    style: { width: 220 },
+                    value: '',
+                    onChange: event => { if (event.target.value !== '') void assignLoose(card.id, event.target.value) },
+                  },
+                    h('option', { value: '' }, '挂到…'),
+                    (matrix.points ?? []).map(point => h('option', { key: point.id, value: point.id }, `${point.id} ${point.title}`)),
+                  ),
+                )),
+              ),
+            ),
+          h('div', { className: 'ds-row', style: { gap: 8, marginTop: 10, alignItems: 'center' } },
+            h('button', { className: 'ds-btn', onClick: () => setPointForm(blankPoint()) }, '＋ 加功能点'),
+            h('button', { className: 'ds-btn ds-btn-primary', disabled: splitBusy, onClick: () => void splitPoints() }, splitBusy ? '拆卡中…' : '按未覆盖的功能点拆卡'),
+            h('button', { className: 'ds-btn ds-btn-ghost', onClick: () => { if (current !== null) void loadMatrix(current.id) } }, '刷新矩阵'),
+            splitNote === null ? null : h('span', { className: 'ds-hint' }, splitNote),
+            matrixNote === null ? null : h('span', { className: 'ds-hint' }, matrixNote),
+          ),
+          pointForm === null ? null : h('div', { className: 'ds-panel ds-form-panel', style: { marginTop: 10 } },
+            h('div', { className: 'ds-panel-head' }, pointForm.id === undefined ? '新增功能点' : `编辑功能点 ${pointForm.id}`),
+            h('div', { className: 'ds-panel-body' },
+              h('div', { className: 'ds-field' },
+                h('div', { className: 'ds-label' }, '功能点标题'),
+                h(TextField, { className: 'ds-input', value: pointForm.title, placeholder: '例如 结算页展示可用积分', onChange: event => setPointForm({ ...pointForm, title: event.target.value }) }),
+              ),
+              h('div', { className: 'ds-field' },
+                h('div', { className: 'ds-label' }, '说明'),
+                h(MdField, { className: 'ds-textarea', rows: 3, value: pointForm.description ?? '', onChange: event => setPointForm({ ...pointForm, description: event.target.value }) }),
+              ),
+              h('div', { className: 'ds-field' },
+                h('div', { className: 'ds-label' }, '验收条件（一行一条，做成什么样算完成）'),
+                h(TextAreaField, { className: 'ds-textarea', rows: 4, value: pointForm.acceptanceText ?? '', onChange: event => setPointForm({ ...pointForm, acceptanceText: event.target.value }) }),
+              ),
+              h('div', { className: 'ds-row', style: { gap: 10 } },
+                h('div', { className: 'ds-field', style: { flex: '0 0 150px' } },
+                  h('div', { className: 'ds-label' }, '优先级'),
+                  h(SelectField, { className: 'ds-select', value: pointForm.priority, onChange: event => setPointForm({ ...pointForm, priority: event.target.value }) },
+                    h('option', { value: 'urgent' }, '紧急'), h('option', { value: 'normal' }, '普通'), h('option', { value: 'relaxed' }, '可缓')),
+                ),
+                h('div', { className: 'ds-field', style: { flex: '0 0 150px' } },
+                  h('div', { className: 'ds-label' }, '状态'),
+                  h(SelectField, { className: 'ds-select', value: pointForm.status, onChange: event => setPointForm({ ...pointForm, status: event.target.value }) },
+                    h('option', { value: 'draft' }, '草稿'), h('option', { value: 'ready' }, '就绪'), h('option', { value: 'done' }, '已完成')),
+                ),
+              ),
+              h('div', { className: 'ds-row', style: { justifyContent: 'flex-end', gap: 8 } },
+                h('button', { className: 'ds-btn', onClick: () => setPointForm(null) }, '取消'),
+                h('button', { className: 'ds-btn ds-btn-primary', onClick: () => void savePoint() }, '保存功能点'),
+              ),
+            ),
+          ),
+          h('div', { className: 'ds-req-stats' },
+            h('div', { className: 'ds-stat-box' }, h('b', null, `${done}/${tasks.length}`), h('span', null, '卡已完成')),
+            h('div', { className: 'ds-stat-box', 'data-warn': blocked > 0 ? '1' : '0' }, h('b', null, String(blocked)), h('span', null, '阻塞')),
+            h('div', { className: 'ds-stat-box', 'data-warn': bugs > 0 ? '1' : '0' }, h('b', null, String(bugs)), h('span', null, '未结缺陷')),
+            h('div', { className: 'ds-stat-box' }, h('b', null, `${checklist.filter(item => item.done).length}/${checklist.length}`), h('span', null, '验收清单')),
+            h('div', { className: 'ds-stat-box' }, h('b', null, `${passed}/${cases.length}`), h('span', null, '用例通过')),
+            h('div', { className: 'ds-stat-box' }, h('b', null, String(artifacts.length)), h('span', null, '交付物')),
+            h('div', { className: 'ds-stat-box' }, h('b', null, String(mrs.length)), h('span', null, 'MR')),
+          ),
+          h('div', { className: 'ds-sec-head', style: { marginTop: 14 } }, `这张需求下的 ${tasks.length} 张卡`),
+          tasks.length === 0
+            ? h('div', { className: 'ds-empty' }, '还没有挂上来的卡。建卡时选择这条需求，编号会自动分配。')
+            : h('div', { className: 'ds-req-tasks' }, tasks.map(task => h('div', {
+                key: task.id,
+                className: 'ds-listrow ds-req-task',
+                onClick: () => onOpenTask(task.id),
+              },
+                h('div', { className: 'ds-listrow-main' },
+                  h('div', { className: 'ds-req-task-title' },
+                    task.code ? h(ChipField, { className: 'ds-chip ds-chip-code' }, task.code) : null,
+                    h('span', null, task.title),
+                  ),
+                  h('div', { className: 'ds-hint' }, `${statusLabel(task.status)}${(() => {
+                    const name = task.expert === '' ? '' : ((state.config.experts ?? []).find(entry => entry.id === task.expert)?.name ?? task.expert)
+                    return name === '' ? '' : ` · ${name}`
+                  })()}${task.dueAt > 0 ? ` · 截止 ${fmtDate(task.dueAt)}` : ''}`),
+                ),
+                h('div', { className: 'ds-listrow-actions' },
+                  task.blocked !== undefined && task.blocked !== null ? h(ChipField, { className: 'ds-chip ds-chip-blocked' }, '⛔') : null,
+                  task.type === 'bug' ? h(ChipField, { className: 'ds-chip ds-chip-bug', 'data-sev': task.severity ?? 'p2' }, 'BUG') : null,
+                ),
+              ))),
+          mrs.length > 0 ? h('div', null,
+            h('div', { className: 'ds-sec-head', style: { marginTop: 14 } }, '关联 MR'),
+            mrs.map(task => h('div', { key: task.id, className: 'ds-hint' }, `${task.code || task.id} · !${task.gitlabMR.iid} ${task.gitlabMR.title ?? ''}（${task.gitlabMR.state || 'open'}）`)),
+          ) : null,
+        )
+      })()
+
+return h('div', { className: 'ds-body' },
+        error !== null ? h('div', { className: 'ds-err', style: { marginBottom: 10 } }, error) : null,
+        formPanel,
+        h('div', { className: 'ds-req-grid' },
+          h('div', { className: 'ds-intake-launch', style: { display: 'flex', gap: 8, padding: '0 0 8px' } },
+            h('span', { className: 'ds-hint' }, '新建需求请用右上角「＋ 新建」'),
+          ),
+          
+          h('div', { className: 'ds-req-list' },
+            h('div', { className: 'ds-req-list-head' },
+              h('span', null, `需求 ${requirements.length}`),
+              h('button', {
+                className: 'ds-btn ds-btn-ghost',
+                style: { marginLeft: 8 },
+                title: '按来源筛选：全部 / 业务提单 / 内部',
+                onClick: () => { const cur = window.localStorage.getItem('dsh-studio:reqsrc') ?? 'all'; window.localStorage.setItem('dsh-studio:reqsrc', cur === 'all' ? 'business' : cur === 'business' ? 'internal' : 'all'); window.dispatchEvent(new Event('resize')) },
+              }, (window.localStorage.getItem('dsh-studio:reqsrc') ?? 'all') === 'all' ? '来源：全部' : (window.localStorage.getItem('dsh-studio:reqsrc') === 'business' ? '来源：业务提单' : '来源：内部')),
+            ),
+            requirements.length === 0
+              ? h('div', { className: 'ds-empty' }, '还没有需求。先建一条——后面所有的卡、用例、缺陷、MR 都会挂在它下面。')
+              : ((window.localStorage.getItem('dsh-studio:reqsort') ?? 'score') === 'score' ? requirements.slice().sort((left, right) => (right.pool?.score ?? 0) - (left.pool?.score ?? 0)) : requirements).map(req => {
+                  const src = window.localStorage.getItem('dsh-studio:reqsrc') ?? 'all'
+                  if (src !== 'all' && (req.source === 'business' ? 'business' : 'internal') !== src) return null
+                  const tasks = tasksOf(req.id)
+                  const reqDone = tasks.filter(task => task.status === 'done').length
+                  const pct = req.progress?.progress ?? (tasks.length === 0 ? 0 : Math.round((reqDone / tasks.length) * 100))
+                  const gate = req.progress?.gate ?? null
+                  return h('div', {
+                    key: req.id,
+                    className: 'ds-req-item',
+                    'data-on': req.id === selected ? '1' : '0',
+                    onClick: () => setSelected(req.id),
+                  },
+                    h('div', { className: 'ds-req-item-title' }, req.title),
+                    h('div', { className: 'ds-req-item-meta' },
+                      h(ChipField, { className: 'ds-chip ds-chip-code' }, req.code || '未编号'),
+                      req.source === 'business' ? h(ChipField, { className: 'ds-chip', 'data-src': 'business', title: [req.requester?.name, req.requester?.dept].filter(Boolean).join(' · ') || '业务提单' }, '业务提单') : null,
+                      h(ChipField, { className: 'ds-chip', 'data-req': req.status }, REQ_STATUS_LABEL[req.status] ?? req.status),
+                      h('span', { className: 'ds-hint' }, `${reqDone}/${tasks.length} 卡`),
+                      gate === null ? null : h('span', { className: 'ds-hint', style: { color: gate.ready ? '#0f9d58' : '#b26a00' } },
+                        gate.ready ? '准出通过' : `还差 ${gate.blockers.length} 项`),
+                    ),
+                    h('div', { className: 'ds-check-bar', 'data-full': pct === 100 ? '1' : '0', style: { marginTop: 2 } },
+                      h('span', { style: { width: `${pct}%` } })),
+                  )
+                }),
+          ),
+          h('div', { className: 'ds-req-detail' }, detail),
+        ),
+      )
+    }
+
+    // ------------------------------------------------------------------ 工作台
+
+    /** 工作台：先看风险，再看流程，最后是能点进去的清单。 */
+    function DashboardPage({ state, onOpenTask, onOpenBoard }) {
+      const [data, setData] = React.useState(null)
+      const [note, setNote] = React.useState(null)
+      React.useEffect(() => {
+        let alive = true
+        void (async () => {
+          try {
+            const json = await api('/dashboard')
+            if (alive) setData(json?.dashboard ?? null)
+          } catch (cause) {
+            if (alive) { const detail = cause instanceof Error ? cause.message : String(cause); setNote(detail); toast(detail, 'error') }
+          }
+        })()
+        return () => { alive = false }
+      }, [state.revision])
+
+      if (data === null) {
+        return h('div', { className: 'ds-body' },
+          h('div', { className: 'ds-hint' }, note === null ? '正在算今天该看什么…' : `算不出来：${note}`))
+      }
+      const risks = data.risks ?? {}
+      const flow = data.flow ?? {}
+      const ai = data.ai ?? {}
+      const kpi = (label, value, hint, warn) => h('div', { className: 'ds-kpi', 'data-warn': warn === true ? '1' : '0' },
+        h('div', { className: 'ds-kpi-value' }, String(value ?? 0)),
+        h('div', { className: 'ds-kpi-label' }, label),
+        h('div', { className: 'ds-kpi-hint' }, hint),
+      )
+      const taskRow = (item) => h('div', { key: item.id, className: 'ds-listrow' },
+        h('div', { className: 'ds-listrow-main' },
+          h('div', null, `${item.code || item.id} · ${item.title}`),
+          h('div', { className: 'ds-hint' }, `${item.statusLabel}${item.dueAt > 0 ? ` · 截止 ${fmtDate(item.dueAt)}` : ''}${item.sla?.state === 'overdue' ? ' · 缺陷超时' : ''}`),
+        ),
+        h('div', { className: 'ds-listrow-actions' },
+          h('button', { className: 'ds-btn ds-btn-ghost', onClick: () => onOpenTask(item.id) }, '打开'),
+        ),
+      )
+      const block = (title, rows, empty, hint) => h('div', { className: 'ds-panel' },
+        h('div', { className: 'ds-panel-head' }, h('span', null, title), h('span', { className: 'ds-hint' }, hint ?? '')),
+        h('div', { className: 'ds-panel-body' }, rows.length === 0 ? h('div', { className: 'ds-hint' }, empty) : rows),
+      )
+
+      return h('div', { className: 'ds-body' },
+        h('div', { className: 'ds-kpi-grid' },
+          kpi('在办卡', data.scope.open, `共 ${data.scope.tasks} 张`),
+          kpi('逾期', risks.overdue, '过了期望完成时间还没完成', risks.overdue > 0),
+          kpi('阻塞', risks.blocked, '挂着阻塞标记等人决策', risks.blocked > 0),
+          kpi('缺陷超时', risks.slaOverdue, '按 P0-P3 时限算', risks.slaOverdue > 0),
+          kpi('准出被拦', risks.gateFailed, '待测试/待验收里过不了准出', risks.gateFailed > 0),
+          kpi('流水线失败', risks.pipelineFailed, '最近一次 CI 没通过', risks.pipelineFailed > 0),
+          kpi('集成异常', risks.integrationsBroken, '飞书/GitLab/云盘/隔离', risks.integrationsBroken > 0),
+          kpi('AI 在跑', ai.running, `今天派单 ${ai.todayRuns} 次`),
+        ),
+        h('div', { className: 'ds-panel' },
+          h('div', { className: 'ds-panel-head' }, h('span', null, '流程与产出'), h('span', { className: 'ds-hint' }, '需要人动手的地方')),
+          h('div', { className: 'ds-panel-body ds-grid4' },
+            h('div', { className: 'ds-field' }, h('div', { className: 'ds-label' }, '待评审'), h('div', null, String(flow.review ?? 0))),
+            h('div', { className: 'ds-field' }, h('div', { className: 'ds-label' }, '待测试'), h('div', null, String(flow.test ?? 0))),
+            h('div', { className: 'ds-field' }, h('div', { className: 'ds-label' }, '待验收'), h('div', null, String(flow.accept ?? 0))),
+            h('div', { className: 'ds-field' }, h('div', { className: 'ds-label' }, '今天完成'), h('div', null, String(flow.doneToday ?? 0))),
+            h('div', { className: 'ds-field' }, h('div', { className: 'ds-label' }, '近 7 天完成'), h('div', null, String(flow.doneWeek ?? 0))),
+            h('div', { className: 'ds-field' }, h('div', { className: 'ds-label' }, '需求卡住'), h('div', null, String(risks.requirementBlocked ?? 0))),
+            h('div', { className: 'ds-field' }, h('div', { className: 'ds-label' }, '版本卡住'), h('div', null, String(risks.releaseBlocked ?? 0))),
+            h('div', { className: 'ds-field' },
+              h('div', { className: 'ds-label' }, ''),
+              h('button', { className: 'ds-btn ds-btn-ghost', onClick: () => onOpenBoard() }, '去看板'),
+            ),
+          ),
+        ),
+        block('逾期', (data.list?.overdue ?? []).map(taskRow), '没有逾期的卡。'),
+        block('阻塞', (data.list?.blocked ?? []).map(taskRow), '没有卡在等人决策。'),
+        block('缺陷超时', (data.list?.slaOverdue ?? []).map(taskRow), '缺陷都在时限内。'),
+        block('准出被拦', (data.list?.gateFailed ?? []).map(taskRow), '没有卡被准出规则拦住。', '清单没勾完 / 用例不通过 / 已签过字但被打回'),
+        block('流水线失败', (data.list?.pipelineFailed ?? []).map(taskRow), '没有 CI 失败的卡。'),
+        block('需求与版本卡住', [
+          ...(data.list?.requirementBlocked ?? []).map(item => h('div', { key: item.id, className: 'ds-listrow' },
+            h('div', { className: 'ds-listrow-main' },
+              h('div', null, `${item.code || item.id} · ${item.title}`),
+              h('div', { className: 'ds-hint' }, `需求：${(item.blockers ?? []).join('；')}`),
+            ),
+          )),
+          ...(data.list?.releaseBlocked ?? []).map(item => h('div', { key: item.id, className: 'ds-listrow' },
+            h('div', { className: 'ds-listrow-main' },
+              h('div', null, `${item.version || item.id} · ${item.name || ''}`),
+              h('div', { className: 'ds-hint' }, `版本：${(item.blockers ?? []).join('；')}`),
+            ),
+          )),
+        ], '需求与版本都还顺。'),
+        h('div', { className: 'ds-hint' }, `统计时间 ${fmtTime(data.at)}，数字随看板变化实时算，不落库。`),
+      )
+    }
+
+    // ------------------------------------------------------------------ 主页面
+
+    /* 键盘可达性 --------------------------------------------------------------
+       这个界面里大量「按钮」其实是带 onClick 的 div/span（卡片、页签、chip、行内小按钮），
+       Tab 聚焦不到、读屏也读不出来。与其改几百个调用点，不如在 DOM 层补一层：
+       凡是计算样式 cursor:pointer 的元素都补上 tabindex / role=button / Enter·Space 激活，
+       并把 data-on 同步成 aria-pressed。只处理新增节点，开销可控。 */
+    const KB_TAG_SKIP = { INPUT: 1, TEXTAREA: 1, SELECT: 1, BUTTON: 1, A: 1, OPTION: 1 }
+    // 只有「长得像可点东西」的节点才值得量一次 cursor：全量 getComputedStyle 会强制样式重算，
+    // 275 个节点就要 600ms 以上（需求页切换时实测 685ms 长任务）。
+    const KB_CANDIDATE = '[data-on],[data-role],[role="button"],[tabindex],[class*="ds-"]'
+    // 读：只量 cursor，绝不改 DOM。批量调用时不会引发「读→写→读」的强制同步布局。
+    function kbClickable(el) {
+      if (el === null || el.nodeType !== 1) return false
+      if (KB_TAG_SKIP[el.tagName] === 1) return false
+      if (el.dataset.kb === '1') return false
+      if (typeof el.className === 'string' && el.className.indexOf('mask') >= 0) return false
+      if (el.getAttribute('contenteditable') === 'true') return false
+      let cursor = ''
+      try { cursor = window.getComputedStyle(el).cursor } catch (error) { cursor = '' }
+      return cursor === 'pointer'
+    }
+    // 写：补键盘可达性。与读数分开调用，写完不再回读样式。
+    function applyKeyboardSupport(el) {
+      el.dataset.kb = '1'
+      if (el.getAttribute('tabindex') === null) el.setAttribute('tabindex', '0')
+      if (el.getAttribute('role') === null) el.setAttribute('role', 'button')
+      const on = el.getAttribute('data-on')
+      if (on !== null) el.setAttribute('aria-pressed', on === '1' ? 'true' : 'false')
+      if (el.getAttribute('aria-label') === null) {
+        const label = String(el.getAttribute('title') ?? el.textContent ?? '').trim().replace(/\s+/g, ' ').slice(0, 80)
+        if (label.length > 0) el.setAttribute('aria-label', label)
+      }
+      el.addEventListener('keydown', event => {
+        if (event.key !== 'Enter' && event.key !== ' ') return
+        if (el.getAttribute('aria-disabled') === 'true') return
+        event.preventDefault()
+        el.click()
+      })
+    }
+    // 看板横向滚动：滚轮默认滚页面，这里改成滚列（shift+滚轮保留给浏览器）。
+// 必须用原生非 passive 监听，React 的 onWheel 在 root 上是 passive，preventDefault 会被忽略。
+function installBoardWheel() {
+  if (typeof document === 'undefined') return () => {}
+  const handler = event => {
+    const target = event.target
+    const board = target instanceof Element ? target.closest('.ds-board') : null
+    if (board === null) return
+    if (board.scrollWidth <= board.clientWidth + 1) return
+    if (event.shiftKey) return
+    if (Math.abs(event.deltaY) <= Math.abs(event.deltaX)) return
+    board.scrollLeft += event.deltaY
+    event.preventDefault()
+  }
+  document.addEventListener('wheel', handler, { passive: false })
+  return () => document.removeEventListener('wheel', handler)
+}
+
+function installKeyboardActivation() {
+      if (typeof document === 'undefined') return () => undefined
+      const patched = new WeakSet()
+      const queue = []
+      let scheduled = false
+      const now = () => (typeof performance !== 'undefined' ? performance.now() : Date.now())
+      const retried = new WeakSet()
+      const retry = []
+      let retryTimer = null
+      const pump = () => {
+        scheduled = false
+        const deadline = now() + 6
+        const batch = []
+        while (queue.length > 0 && batch.length < 60 && now() < deadline) batch.push(queue.pop())
+        // 阶段一：只读（不伴随写操作，不会逐节点强制重算样式）
+        const hits = []
+        const misses = []
+        for (const el of batch) {
+          if (el.isConnected === false) continue
+          if (kbClickable(el)) hits.push(el)
+          else misses.push(el)
+        }
+        // 阶段二：只写
+        for (const el of hits) { patched.add(el); applyKeyboardSupport(el) }
+        // 挂载瞬间样式可能还没生效（卡片先渲染、主题类后挂），400ms 后再看一次
+        let fresh = false
+        for (const el of misses) {
+          if (retried.has(el)) continue
+          retried.add(el)
+          if (el.isConnected !== false) { retry.push(el); fresh = true }
+        }
+        if (fresh && retryTimer === null) {
+          retryTimer = window.setTimeout(() => {
+            retryTimer = null
+            queue.push(...retry.splice(0))
+            schedule()
+          }, 400)
+        }
+        if (queue.length > 0) schedule()
+      }
+      const schedule = () => {
+        if (scheduled === true) return
+        scheduled = true
+        if (typeof window.requestIdleCallback === 'function') window.requestIdleCallback(pump, { timeout: 300 })
+        else window.setTimeout(pump, 16)
+      }
+      const scan = () => {
+        const root = document.querySelector('[data-dsh-studio]')
+        if (root === null) return
+        // 只收候选节点，且把处理摊到空闲帧里，单帧最多占 6ms。
+        for (const el of root.querySelectorAll(KB_CANDIDATE)) {
+          if (patched.has(el) || retried.has(el) || el.dataset.kb === '1') continue
+          queue.push(el)
+        }
+        if (queue.length > 0) schedule()
+      }
+      scan()
+      let timer = null
+      const observer = new MutationObserver(() => {
+        if (timer !== null) return
+        timer = window.setTimeout(() => { timer = null; scan() }, 200)
+      })
+      observer.observe(document.body, { childList: true, subtree: true })
+      return () => observer.disconnect()
+    }
+
+    /**
+     * 统一登录：服务端开了 requireLogin 又没带会话时，/state 会返回 locked，
+     * 这里就盖一层登录框。用户名 = LDAP 账号（sAMAccountName / uid / mail 都试）。
+     */
+    function LoginGate({ config, theme, message, onDone, onClose, overlay }) {
+      const localName = String(config?.localAuth?.username ?? 'admin')
+      const localReady = config?.localAuth?.enabled !== false
+      const ldapReady = config?.ldap?.enabled === true
+      const [mode, setMode] = React.useState(ldapReady ? 'ldap' : 'local')
+      const [username, setUsername] = React.useState(ldapReady ? '' : localName)
+      const [password, setPassword] = React.useState('')
+      const [busy, setBusy] = React.useState(false)
+      const [error, setError] = React.useState(message ?? '')
+
+      const switchMode = next => {
+        if (next === mode) return
+        setMode(next)
+        setError('')
+        setPassword('')
+        setUsername(next === 'local' ? localName : '')
+      }
+
+      const submit = async () => {
+        if (busy) return
+        if (username.trim() === '' || password === '') {
+          setError(mode === 'local' ? '本地账号和密码都要填' : '域账号和密码都要填')
+          return
+        }
+        setBusy(true)
+        setError('')
+        try {
+          const payload = await api('/auth/login', { username: username.trim(), password, mode })
+          setSessionToken(payload.token)
+          setAuthUser(payload.user ?? null)
+          setUserName(String(payload.user?.name ?? payload.user?.id ?? username.trim()))
+          setPassword('')
+          onDone()
+        } catch (cause) {
+          setError(cause instanceof Error ? cause.message : String(cause))
+        } finally {
+          setBusy(false)
+        }
+      }
+
+      const tabs = h('div', { className: 'ds-seg', style: { alignSelf: 'flex-start' } },
+        h('button', {
+          className: 'ds-seg-btn',
+          type: 'button',
+          'data-on': mode === 'ldap' ? '1' : '0',
+          disabled: !ldapReady,
+          title: ldapReady ? '用公司目录（LDAP）的账号登录' : 'LDAP 还没启用，先在设置里配好再用',
+          onClick: () => switchMode('ldap'),
+        }, 'LDAP 账号'),
+        h('button', {
+          className: 'ds-seg-btn',
+          type: 'button',
+          'data-on': mode === 'local' ? '1' : '0',
+          disabled: !localReady,
+          title: '用平台自带的超管账号登录',
+          onClick: () => switchMode('local'),
+        }, '本地超管'),
+      )
+
+      const hint = mode === 'ldap'
+        ? h('div', { className: 'ds-login-hint' },
+            '用公司账号登录（LDAP）。登录后会记下你的名字，写操作和审计都挂在这个名字下。')
+        : h('div', { className: 'ds-login-hint' },
+            `用平台自带的超管账号登录。默认账号 ${localName}，默认口令 admin（改过之后就用新口令）。`)
+
+      const card = h('div', { className: 'ds-login' },
+            h('div', { className: 'ds-login-brand' }, '◈ ', config?.board?.title ?? '工作空间'),
+            tabs,
+            hint,
+            h('label', { className: 'ds-field' },
+              h('span', null, mode === 'local' ? '超管账号' : '域账号'),
+              h('input', {
+                value: username,
+                autoFocus: mode === 'ldap',
+                name: 'studio-account',
+                autoComplete: 'off',
+                spellCheck: false,
+                placeholder: mode === 'local' ? localName : '域账号',
+                onChange: event => setUsername(event.target.value),
+                onKeyDown: event => { if (event.key === 'Enter') void submit() },
+              }),
+            ),
+            h('label', { className: 'ds-field' },
+              h('span', null, '密码'),
+              h('input', {
+                type: 'password',
+                value: password,
+                autoFocus: mode === 'local',
+                name: 'studio-pass',
+                // 用 new-password 而不是 current-password：浏览器就不会把这里当成「可保存的登录表单」，
+                // 也就不会在每次登录后弹保存密码/微软账户同步窗口（那是浏览器自己的行为，不是平台的）
+                autoComplete: 'new-password',
+                placeholder: mode === 'local' ? '默认口令 admin' : '域密码',
+                onChange: event => setPassword(event.target.value),
+                onKeyDown: event => { if (event.key === 'Enter') void submit() },
+              }),
+            ),
+            error === '' ? null : h('div', { className: 'ds-error' }, error),
+            error !== '' && /LDAP|域|目录|连不上/.test(error)
+              ? h('div', { className: 'ds-login-note' }, '连不上目录服务时，切到「本地超管」用平台账号进来；等网络打通再用域账号。')
+              : null,
+            h('div', { className: 'ds-login-actions' },
+              h('button', {
+                className: 'ds-btn ds-btn-primary',
+                disabled: busy,
+                onClick: () => void submit(),
+              }, busy ? '登录中…' : (mode === 'local' ? '登录（本地超管）' : '登录（LDAP）')),
+              typeof onClose === 'function'
+                ? h('button', { className: 'ds-btn ds-btn-ghost', onClick: () => onClose() }, '先不登录')
+                : null,
+            ),
+            h('div', { className: 'ds-login-note' },
+              mode === 'ldap'
+                ? `${config?.ldap?.url ?? '—'} · BASE：${config?.ldap?.baseDN ?? '—'}`
+                : `本地账号存在服务端密钥里（scrypt 哈希），改密码在「设置 → 统一登录（LDAP）」`),
+        )
+      const wrap = h('div', { className: 'ds-login-wrap', 'data-overlay': overlay === true ? '1' : '0' }, card)
+      if (overlay === true) return wrap
+      return h('div', { 'data-dsh-studio': '', 'data-theme': theme }, h('style', null, CSS), wrap)
+    }
+
+    function StudioPage(props) {
+      // The bundled build swaps in the shadcn login card; the standalone artifact
+      // (no build step) keeps the hand-written one below.
+      const LoginGateView = props?.loginGate ?? LoginGate
+      const { state, error, reload } = useStudio()
+      const [tab, setTab] = React.useState('dashboard')
+      const [settingsSection, setSettingsSection] = React.useState('experts')
+      const [openId, setOpenId] = React.useState(null)
+      const [creating, setCreating] = React.useState(false)
+      // 统一的「新建」入口：一个按钮弹出「需求 / 任务」两项，两个页面不再各放一个。
+      const [newMenu, setNewMenu] = React.useState(false)
+      const [newReq, setNewReq] = React.useState(0)
+      React.useEffect(() => {
+        if (!newMenu) return undefined
+        const off = () => setNewMenu(false)
+        document.addEventListener('click', off)
+        return () => document.removeEventListener('click', off)
+      }, [newMenu])
+      const [theme, setTheme] = React.useState(currentTheme)
+      const [hostTheme, setHostTheme] = React.useState(() => hostScheme() ?? (systemDarkQuery()?.matches ? 'dark' : 'light'))
+      const [showLogin, setShowLogin] = React.useState(false)
+
+      // 「跟随系统」实际跟宿主界面：系统深浅色变化、宿主自己换主题都要跟上（1.5s 轮询足够，成本可忽略）
+      React.useEffect(() => {
+        const read = () => {
+          const next = hostScheme() ?? (systemDarkQuery()?.matches ? 'dark' : 'light')
+          setHostTheme(previous => (previous === next ? previous : next))
+        }
+        read()
+        const query = systemDarkQuery()
+        const onChange = () => read()
+        if (query !== null) query.addEventListener('change', onChange)
+        const timer = window.setInterval(read, 1500)
+        return () => {
+          if (query !== null) query.removeEventListener('change', onChange)
+          window.clearInterval(timer)
+        }
+      }, [])
+
+      const resolvedTheme = theme === 'system' ? hostTheme : theme
+
+      // 主题覆盖整个页面（含宿主侧栏/顶栏），不只是工作区子树。
+      React.useEffect(() => {
+        const root = document.documentElement
+        root.setAttribute('data-dsh-theme', resolvedTheme)
+        root.style.colorScheme = resolvedTheme
+        let node = document.getElementById('dsh-studio-global-theme')
+        if (node === null) {
+          node = document.createElement('style')
+          node.id = 'dsh-studio-global-theme'
+          node.textContent = GLOBAL_THEME_CSS
+          document.head.appendChild(node)
+        }
+        return () => {
+          root.removeAttribute('data-dsh-theme')
+          root.style.colorScheme = ''
+        }
+      }, [resolvedTheme])
+
+
+      // 键盘可达性：挂载后给「可点的 div」补 tabindex/role，卸载时断开观察
+      React.useEffect(() => installKeyboardActivation(), [])
+  React.useEffect(() => installBoardWheel(), [])
+
+      if (state === null) {
+        return h('div', { 'data-dsh-studio': '', 'data-theme': resolvedTheme },
+          h('style', null, CSS),
+          h('div', { className: 'ds-loading' }, error === null ? '正在载入工作空间…' : `载入失败：${error}`),
+        )
+      }
+      if (state.locked === true) {
+        return h(LoginGateView, { config: state.config, theme: resolvedTheme, message: '', onDone: () => void reload() })
+      }
+      const openTask = openId === null ? null : state.tasks.find(t => t.id === openId) ?? null
+      const counts = state.tasks.reduce((acc, task) => { acc[task.status] = (acc[task.status] ?? 0) + 1; return acc }, {})
+
+      return h('div', { 'data-dsh-studio': '', 'data-theme': resolvedTheme },
+        h('style', null, CSS),
+        h(DialogHost, null),
+        h(ToastHost, null),
+        h('div', { className: 'ds-head' },
+          h('div', { className: 'ds-head-top' },
+            h('div', { className: 'ds-brand' },
+              h('span', { className: 'ds-brand-mark' }, '◈'),
+              h('div', null,
+                h('div', { className: 'ds-title' }, state.config.board.title),
+                h('div', { className: 'ds-sub' }, `${state.tasks.length} 个任务 · rev ${state.revision} · 更新于 ${fmtTime(state.updatedAt)}`),
+              ),
+            ),
+            h('div', { className: 'ds-head-actions' },
+              authUser() === null
+                ? h(ChipField, {
+                    className: 'ds-chip',
+                    'data-on': '1',
+                    title: '没配 LDAP 时平台默认以超管身份使用，不需要登录；写操作与审计都记在它名下',
+                  }, `👤 超管 ${state.config.localAuth?.username ?? 'admin'}`)
+                : h(ChipField, { className: 'ds-chip', title: `已登录：${authUser()?.id ?? ''}` }, `👤 ${authUser()?.name ?? authUser()?.id}`),
+              authUser() === null
+                ? h('button', { className: 'ds-btn ds-btn-ghost', title: '用域账号或本地超管账号登录', onClick: () => setShowLogin(true) }, '登录')
+                : tipOf('退出当前账号（退出后回到超管身份）', h('button', {
+                    className: 'ds-btn ds-btn-ghost',
+                    onClick: async () => {
+                      try { await api('/auth/logout', {}) } catch { /* 会话可能已过期 */ }
+                      setSessionToken('')
+                      setAuthUser(null)
+                      setShowLogin(false)
+                      void reload()
+                    },
+                  }, '退出登录')),
+              (() => {
+                const Seg = kit('SegGroup')
+                const options = THEMES.map(([id, label]) => ({ id, label }))
+                if (Seg !== null) {
+                  return h(Seg, { value: theme, onChange: next => setTheme(setThemeName(next)), options })
+                }
+                return h('div', { className: 'ds-seg', title: '显示模式；「跟随系统」会先跟宿主界面的深浅色，宿主没给出信号时再跟操作系统' },
+                  THEMES.map(([id, label]) => h('button', {
+                    key: id,
+                    className: 'ds-seg-btn',
+                    'data-on': theme === id ? '1' : '0',
+                    onClick: () => setTheme(setThemeName(id)),
+                  }, label)),
+                )
+              })(),
+              h('button', { className: 'ds-btn', onClick: () => void reload() }, '刷新'),
+              h('a', {
+                className: 'ds-btn ds-btn-ghost',
+                style: { textDecoration: 'none' },
+                href: '/studio-api/export/tasks.csv',
+                title: '把看板上的卡导出成 CSV（Excel 可直接打开）',
+              }, '导出卡'),
+              h('a', {
+                className: 'ds-btn ds-btn-ghost',
+                style: { textDecoration: 'none' },
+                href: '/studio-api/export/requirements.csv',
+                title: '把需求与准出情况导出成 CSV',
+              }, '导出需求'),
+              (state.integrations?.broken ?? 0) > 0
+                ? h('button', {
+                    className: 'ds-btn ds-btn-ghost',
+                    style: { color: '#e5484d', borderColor: 'color-mix(in srgb, #e5484d 40%, var(--ds-line))' },
+                    title: (state.integrations.channels ?? []).filter(item => item.state === 'error').map(item => `${item.label}：${item.lastError}`).join('\n'),
+                    onClick: () => { setTab('settings'); setSettingsSection('health') },
+                  }, `⚠ 集成异常 ${state.integrations.broken}`)
+                : null,
+              h('div', { className: 'ds-newmenu', style: { position: 'relative' } },
+                h('button', {
+                  className: 'ds-btn ds-btn-primary',
+                  'aria-haspopup': 'menu',
+                  'aria-expanded': newMenu ? 'true' : 'false',
+                  onClick: event => { event.stopPropagation(); setNewMenu(value => !value) },
+                }, '＋ 新建'),
+                newMenu
+                  ? h('div', {
+                    role: 'menu',
+                    className: 'ds-menu',
+                    style: { position: 'absolute', right: 0, top: 'calc(100% + 6px)', zIndex: 80, minWidth: 232, padding: 6, background: 'var(--ds-surface)', border: '1px solid var(--ds-line)', borderRadius: 10, boxShadow: '0 12px 32px rgba(0,0,0,.22)' },
+                    onClick: event => event.stopPropagation(),
+                  },
+                    h('button', { role: 'menuitem', className: 'ds-btn ds-btn-ghost', style: { display: 'block', width: '100%', textAlign: 'left', height: 'auto', padding: '9px 10px' }, title: '先建需求，再按功能点拆卡', onClick: () => { setNewMenu(false); setTab('requirements'); setNewReq(count => count + 1) } },
+                      h('div', { style: { fontWeight: 600 } }, '新建需求'),
+                      h('div', { className: 'ds-hint', style: { marginTop: 2 } }, '需求 → 功能点 → 拆成卡'),
+                    ),
+                    h('button', { role: 'menuitem', className: 'ds-btn ds-btn-ghost', style: { display: 'block', width: '100%', textAlign: 'left', height: 'auto', padding: '9px 10px', marginTop: 2 }, title: '直接在看板上建一张卡', onClick: () => { setNewMenu(false); setTab('board'); setCreating(true) } },
+                      h('div', { style: { fontWeight: 600 } }, '新建任务'),
+                      h('div', { className: 'ds-hint', style: { marginTop: 2 } }, '直接在看板上建一张卡'),
+                    ),
+                  )
+                  : null,
+              ),
+            ),
+          ),
+          h('div', { className: 'ds-head-tabs' },
+            (() => {
+              const Tabs = kit('TabsBar')
+              const TRoot = kit('Tabs')
+              const TList = kit('TabsList')
+              const TItem = kit('TabsTrigger')
+              const items = [
+                { id: 'dashboard', label: '工作台', hint: '今天该看什么：在办、逾期、阻塞、缺陷超时、准出被拦' },
+                { id: 'board', label: '看板', hint: '按列推进卡片；点开卡片能看计划、交付物、测试、讨论' },
+                { id: 'requirements', label: '需求', hint: '需求、功能点、可追溯矩阵与需求级准出' },
+                { id: 'releases', label: '版本', hint: '版本清单、发布门禁、灰度与部署记录' },
+                { id: 'projects', label: '项目', hint: '业务项目、迭代与每个服务对应的代码目录' },
+                { id: 'analytics', label: '效能', hint: '周期分布、每列停留、团队负载、返工与 AI 成本' },
+                { id: 'settings', label: '设置', hint: '列、模型、自动派单、集成、权限、备份' },
+              ]
+              if (TRoot !== null && TList !== null && TItem !== null) {
+                return h(TRoot, { value: tab, onValueChange: next => setTab(next) },
+                  h(TList, { className: '' },
+                    items.map(item => h(TItem, {
+                      key: item.id,
+                      value: item.id,
+                      title: item.hint,
+                      className: '',
+                    }, item.label))))
+              }
+              if (Tabs !== null) {
+                return h(Tabs, { items, value: tab, onChange: next => setTab(next) })
+              }
+              return h('div', { className: 'ds-tabs' },
+                items.map(item => h('button', {
+                  key: item.id,
+                  className: 'ds-tab',
+                  'data-on': tab === item.id ? '1' : '0',
+                  onClick: () => setTab(item.id),
+                }, item.label)),
+              )
+            })(),
+            h('div', { className: 'ds-grow' }),
+            h('span', { className: 'ds-stat' },
+              tab === 'dashboard'
+                ? '今天该看什么：风险 · 流程 · 待办'
+                : tab === 'board'
+                ? `${(state.config.experts ?? []).filter(expert => expert.enabled !== false).length} 位专家 · ${(state.config.teams ?? []).length} 个专家团`
+                : tab === 'requirements'
+                  ? `${(state.requirements ?? []).length} 条需求 · ${state.tasks.filter(task => (task.requirementId ?? '') === '').length} 张卡未挂需求`
+                  : tab === 'releases'
+                    ? `${(state.releases ?? []).length} 个版本 · ${state.tasks.filter(task => (task.releaseId ?? '') !== '').length} 张卡已挂版本`
+                  : tab === 'projects'
+                    ? `${(state.config.projects ?? []).length} 个项目`
+                    : tab === 'analytics'
+                      ? '过程指标：通过率 · 返工 · 周期'
+                    : tab === 'settings'
+                      ? '改动即时生效，技能与专家保存在 ~/.dsh'
+                      : '内部插件市场'),
+          ),
+        ),
+        error !== null
+          ? h('div', { className: 'ds-err', style: { padding: '6px 18px' } }, error)
+          : null,
+        tab === 'board'
+          ? h(Board, { state, onWip: async (status, current) => { const raw = await promptDialog(`这一列的 WIP 上限（0 = 不限，最多 50）`, { title: 'WIP 上限', defaultValue: String(current) }); if (raw === null) return; const value = Math.min(50, Math.max(0, Math.trunc(Number(String(raw).trim()) || 0))); try { await api('/columns/wip', { status, wip: value }); toast(value === 0 ? '已取消 WIP 上限' : `WIP 上限设为 ${value}`); await reload() } catch (cause) { toast(cause instanceof Error ? cause.message : String(cause), 'error') } }, onMove: async (id, status) => { await api('/task/update', { id, status }); await reload() }, onOpen: setOpenId })
+          : tab === 'dashboard'
+            ? h(DashboardPage, { state, onOpenTask: setOpenId, onOpenBoard: () => setTab('board') })
+          : tab === 'requirements'
+            ? h(RequirementsPage, { state, onOpenTask: setOpenId, onChanged: reload, createSignal: newReq })
+            : tab === 'releases'
+              ? h(ReleasesPage, { state, onOpenTask: setOpenId })
+            : tab === 'projects'
+              ? h(ProjectsOverview, { state, onOpenBoard: () => setTab('board') })
+              : tab === 'analytics'
+                ? h(AnalyticsPage, { state, onOpenTask: setOpenId })
+              : tab === 'market'
+                ? h('div', { className: 'ds-body' }, h(Market, { state, onChanged: reload }))
+                : h('div', { className: 'ds-body' }, h(Settings, { state, onChanged: reload, initialSection: settingsSection, onSection: setSettingsSection })),
+        openTask !== null ? h(Drawer, { task: openTask, state, onClose: () => setOpenId(null), onChanged: reload }) : null,
+        creating ? h(NewTaskDialog, { state, onClose: () => setCreating(false), onCreated: reload }) : null,
+        showLogin && state.locked !== true
+          ? h(LoginGateView, {
+              config: state.config,
+              theme: resolvedTheme,
+              message: '',
+              overlay: true,
+              onDone: () => { setShowLogin(false); void reload() },
+              onClose: () => setShowLogin(false),
+            })
+          : null,
+      )
+    }
+
+    // ------------------------------------------------------------------ icon
+
+    function StudioIcon(props) {
+      const size = typeof props.size === 'number' ? props.size : 16
+      return h('svg', {
+        width: size, height: size, viewBox: '0 0 16 16', fill: 'none',
+        stroke: 'currentColor', strokeWidth: 1.3, strokeLinecap: 'round', strokeLinejoin: 'round',
+        'aria-hidden': true,
+      },
+        h('rect', { x: 1.5, y: 2.5, width: 4, height: 11, rx: 1 }),
+        h('rect', { x: 6, y: 2.5, width: 4, height: 7, rx: 1 }),
+        h('rect', { x: 10.5, y: 2.5, width: 4, height: 9, rx: 1 }),
+      )
+    }
+
+    // ----------------------------------------------------------------- mount
+
+    return {
+      inject: ['slots'],
+      apply(ctx) {
+        const disposers = []
+        const page = StudioPage
+        disposers.push(ctx.slots.inject('main', () => ctx.slots.register(
+          { name: 'main', key: PANEL_ID }, page,
+        )))
+        disposers.push(ctx.slots.inject('sidebar.panellist', () => ctx.slots.register(
+          { name: 'sidebar.panellist', id: PANEL_ID, order: 12, label: () => '需求&任务工作空间' }, StudioIcon,
+        )))
+        const cleanup = () => { for (const dispose of disposers.splice(0).reverse()) dispose() }
+        if (typeof ctx.effect === 'function') ctx.effect(() => cleanup)
+        return cleanup
+      },
+    }
+  },
+})
