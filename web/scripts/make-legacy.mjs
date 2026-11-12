@@ -94,6 +94,11 @@ const imports = [
   "import { LdapPanel, CostsPanel, BusinessPanel } from './studio/panels/platform.js'",
   "import { AccessPanel, ColumnsPanel, StoragePanel, HealthPanel } from './studio/panels/governance.js'",
   "import { ReposPanel, BotsPanel, SkillsPanel } from './studio/panels/integrations.js'",
+  "import { DashboardPage } from './studio/pages/insights.js'",
+  "import { BurnChart, ProgressField } from './studio/charts.js'",
+  "import { IntakePage, RequirementsPage } from './studio/pages/requirements.js'",
+  "import { ReleasesPage } from './studio/pages/releases.js'",
+  "import { AnalyticsPage } from './studio/pages/analytics.js'",
 ].join('\n') + '\n\n'
 writeFileSync(target, banner + imports + text)
 console.log(`make-legacy: wrote ${target} (${text.length} chars)`)

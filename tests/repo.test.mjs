@@ -102,7 +102,7 @@ test('client: heavy helpers live in web/src/studio and client.src.js ratchets do
     assert.ok(existsSync(path(file)), file + ' missing')
   }
   const lines = read('client.src.js').split(/\r?\n/).length
-  assert.ok(lines < 4400, 'client.src.js is ' + lines + ' lines; keep lifting helpers into web/src/studio')
+  assert.ok(lines < 2500, 'client.src.js is ' + lines + ' lines; keep lifting helpers into web/src/studio')
   const maker = read('web/scripts/make-legacy.mjs')
   for (const spec of ['./studio/markdown.js', './studio/format.js', './studio/labels.js', './studio/roster.js', './studio/fields.js', './studio/shell.js', './studio/card.js', './studio/board.js']) {
     assert.ok(maker.includes(spec), 'make-legacy must keep importing ' + spec)
@@ -173,15 +173,17 @@ test('client: every studio export used by client.src.js is imported back by make
 const stripCode = (code) => code
   .replace(/\/\*[\s\S]*?\*\//g, ' ')
   .replace(/\/\/[^\n]*/g, ' ')
-  .replace(/\u0060(?:\\[\s\S]|[^\u0060\\])*\u0060/g, ' ')
-  .replace(/'(?:\\[\s\S]|[^'\\])*'/g, ' ')
-  .replace(/"(?:\\[\s\S]|[^"\\])*"/g, ' ')
+  .replace(/\u0060(?:\\[\s\S]|[^\u0060\\\n])*\u0060/g, ' ')
+  .replace(/'(?:\\[\s\S]|[^'\\\n])*'/g, ' ')
+  .replace(/"(?:\\[\s\S]|[^"\\\n])*"/g, ' ')
 
 test('client: studio modules only use names they declare, import or receive', () => {
-  const client = stripCode(read('client.src.js'))
+  // Names owned by client.src.js are collected from the raw source: stripping string
+  // literals first used to swallow whole regions and hide real offenders.
+  const clientRaw = read('client.src.js').replace(/^[ \t]*\/\/[^\n]*$/gm, '')
   const clientNames = new Set([
-    ...[...client.matchAll(/^\s*(?:async )?function ([A-Za-z_$][\w$]*)\(/gm)].map((m) => m[1]),
-    ...[...client.matchAll(/^\s*(?:const|let) ([A-Za-z_$][\w$]*) =/gm)].map((m) => m[1]),
+    ...[...clientRaw.matchAll(/^ {0,4}(?:async )?function ([A-Za-z_$][\w$]*)\(/gm)].map((m) => m[1]),
+    ...[...clientRaw.matchAll(/^ {0,4}(?:const|let) ([A-Za-z_$][\w$]*) =/gm)].map((m) => m[1]),
   ])
   const walk = (dir) =>
     readdirSync(path(dir), { withFileTypes: true }).flatMap((entry) =>
@@ -197,7 +199,7 @@ test('client: studio modules only use names they declare, import or receive', ()
     }
   }
   const provided = new Set([
-    ...[...client.matchAll(/const \{([^}]*)\} = create\w+\(/g)].flatMap((m) =>
+    ...[...clientRaw.matchAll(/const \{([^}]*)\} = create\w+\(/g)].flatMap((m) =>
       m[1].split(',').map((part) => part.trim().split(':').pop().trim()).filter((part) => part !== ''),
     ),
   ])
@@ -394,4 +396,40 @@ test('docs: compatibility.md covers the host entry points we depend on', () => {
   const dispatcher = readFileSync('src/host/dispatcher.js', 'utf8')
   assert.ok(dispatcher.includes('agents.create'), 'src/host/dispatcher.js actually calls agents.create')
   assert.ok(index.includes('webServer'), 'index.js actually registers web routes')
+})
+
+test('client: every studio module pulls in what it borrows from its siblings', () => {
+  const walk = (dir) =>
+    readdirSync(path(dir), { withFileTypes: true }).flatMap((entry) =>
+      entry.isDirectory()
+        ? walk(dir + '/' + entry.name)
+        : entry.name.endsWith('.js') ? [dir + '/' + entry.name] : [])
+  const stripComments = (code) =>
+    code.replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/(^|[^:])\/\/[^\n]*/g, '$1 ')
+  const modules = walk('web/src/studio')
+  const owners = new Map()
+  for (const name of modules) {
+    const code = stripComments(read(name))
+    for (const match of code.matchAll(/export (?:async )?(?:function|const) ([A-Za-z_$][\w$]*)/g)) {
+      owners.set(match[1], name)
+    }
+  }
+  const missing = []
+  for (const name of modules) {
+    const code = stripComments(read(name))
+    const own = new Set([
+      ...[...code.matchAll(/(?:export )?(?:async )?function ([A-Za-z_$][\w$]*)/g)].map((m) => m[1]),
+      ...[...code.matchAll(/(?:export )?(?:const|let|var) ([A-Za-z_$][\w$]*)/g)].map((m) => m[1]),
+      ...[...code.matchAll(/import \{([^}]*)\}/g)].flatMap((m) => m[1].split(',').map((s) => s.trim().split(/\s+as\s+/).pop())),
+      ...[...code.matchAll(/const \{([^}]*)\} = client\(\)/g)].flatMap((m) => m[1].split(',').map((s) => s.trim())),
+      ...[...code.matchAll(/(?:export )?function \w+\(\{([^}]*)\}\)/g)].flatMap((m) => m[1].split(',').map((s) => s.trim().split(':').pop().trim())),
+      ...[...code.matchAll(/(?:export )?function \w+\(([^)]*)\)/g)].flatMap((m) => m[1].split(',').map((s) => s.trim()).filter((s) => /^[A-Za-z_$][\w$]*$/.test(s))),
+    ])
+    for (const [symbol, owner] of owners) {
+      if (owner === name || own.has(symbol)) continue
+      if (!new RegExp('(^|[^\\w$.' + "'" + '"])' + symbol + '\\b').test(code)) continue
+      missing.push(name + ' borrows ' + symbol + ' from ' + owner + ' without importing it')
+    }
+  }
+  assert.deepEqual(missing, [], 'studio module uses a sibling export without importing it')
 })
