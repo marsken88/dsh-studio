@@ -1373,3 +1373,15 @@ html body [data-dsh-studio][data-dsh-studio-portal] {
 /* 拖拽反馈 */
 [data-dsh-studio] .ds-card[data-dragging="1"] { opacity: .55; transform: rotate(-.5deg) }
 [data-dsh-studio] .ds-col[data-drag-over="1"] { outline: 2px dashed var(--ds-accent); outline-offset: -3px; background: color-mix(in srgb, var(--ds-accent) 8%, var(--muted)) }
+
+/* 全局搜索（⌘K / Ctrl+K） */
+[data-dsh-studio] .ds-palette-veil { position: fixed; inset: 0; z-index: 120; background: rgba(9, 9, 11, .38); display: flex; align-items: flex-start; justify-content: center; padding-top: 12vh }
+[data-dsh-studio] .ds-palette { width: min(560px, 92vw); background: var(--ds-surface, #fff); border: 1px solid var(--ds-line, #e4e4e7); border-radius: 12px; box-shadow: 0 24px 64px rgba(0, 0, 0, .28); overflow: hidden }
+[data-dsh-studio] .ds-palette-input { width: 100%; height: 44px; padding: 0 14px; border: 0; border-bottom: 1px solid var(--ds-line, #e4e4e7); background: transparent; color: inherit; font-size: 14px; outline: none }
+[data-dsh-studio] .ds-palette-list { max-height: min(52vh, 420px); overflow: auto; padding: 6px }
+[data-dsh-studio] .ds-palette-item { display: flex; align-items: center; gap: 8px; padding: 8px 10px; border-radius: 8px; cursor: pointer; font-size: 13px }
+[data-dsh-studio] .ds-palette-item[data-active="1"] { background: color-mix(in srgb, var(--ds-accent, #18181b) 10%, transparent) }
+[data-dsh-studio] .ds-palette-kind { flex: 0 0 auto; font-size: 11px; padding: 1px 6px; border-radius: 999px; background: var(--ds-surface-2, #f4f4f5); color: var(--ds-muted, #71717a) }
+[data-dsh-studio] .ds-palette-label { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap }
+[data-dsh-studio] .ds-palette-hint { flex: 0 0 auto; max-width: 40%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ds-muted, #71717a); font-size: 12px }
+[data-dsh-studio][data-theme="dark"] .ds-palette-veil { background: rgba(0, 0, 0, .6) }

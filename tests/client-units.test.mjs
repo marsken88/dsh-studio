@@ -18,6 +18,7 @@ import {
 } from '../web/src/studio/labels.js'
 import { buildRoster, ownerLabel, memberLabel, toDateInput, fromDateInput } from '../web/src/studio/roster.js'
 import { fmtTime, fmtDate } from '../web/src/studio/format.js'
+import { searchItems, filterItems } from '../web/src/studio/palette.js'
 
 test('labels: every ordered status has a label', () => {
   for (const id of REQ_STATUS_ORDER) {
@@ -98,4 +99,36 @@ test('format: time helpers never throw on empty input', () => {
     assert.equal(typeof fmtDate(value), 'string')
   }
   assert.notEqual(fmtTime(Date.parse('2026-11-13T10:20:00+08:00')), '')
+})
+
+test('palette: searchItems covers tasks, requirements and releases', () => {
+  const state = {
+    statuses: [{ id: 'dev', label: '开发中' }],
+    tasks: [
+      { id: 't1', code: 'DEV-001', title: '退款对账', status: 'dev', owner: { label: '🏛️ 支付架构师' } },
+      { id: 't2', code: 'BUG-001', title: '并发超卖', status: 'dev' },
+    ],
+    requirements: [{ id: 'r1', code: 'REQ-2026-001', title: '会员积分抵扣', domain: '支付', owner: 'ken' }],
+    releases: [{ id: 'v1', name: 'v1.0.0', tagName: 'v1.0.0', status: 'draft' }],
+  }
+  const items = searchItems(state)
+  assert.deepEqual(items.map((item) => item.kind), ['task', 'task', 'requirement', 'release'])
+  assert.equal(items[0].hint, '开发中 · 🏛️ 支付架构师')
+  assert.equal(items[2].hint, '需求 · 支付 · ken')
+  assert.ok(items[3].hint.startsWith('版本'))
+})
+
+test('palette: filterItems matches words, ranks prefixes first and stops when empty', () => {
+  const items = [
+    { key: 'a', label: 'DEV-001 退款', search: 'dev-001 退款' },
+    { key: 'b', label: 'BUG-001 超卖', search: 'bug-001 超卖' },
+    { key: 'c', label: 'REQ 退款需求', search: 'req-2026-001 退款需求' },
+  ]
+  assert.deepEqual(filterItems(items, 'BUG').map((item) => item.key), ['b'])
+  assert.deepEqual(filterItems(items, 'bug 超卖').map((item) => item.key), ['b'])
+  assert.deepEqual(filterItems(items, 'bug 退款'), [])
+  assert.equal(filterItems(items, '').length, 3)
+  assert.deepEqual(filterItems(items, '没有这个词'), [])
+  const ranked = filterItems([...items, { key: 'd', label: '退款退款', search: '退款退款' }], '退款')
+  assert.equal(ranked.length, 3)
 })

@@ -1176,6 +1176,7 @@ html[data-dsh-theme="light"] [class*="rightbarCol"] { background: #fafafa !impor
     /** @ 选择器：一列可搜的名单，代替原来平铺的一堆按钮。 */
     const MentionPicker = createMentionPicker({ h, TextField })
     const Drawer = createDrawer({ h, React, api, kit, currentUser, renderMarkdown, tipOf, tipLabel, confirmDialog, promptDialog, TextField, TextAreaField, ChipField, CheckField, SelectField, MdField, MentionPicker })
+    const Palette = createPalette({ h, React })
     provideClient({ h, React, Editor, api, kit, toast, sessionToken, currentUser, confirmDialog, promptDialog, tipOf, tipLabel, renderMarkdown, SideDrawer, MentionPicker, Card, TextField, TextAreaField, ChipField, CheckField, SelectField, MdField })
 
 
@@ -2126,6 +2127,18 @@ function installKeyboardActivation() {
       const [theme, setTheme] = React.useState(currentTheme)
       const [hostTheme, setHostTheme] = React.useState(() => hostScheme() ?? (systemDarkQuery()?.matches ? 'dark' : 'light'))
       const [showLogin, setShowLogin] = React.useState(false)
+      // 全局搜索：⌘K / Ctrl+K 打开，选到哪条就跳到哪条。
+      const [paletteOpen, setPaletteOpen] = React.useState(false)
+      const [focusReq, setFocusReq] = React.useState(null)
+      React.useEffect(() => {
+        const onKey = event => {
+          if (!(event.metaKey || event.ctrlKey) || String(event.key).toLowerCase() !== 'k') return
+          event.preventDefault()
+          setPaletteOpen(value => !value)
+        }
+        document.addEventListener('keydown', onKey)
+        return () => document.removeEventListener('keydown', onKey)
+      }, [])
 
       // 「跟随系统」实际跟宿主界面：系统深浅色变化、宿主自己换主题都要跟上（1.5s 轮询足够，成本可忽略）
       React.useEffect(() => {
@@ -2341,7 +2354,7 @@ function installKeyboardActivation() {
           : tab === 'dashboard'
             ? h(DashboardPage, { state, onOpenTask: setOpenId, onOpenBoard: () => setTab('board') })
           : tab === 'requirements'
-            ? h(RequirementsPage, { state, onOpenTask: setOpenId, onChanged: reload, createSignal: newReq })
+            ? h(RequirementsPage, { state, onOpenTask: setOpenId, onChanged: reload, createSignal: newReq, focusReq })
             : tab === 'releases'
               ? h(ReleasesPage, { state, onOpenTask: setOpenId })
             : tab === 'projects'
@@ -2351,6 +2364,17 @@ function installKeyboardActivation() {
               : tab === 'market'
                 ? h('div', { className: 'ds-body' }, h(Market, { state, onChanged: reload }))
                 : h('div', { className: 'ds-body' }, h(Settings, { state, onChanged: reload, initialSection: settingsSection, onSection: setSettingsSection })),
+        paletteOpen
+          ? h(Palette, {
+              state,
+              onClose: () => setPaletteOpen(false),
+              onPick: item => {
+                if (item.kind === 'task') { setOpenId(item.id); return }
+                if (item.kind === 'requirement') { setTab('requirements'); setFocusReq({ id: item.id, at: Date.now() }); return }
+                if (item.kind === 'release') { setTab('releases') }
+              },
+            })
+          : null,
         openTask !== null ? h(Drawer, { task: openTask, state, onClose: () => setOpenId(null), onChanged: reload }) : null,
         creating ? h(NewTaskDialog, { state, onClose: () => setCreating(false), onCreated: reload }) : null,
         showLogin && state.locked !== true

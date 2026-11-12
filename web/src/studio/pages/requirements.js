@@ -88,7 +88,7 @@ h('div', { className: 'ds-field' }, h('div', { className: 'ds-label' }, '验收�
       )
     }
 
-export     function RequirementsPage({ state, onOpenTask, onChanged, createSignal }) {
+export     function RequirementsPage({ state, onOpenTask, onChanged, createSignal, focusReq }) {
   const { h, React, api, toast, currentUser, confirmDialog, promptDialog, renderMarkdown, TextField, TextAreaField, ChipField, CheckField, SelectField, MdField } = client()
       const requirements = state.requirements ?? []
       const projects = state.config.projects ?? []
@@ -99,6 +99,8 @@ export     function RequirementsPage({ state, onOpenTask, onChanged, createSigna
         setError(null)
       }
       React.useEffect(() => { if (Number(createSignal) > 0) openNew() }, [createSignal])
+      // 从全局搜索跳过来时，直接选中那一条需求。
+      React.useEffect(() => { if (focusReq && focusReq.id) setSelected(focusReq.id) }, [focusReq])
       const [form, setForm] = React.useState(null)
       const [error, setError] = React.useState(null)
       const [busy, setBusy] = React.useState(false)
