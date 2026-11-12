@@ -1044,6 +1044,16 @@ function publicState(store) {
     releaseStatuses: RELEASE_STATUSES,
     audit: (state.audit ?? []).slice(0, 200),
     integrations: healthReport(),
+    // 技能库在磁盘上是另一份数据，但命令面板要能搜到它，所以顺带下发精简版（含"几位专家在用"）。
+    skills: activeSkills === undefined
+      ? []
+      : activeSkills.list().map(skill => ({
+        name: skill.name,
+        description: skill.description ?? '',
+        tags: skill.tags ?? [],
+        enabled: skill.enabled !== false,
+        users: (state.config.experts ?? []).filter(expert => (expert.skills ?? []).includes(skill.name)).length,
+      })),
     storage: typeof store.describe === 'function' ? store.describe() : null,
     requirements: state.requirements.map(item => ({
       ...item,

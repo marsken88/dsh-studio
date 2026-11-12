@@ -152,6 +152,28 @@ test('palette: actions are searchable next to records', async () => {
   assert.deepEqual(filterItems(all, '不存在的词'), [])
 })
 
+test('palette: skills from the library are searchable and open the right pane', async () => {
+  const { searchItems, paletteItems, filterItems } = await import('../web/src/studio/palette.js')
+  const state = {
+    tasks: [], requirements: [], releases: [], statuses: [], config: { experts: [], teams: [], projects: [] },
+    skills: [
+      { name: 'gitlab-mr-review', description: '按团队规范审 MR', tags: ['gitlab', 'review'], enabled: true, users: 1 },
+      { name: 'qa-bugfix-verification', description: '缺陷复现与回归', tags: ['qa'], enabled: false, users: 2 },
+    ],
+  }
+  const records = searchItems(state)
+  assert.deepEqual(records.map((item) => item.kind), ['skill', 'skill'])
+  assert.equal(records[0].label, '🧩 gitlab-mr-review')
+  assert.equal(records[0].hint, '技能 · 已启用 · 1 位专家在用')
+  assert.equal(records[1].hint, '技能 · 已停用 · 2 位专家在用')
+
+  const all = paletteItems(state)
+  assert.equal(filterItems(all, 'mr-review')[0].kind, 'skill')
+  assert.equal(filterItems(all, '回归')[0].id, 'qa-bugfix-verification')
+  assert.equal(filterItems(all, 'gitlab')[0].kind, 'skill')
+  assert.equal(filterItems(all, '不存在的技能').length, 0)
+})
+
 test('palette: experts, teams and projects are searchable too', async () => {
   const { searchItems, paletteItems, filterItems } = await import('../web/src/studio/palette.js')
   const state = {

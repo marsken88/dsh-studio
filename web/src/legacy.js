@@ -2402,6 +2402,7 @@ function installKeyboardActivation() {
                 if (item.kind === 'expert') { setTab('settings'); setSettingsSection('experts'); return }
                 if (item.kind === 'team') { setTab('settings'); setSettingsSection('teams'); return }
                 if (item.kind === 'project') { setTab('projects'); return }
+                if (item.kind === 'skill') { setTab('settings'); setSettingsSection('skills'); return }
                 if (item.kind !== 'action') return
                 if (item.id === 'new-requirement') { setTab('requirements'); setNewReq(n => n + 1); return }
                 if (item.id === 'new-task') { setTab('board'); setCreating(true); return }

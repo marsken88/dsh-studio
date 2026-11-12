@@ -71,6 +71,16 @@ export function searchItems(state) {
       search: [project.name, project.id, project.description, ...(project.services ?? []).map((service) => service.name ?? service.repoPath)].filter(Boolean).join(' ').toLowerCase(),
     })
   }
+  for (const skill of state.skills ?? []) {
+    items.push({
+      key: 'skill:' + skill.name,
+      kind: 'skill',
+      id: skill.name,
+      label: '🧩 ' + skill.name,
+      hint: ['技能', skill.enabled === false ? '已停用' : '已启用', (skill.users ?? 0) + ' 位专家在用'].join(' · '),
+      search: [skill.name, skill.description, ...(skill.tags ?? [])].filter(Boolean).join(' ').toLowerCase(),
+    })
+  }
   return items
 }
 
@@ -145,7 +155,7 @@ export function filterItems(items, query, limit = 20) {
   return scored.slice(0, limit).map((entry) => entry.item)
 }
 
-const KIND_LABEL = { task: '卡片', requirement: '需求', release: '版本', expert: '专家', team: '专家团', project: '项目', action: '操作' }
+const KIND_LABEL = { task: '卡片', requirement: '需求', release: '版本', expert: '专家', team: '专家团', project: '项目', skill: '技能', action: '操作' }
 
 export function createPalette({ h, React }) {
   return function Palette({ state, onPick, onClose }) {
