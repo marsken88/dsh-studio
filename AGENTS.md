@@ -7,7 +7,7 @@
 | 路径 | 是什么 | 谁能改 |
 | --- | --- | --- |
 | `index.js` | 宿主半边：`apply(ctx)`、39 个 `studio_*` 工具、`/studio-api/*` 路由、SQLite 存储、派单引擎、门禁 | ✅ 直接改 |
-| `src/host/*.js` | 宿主层模块：`domain.js`（板列/数据形状/`sanitize*`/默认配置，纯函数）、`dispatcher.js`（派单引擎）、`executor.js`（用例执行、代码事实核对、健康检查）、`store.js`（`StudioStore`/`SecretStore`：SQLite 台账 + 快照 + 登录会话）、`integrations.js`（GitLab / 飞书 / 平台健康）、`routes/*.js`（按前缀拆出的 HTTP 处理，目前是 `exports.js`） | ✅ 直接改，新逻辑优先放这里 |
+| `src/host/*.js` | 宿主层模块：`domain.js`（板列/数据形状/`sanitize*`/默认配置，纯函数）、`dispatcher.js`（派单引擎）、`executor.js`（用例执行、代码事实核对、健康检查）、`store.js`（`StudioStore`/`SecretStore`：SQLite 台账 + 快照 + 登录会话）、`integrations.js`（GitLab / 飞书 / 平台健康）、`routes/*.js`（按前缀拆出的 HTTP 处理：`exports.js` 导出 CSV、`auth.js` 统一登录） | ✅ 直接改，新逻辑优先放这里 |
 | `client.src.js` | 浏览器半边的手写源码（通过 `window.__ModuleLoader__` 注册面板） | ✅ 直接改（前端逻辑） |
 | `web/src/**` | shadcn/Radix 组件、样式、`legacy.js` 桥 | ✅ 直接改（样式与组件） |
 | `dist/client.js` | `pnpm build` 的产物（单文件 IIFE，注意在仓库根 `dist/`，不是 `web/dist/`） | ❌ 生成物 |
@@ -63,7 +63,7 @@ bash /tmp/deploy-all.sh     # cp 两个文件到 /home/lyf/dsh-studio，restart 
    - 切页签用 `elementHandle.click()`（Radix Tabs 不认 DOM `.click()`）
    - 断言 DOM + `pageerror` 为空，并截图留档
 5. 涉及权限/门禁/发布的重改动，跑一遍既有 e2e 脚本并贴出数字
-6. `npm test`（24 条：`tests/repo.test.mjs` 管 manifest / 产物一致 / 宿主接口 / 领域层拆分与导入 / **导入只读绑定不许赋值** / 迁移 / 文档 / locale；`tests/store-boot.test.mjs` 真的起一个 `StudioStore`，把「搬完代码启动就炸」这类问题挡在部署前。想连真数据验证：把生产库三个文件（`.db`/`-wal`/`-shm`）拷到临时目录，用 `new StudioStore()` + `await store.ready` 跑一遍，`tmp/boot-real.mjs` 就是这么写的）；`npm run check` = 语法 + 契约一把过
+6. `npm test`（25 条：`tests/repo.test.mjs` 管 manifest / 产物一致 / 宿主接口 / 领域层拆分与导入 / **导入只读绑定不许赋值** / 迁移 / 文档 / locale；`tests/store-boot.test.mjs` 真的起一个 `StudioStore`，把「搬完代码启动就炸」这类问题挡在部署前。想连真数据验证：把生产库三个文件（`.db`/`-wal`/`-shm`）拷到临时目录，用 `new StudioStore()` + `await store.ready` 跑一遍，`tmp/boot-real.mjs` 就是这么写的）；`npm run check` = 语法 + 契约一把过
 7. CI 在 `.github/workflows/ci.yml`：语法 → 契约 → `web/` 里 `pnpm install --frozen-lockfile && pnpm build` → `cmp dist/client.js client.js` → `git diff --exit-code`（产物必须可复现，改了前端忘记构建会直接红）
 
 ## 5. 禁止事项

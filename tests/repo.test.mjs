@@ -111,6 +111,16 @@ test('host: export routes live in a module and are wired', () => {
   assert.ok(mod.includes('export function handleExportRoute('), 'module exposes the handler')
 })
 
+test('host: auth routes live in a module and are wired', () => {
+  const index = readFileSync('index.js', 'utf8')
+  const mod = readFileSync('src/host/routes/auth.js', 'utf8')
+  assert.ok(index.includes("from './src/host/routes/auth.js'"), 'index.js imports the auth routes module')
+  assert.ok(index.includes('configureAuthRoutes({'), 'index.js injects session helpers')
+  assert.ok(!index.includes("route === '/auth/login'"), 'the login handler moved out of index.js')
+  assert.ok(mod.includes('export async function handleAuthRoute('), 'module exposes the handler')
+  assert.ok(/return true/.test(mod), 'handled branches return true so the dispatcher stops')
+})
+
 test('host: domain layer lives in src/host and stays out of index.js', () => {
   assert.ok(existsSync(path('src/host/domain.js')), 'src/host/domain.js missing')
   const domain = read('src/host/domain.js')
@@ -120,7 +130,7 @@ test('host: domain layer lives in src/host and stays out of index.js', () => {
   assert.ok(index.includes("from './src/host/domain.js'"), 'index.js must import the domain layer')
   assert.ok(!/^function sanitizeRequirement\(/m.test(index), 'sanitizeRequirement must not be re-declared in index.js')
   const lines = index.split(/\r?\n/).length
-  assert.ok(lines < 5600, `index.js is still ${lines} lines; keep splitting by domain`)
+  assert.ok(lines < 5450, `index.js is still ${lines} lines; keep splitting by domain`)
 })
 
 test('host: index.js imports every domain symbol it uses', () => {

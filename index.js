@@ -30,6 +30,7 @@ export const inject = ['tools', 'systemPrompt']
 import { ACCESS_ROLE_LABEL, ACCESS_ROLES, ADMIN_ROUTES, ARTIFACT_KINDS, ARTIFACT_STATUS, CASE_HTTP_METHODS, CASE_PRIORITIES, CASE_RESULTS, CASE_TYPE_LABEL, CASE_TYPES, cleanId, CODE_PREFIX, CODING_FILE_CHANGES, CODING_REVIEW_STATUS, codingSummary, COLUMN_STRATEGIES, DEFAULT_ROLES, defaultColumns, defaultConfig, defaultDeployEnvs, defaultTemplates, DEPLOY_ENV_KINDS, FALLBACK_AGENT_MODEL, hashLocalPassword, INTAKE_HTML, ISOLATION_MODES, LEGACY_BLOCKED_STATUS, LEVEL_RANK, LOCAL_DEFAULT_PASSWORD, mergeCoding, mergeConfig, mergeSection, MINE_HTML, nextRequirementCode, nextTaskCode, normalizePatch, normalizeStrategy, PRIORITIES, ROLE_LABELS, canonicalAuthor, RELEASE_STATUSES, RELEASE_STATUS_LABEL, REQ_DOC_KIND_LABEL, REQ_DOC_KINDS, REQ_DOC_STATUS, REQ_REVIEW_LABEL, REQ_REVIEW_STATUS, REQ_STATUS_LABEL, REQ_STATUSES, ROLE_IDS, ROLE_LEVEL, SANDBOX_MODES, sanitizeAcceptanceItem, sanitizeAccess, sanitizeAllowHosts, sanitizeArtifact, sanitizeArtifacts, sanitizeBaseline, sanitizeBots, sanitizeBugSource, sanitizeCase, sanitizeCaseHttp, sanitizeCaseRun, sanitizeCases, sanitizeChangedFile, sanitizeChangedFiles, sanitizeChecklist, sanitizeChecklistItem, sanitizeCoding, sanitizeColumns, sanitizeCommit, sanitizeCommits, sanitizeCosts, sanitizeDeployEnvs, sanitizeEnvs, sanitizeExperts, sanitizeIterations, sanitizeLdap, sanitizeLocalAuth, sanitizeProjects, sanitizeReqDoc, sanitizeReqDocs, sanitizeRelease, sanitizeRequirement, sanitizeRequirementChange, sanitizeRequirementHistory, sanitizeRequirementPoint, sanitizeRequirementPoints, sanitizeRequirementPool, sanitizeRequirementQuestions, sanitizeRequirementReview, sanitizeRequirements, sanitizeServices, sanitizeSla, sanitizeTeams, sanitizeTemplates, sanitizeTesting, sanitizeTestRun, sanitizeTestRuns, sanitizeUsers, sanitizeWorkProjects, seedExperts, SEVERITIES, STATUS_HTML, STATUS_IDS, STATUS_SET, STATUSES, TASK_TYPES, text, verifyLocalPassword, worktreeRoot } from './src/host/domain.js'
 import { Dispatcher, RUN_LOG, claimDispatchLock, clearAgentFailure, configureDispatcher, noteAgentFailure, parseMentions, runSummary } from './src/host/dispatcher.js'
 import { buildDashboard, codingVerifyLine, commentTask, configureExecutor, ensureReqFolder, larkCliReady, invalidateLarkProbe, larkProbeCache, mutateReqDoc, pullFeishuDoc, requirementGate, requirementMatrix, requirementProgress, requirementRollup, runCommand, runSuite, runTaskCases, saveRequirement, syncArtifact, syncRequirementArtifacts, taskExitGate, updateTask, verifyCodingRecord } from './src/host/executor.js'
+import { configureAuthRoutes, handleAuthRoute } from './src/host/routes/auth.js'
 import { configureExportRoutes, handleExportRoute } from './src/host/routes/exports.js'
 import { INTEGRATION, markHealth, escalateHealth, healthReport, projectReady, gitlabReady, gitlabRequest, gitlabSync, feishuPush, feishuBroadcast, broadcastChange, configureIntegrations } from './src/host/integrations.js'
 import { SecretStore, StudioStore } from './src/host/store.js'
@@ -2360,134 +2361,7 @@ function registerRoutes(webCtx, store, ctx, getDispatcher = () => undefined) {
         sendJson(res, 200, { ok: true, state: dispatcher === undefined ? state : { ...state, agents: dispatcher.status() } })
         return
       }
-      if (method === 'POST' && route === '/auth/login') {
-        const body = await readJsonBody(req)
-        const ip = String(req.socket?.remoteAddress ?? '')
-        const config = store.snapshot().config
-        const settings = sanitizeLdap(config.ldap ?? {})
-        /* 中文输入法会把 admin 打成全角 ａｄｍｉｎ，NFKC 归一后再比对，免得
-           用户明明敲对了却被告知口令不对（典型：口令框里混进全角字母/空格）。 */
-        const username = String(body.username ?? body.user ?? '').trim().normalize('NFKC')
-        const password = String(body.password ?? '').normalize('NFKC')
-        const wideChar = /[\uFF01-\uFF5E\u3000]/.test(String(body.password ?? ''))
-        // mode: local = 只试本地账号；ldap = 只试目录；'' = 先本地后目录（老调用方兼容）
-        const mode = String(body.mode ?? '').trim().toLowerCase()
-
-        /* 先试本地超管：没配 LDAP 时它是唯一账号，配了也能在目录故障时兜底。 */
-        const local = mode === 'ldap' ? { ok: false, reason: 'skipped' } : verifyLocalPassword(config.localAuth, username, password)
-        if (local.ok === true) {
-          const localUser = sanitizeLocalAuth(config.localAuth)
-          const user = { id: localUser.username, name: '超级管理员', role: 'admin', source: 'local', mail: '', dept: '' }
-          const session = issueSession(user, ip)
-          await recordAudit(store, { by: user.name, route, level: 'read', status: 200, ok: true, summary: `本地超管登录成功：${user.id}` })
-          sendJson(res, 200, { ok: true, token: session.token, expiresAt: session.expiresAt, user, state: publicState(store) })
-          return
-        }
-
-        if (mode === 'local') {
-          const localUser = sanitizeLocalAuth(config.localAuth)
-          const hint =
-            local.reason === 'nouser'
-              ? `没有这个本地账号（本地超管是 ${localUser.username}）`
-              : local.reason === 'form'
-                ? '账号和密码都要填'
-                : wideChar
-                  ? `口令里有全角字符（中文输入法打出来的），切到英文输入法再输一次；账号 ${localUser.username}${localUser.password === null ? '，默认口令是 admin' : ''}`
-                  : `本地超管的账号或口令不对（账号 ${localUser.username}${localUser.password === null ? '，还没改过口令就是默认的 admin' : ''}）`
-          await recordAudit(store, { by: username === '' ? '匿名' : username.slice(0, 40), route, level: 'read', status: 401, ok: false, summary: `本地登录失败：${hint}` })
-          sendJson(res, 401, { ok: false, code: 'local', error: hint })
-          return
-        }
-
-        const result = await ldapAuthenticate(settings, username, password)
-        if (result.ok !== true) {
-          const hint =
-            result.code === 'disabled' && local.reason === 'badpass'
-              ? `用户名或密码不对（本地超管账号是 ${sanitizeLocalAuth(config.localAuth).username}；LDAP 登录还没启用）`
-              : result.message
-          await recordAudit(store, { by: username === '' ? '匿名' : username.slice(0, 40), route, level: 'read', status: 401, ok: false, summary: `登录失败：${hint}` })
-          sendJson(res, 401, { ok: false, code: result.code, error: hint })
-          return
-        }
-        await recordLogin(store, result.user, ip)
-        const session = issueSession(result.user, ip)
-        await recordAudit(store, { by: result.user.name, route, level: 'read', status: 200, ok: true, summary: `LDAP 登录成功：${result.user.id}` })
-        const saved = (store.snapshot().config.users ?? []).find(item => item.id === result.user.id) ?? {}
-        sendJson(res, 200, { ok: true, token: session.token, expiresAt: session.expiresAt, user: { ...result.user, ...saved }, state: publicState(store) })
-        return
-      }
-      if (method === 'POST' && route === '/auth/password') {
-        const body = await readJsonBody(req)
-        const config = store.snapshot().config
-        const local = sanitizeLocalAuth(config.localAuth)
-        const username = String(body.username ?? local.username).trim().toLowerCase().normalize('NFKC')
-        const currentPassword = String(body.currentPassword ?? '').normalize('NFKC')
-        const check = verifyLocalPassword(local, username, currentPassword)
-        if (check.ok !== true) {
-          sendJson(res, 401, { ok: false, code: check.reason, error: check.reason === 'nouser' ? '没有这个本地账号' : '当前密码不对' })
-          return
-        }
-        const next = String(body.newPassword ?? '').normalize('NFKC')
-        if (body.reset !== true && next.length < 8) {
-          sendJson(res, 400, { ok: false, error: '新密码至少 8 位' })
-          return
-        }
-        if (body.reset !== true && next === currentPassword) {
-          sendJson(res, 400, { ok: false, error: '新密码和当前密码一样' })
-          return
-        }
-        await store.mutate(state => {
-          const current = sanitizeLocalAuth(state.config.localAuth)
-          state.config.localAuth =
-            body.reset === true
-              ? { ...current, password: null, mustChange: true, updatedAt: Date.now() }
-              : { ...current, password: hashLocalPassword(next), mustChange: false, updatedAt: Date.now() }
-        })
-        await recordAudit(store, { by: operatorOf(req), route, level: 'admin', status: 200, ok: true, summary: body.reset === true ? '重置本地超管密码为默认' : '修改本地超管密码' })
-        sendJson(res, 200, { ok: true, state: publicState(store) })
-        return
-      }
-      if (method === 'GET' && route === '/auth/me') {
-        const found = sessionOf(req, store.snapshot().config)
-        if (found === null) {
-          sendJson(res, 401, { ok: false, error: '没有登录或会话已过期' })
-          return
-        }
-        sendJson(res, 200, { ok: true, user: found.user, expiresAt: found.session.expiresAt })
-        return
-      }
-      if (method === 'POST' && route === '/auth/logout') {
-        const rawToken = req.headers['x-studio-session']
-        const token = String((Array.isArray(rawToken) ? rawToken[0] : rawToken) ?? '').trim()
-        if (token !== '') {
-          SESSIONS.delete(token)
-          if (SESSION_STORE !== null) SESSION_STORE.dropSession(token)
-        }
-        sendJson(res, 200, { ok: true })
-        return
-      }
-      if (method === 'POST' && route === '/auth/ldap/test') {
-        const body = await readJsonBody(req)
-        const config = store.snapshot().config
-        const settings = sanitizeLdap({ ...(config.ldap ?? {}), ...(body.ldap !== null && typeof body.ldap === 'object' ? body.ldap : {}) })
-        if (String(body.bindPassword ?? '') !== '') settings.bindPassword = String(body.bindPassword)
-        const steps = []
-        const started = Date.now()
-        const lookup = await ldapLookup(settings, String(body.username ?? '').trim() || '*')
-        steps.push({ name: '服务账号绑定并查询', ok: lookup.ok === true, message: lookup.ok === true ? `查到 ${lookup.entries.length} 条` : lookup.message, ms: Date.now() - started })
-        if (lookup.ok === true && lookup.entries.length > 0) {
-          const entry = lookup.entries[0]
-          steps.push({
-            name: '第一个命中的账号',
-            ok: true,
-            message: `${ldapAttr(entry, 'sAMAccountName') || ldapAttr(entry, 'uid') || '(无 sAMAccountName)'} · ${ldapAttr(entry, settings.nameAttr) || ldapAttr(entry, 'cn') || '(无显示名)'} · ${entry.dn}`,
-            ms: 0,
-          })
-        }
-        const ok = steps.every(step => step.ok === true)
-        sendJson(res, ok ? 200 : 400, { ok, steps, message: ok ? '连接正常，可以保存' : steps.find(step => step.ok !== true)?.message ?? '测试没通过' })
-        return
-      }
+      if (await handleAuthRoute({ method, route, req, res, store, url })) return
       if (method === 'GET' && route === '/agents/probe') {
         const dispatcher = getDispatcher()
         sendJson(res, 200, { ok: true, probe: dispatcher === undefined ? {} : await dispatcher.probePrompt() })
@@ -5498,6 +5372,7 @@ export function apply(ctx) {
     configureDispatcher({ feishuBroadcast, INTEGRATION, bugSla, removeWorktree, ensureWorktree, serviceOf, workProjectOf, serviceConflicts })
     configureIntegrations({ newTaskId, serviceOf, getStore: () => activeStore })
     configureExportRoutes({ sendCsv, requirementProgress, sessions: SESSIONS })
+    configureAuthRoutes({ sendJson, readJsonBody, recordAudit, recordLogin, issueSession, sessionOf, operatorOf, ldapAuthenticate, ldapLookup, ldapAttr, sessions: SESSIONS, dropSession: token => SESSION_STORE?.dropSession?.(token), hasSessionStore: () => SESSION_STORE !== null, publicState })
     dispatcher = new Dispatcher(dispatcherCtx, store)
     activeDispatcher = dispatcher
     dispatcher.start()
