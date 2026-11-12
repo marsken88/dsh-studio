@@ -97,6 +97,18 @@ test('host: studio tools are registered once each', () => {
   assert.equal(new Set(names).size, names.length, 'duplicate studio tool name')
 })
 
+test('client: heavy helpers live in web/src/studio and client.src.js ratchets down', () => {
+  for (const file of ['web/src/studio/markdown.js', 'web/src/studio/format.js']) {
+    assert.ok(existsSync(path(file)), file + ' missing')
+  }
+  const lines = read('client.src.js').split(/\r?\n/).length
+  assert.ok(lines < 8100, 'client.src.js is ' + lines + ' lines; keep lifting helpers into web/src/studio')
+  const maker = read('web/scripts/make-legacy.mjs')
+  for (const spec of ['./studio/markdown.js', './studio/format.js']) {
+    assert.ok(maker.includes(spec), 'make-legacy must keep importing ' + spec)
+  }
+  assert.ok(read('web/src/legacy.js').includes("from './studio/markdown.js'"), 'generated legacy module lost its imports')
+})
 test('ui: build-time guard rejects hsl(var( and unscoped portals', () => {
   const out = execFileSync(process.execPath, ['web/scripts/guard.mjs', '--pre'], { cwd: ROOT, encoding: 'utf8' })
   assert.match(out, /ui guard \(pre\)/)

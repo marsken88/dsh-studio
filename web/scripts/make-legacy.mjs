@@ -66,5 +66,12 @@ const banner = `/**
 
 `
 mkdirSync(dirname(target), { recursive: true })
-writeFileSync(target, banner + text)
+
+// Modules the panel already imports. Keep this list in sync with the blocks that
+// were lifted out of client.src.js (they are plain ES modules under web/src/studio).
+const imports = [
+  "import { createMarkdown } from './studio/markdown.js'",
+  "import { fmtTime, fmtDate } from './studio/format.js'",
+].join('\n') + '\n\n'
+writeFileSync(target, banner + imports + text)
 console.log(`make-legacy: wrote ${target} (${text.length} chars)`)
