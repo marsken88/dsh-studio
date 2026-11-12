@@ -2371,7 +2371,15 @@ function installKeyboardActivation() {
               onPick: item => {
                 if (item.kind === 'task') { setOpenId(item.id); return }
                 if (item.kind === 'requirement') { setTab('requirements'); setFocusReq({ id: item.id, at: Date.now() }); return }
-                if (item.kind === 'release') { setTab('releases') }
+                if (item.kind === 'release') { setTab('releases'); return }
+                if (item.kind !== 'action') return
+                if (item.id === 'new-requirement') { setTab('requirements'); setNewReq(n => n + 1); return }
+                if (item.id === 'new-task') { setTab('board'); setCreating(true); return }
+                if (item.id.startsWith('tab:')) { setTab(item.id.slice(4)); return }
+                if (item.id === 'export:tasks') { window.open('/studio-api/export/tasks.csv', '_blank'); return }
+                if (item.id === 'export:requirements') { window.open('/studio-api/export/requirements.csv', '_blank'); return }
+                if (item.id.startsWith('theme:')) { setTheme(setThemeName(item.id.slice(6))); return }
+                if (item.id === 'refresh') { void reload() }
               },
             })
           : null,

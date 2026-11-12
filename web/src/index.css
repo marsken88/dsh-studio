@@ -1382,6 +1382,8 @@ html body [data-dsh-studio][data-dsh-studio-portal] {
 [data-dsh-studio] .ds-palette-item { display: flex; align-items: center; gap: 8px; padding: 8px 10px; border-radius: 8px; cursor: pointer; font-size: 13px }
 [data-dsh-studio] .ds-palette-item[data-active="1"] { background: color-mix(in srgb, var(--ds-accent, #18181b) 10%, transparent) }
 [data-dsh-studio] .ds-palette-kind { flex: 0 0 auto; font-size: 11px; padding: 1px 6px; border-radius: 999px; background: var(--ds-surface-2, #f4f4f5); color: var(--ds-muted, #71717a) }
+[data-dsh-studio] .ds-palette-kind[data-kind="action"] { background: color-mix(in srgb, #7c3aed 16%, transparent); color: #7c3aed }
+[data-theme="dark"] .ds-palette-kind[data-kind="action"] { background: color-mix(in srgb, #a78bfa 22%, transparent); color: #c4b5fd }
 [data-dsh-studio] .ds-palette-label { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap }
 [data-dsh-studio] .ds-palette-hint { flex: 0 0 auto; max-width: 40%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ds-muted, #71717a); font-size: 12px }
 [data-dsh-studio][data-theme="dark"] .ds-palette-veil { background: rgba(0, 0, 0, .6) }

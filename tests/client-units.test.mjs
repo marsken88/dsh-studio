@@ -132,3 +132,22 @@ test('palette: filterItems matches words, ranks prefixes first and stops when em
   const ranked = filterItems([...items, { key: 'd', label: '退款退款', search: '退款退款' }], '退款')
   assert.equal(ranked.length, 3)
 })
+
+test('palette: actions are searchable next to records', async () => {
+  const { actionItems, paletteItems } = await import('../web/src/studio/palette.js')
+  const actions = actionItems()
+  assert.equal(actions.length, 13)
+  assert.equal(new Set(actions.map((item) => item.id)).size, 13, 'action ids must be unique')
+  for (const item of actions) {
+    assert.equal(item.kind, 'action')
+    assert.ok(item.label.length > 0 && item.search.length > 0)
+  }
+  const state = { tasks: [{ id: 't1', code: 'DEV-001', title: '退款对账', status: 'dev' }], requirements: [], releases: [], statuses: [{ id: 'dev', label: '开发中' }] }
+  const all = paletteItems(state)
+  assert.equal(all.length, 14, 'actions + one task')
+  assert.equal(filterItems(all, '新建需求')[0].id, 'new-requirement')
+  assert.equal(filterItems(all, '导出')[0].kind, 'action')
+  assert.equal(filterItems(all, '主题').length, 3)
+  assert.equal(filterItems(all, 'DEV-001')[0].kind, 'task')
+  assert.deepEqual(filterItems(all, '不存在的词'), [])
+})
