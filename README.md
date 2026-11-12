@@ -938,7 +938,7 @@ pnpm build            # make-legacy → vite build → sync-client，一次跑�
 | 文件 | 是什么 | 谁读它 |
 | --- | --- | --- |
 | `client.src.js` | 手写的单文件源码（约 520 KB，前端逻辑全量实现） | 构建第一步 `make-legacy.mjs` 读它生成 `web/src/legacy.js` |
-| `web/dist/client.js` | Vite 产物：单文件 IIFE，React 与 CSS 都打进（约 712 KB） | 部署时上传的源文件 |
+| `dist/client.js` | Vite 产物：单文件 IIFE，React 与 CSS 都打进（约 696 KB / gzip 207 KB） | 部署时上传它就是根目录 `client.js` 的来源 |
 | `client.js`（包根） | 构建产物的副本，由 `sync-client.mjs` 写出 | DSH 按 `package.json` 的 `./client` 导出加载它 |
 
 所以：**只改前端逻辑 → 改 `client.src.js`；改样式/组件 → 改 `web/src/**`**；两边都要在 `web/` 里跑一次 `pnpm build`，根目录 `client.js` 会自动同步，然后提交。

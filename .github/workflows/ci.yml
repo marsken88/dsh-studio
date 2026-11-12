@@ -1,0 +1,36 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  repo:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - name: Syntax
+        run: node --check index.js && node --check client.src.js
+
+      - name: Repository contract
+        run: npm test
+
+      - name: Build bundle
+        working-directory: web
+        run: pnpm install --frozen-lockfile && pnpm build
+
+      - name: Bundle is reproducible
+        run: |
+          node -e "const c=require('crypto'),f=require('fs');for(const p of ['dist/client.js','client.js']){console.log(p,f.statSync(p).size,c.createHash('sha256').update(f.readFileSync(p)).digest('hex'))}"
+          cmp dist/client.js client.js
+          git diff --exit-code -- dist/client.js client.js

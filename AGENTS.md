@@ -9,7 +9,7 @@
 | `index.js` | 宿主半边：`apply(ctx)`、39 个 `studio_*` 工具、`/studio-api/*` 路由、SQLite 存储、派单引擎、门禁 | ✅ 直接改 |
 | `client.src.js` | 浏览器半边的手写源码（通过 `window.__ModuleLoader__` 注册面板） | ✅ 直接改（前端逻辑） |
 | `web/src/**` | shadcn/Radix 组件、样式、`legacy.js` 桥 | ✅ 直接改（样式与组件） |
-| `web/dist/client.js` | `pnpm build` 的产物（单文件 IIFE） | ❌ 生成物 |
+| `dist/client.js` | `pnpm build` 的产物（单文件 IIFE，注意在仓库根 `dist/`，不是 `web/dist/`） | ❌ 生成物 |
 | `client.js`（包根） | 上面产物自动同步过来的副本，dsh 真正加载的那个 | ❌ 生成物 |
 | `cordis.patch.yml` | bundle patch，把本包挂进 profile | ✅ |
 | `locale/*.json` | 面板标题/描述等元数据 | ✅ |
@@ -22,13 +22,13 @@
 client.src.js              手写源码
       │  web/scripts/make-legacy.mjs  →  web/src/legacy.js
       ▼
-web/src/**  ── vite build ──▶  web/dist/client.js  ── sync-client.mjs ──▶  根 client.js
+web/src/**  ── vite build ──▶  dist/client.js  ── sync-client.mjs ──▶  根 client.js
 ```
 
 - 改**前端逻辑** → `client.src.js`
 - 改**样式/组件/主题** → `web/src/**`
 - 改完一律在 `web/` 里构建：`pnpm build`（= `make-legacy` → `vite build` → `sync-client`）
-- 构建后自检：`cmp -s web/dist/client.js client.js && echo same`，大小应约 700 KB（gzip ≈ 207 KB）
+- 构建后自检：`cmp -s dist/client.js client.js && echo same`，大小应约 700 KB（gzip ≈ 207 KB）
 
 > 曾经漏跑 `make-legacy`，`client.src.js` 的改动根本没进 bundle，白改好几轮。构建脚本已经把它串进 `build`，不要手工跳过。
 
@@ -60,10 +60,12 @@ bash /tmp/deploy-all.sh     # cp 两个文件到 /home/lyf/dsh-studio，restart 
    - 切页签用 `elementHandle.click()`（Radix Tabs 不认 DOM `.click()`）
    - 断言 DOM + `pageerror` 为空，并截图留档
 5. 涉及权限/门禁/发布的重改动，跑一遍既有 e2e 脚本并贴出数字
+6. `npm test`（`tests/repo.test.mjs`，13 条仓库契约：manifest / 产物一致 / 宿主接口 / 迁移 / 文档 / locale）；`npm run check` = 语法 + 契约一把过
+7. CI 在 `.github/workflows/ci.yml`：语法 → 契约 → `web/` 里 `pnpm install --frozen-lockfile && pnpm build` → `cmp dist/client.js client.js` → `git diff --exit-code`（产物必须可复现，改了前端忘记构建会直接红）
 
 ## 5. 禁止事项
 
-- ❌ 手改 `web/dist/client.js` 或根 `client.js`（会被下次构建覆盖）
+- ❌ 手改 `dist/client.js` 或根 `client.js`（会被下次构建覆盖）
 - ❌ 直接在目标机上改文件而不回写仓库（下次部署即丢）
 - ❌ 用 `powershell -Command "node -e \"...\""` 这类多层引号跑逻辑；一律落成 `tmp/*.js|mjs|py`
 - ❌ 用 `split("\r\n")` 编辑 README（本仓库是混合行尾）：用 `split(/\r?\n/)`，写回统一 `\r\n`
@@ -110,7 +112,7 @@ git remote -v          # origin = ssh://git@ssh.github.com:443/marsken88/dsh-stu
 GIT_SSH_COMMAND="ssh -p 443" git push
 ```
 - 一个提交只做一件事，标题一句话说清（英文或中文均可，与既有历史保持同风格）。
-- 提交前确保根 `client.js` 与 `web/dist/client.js` 一致（clone 下来即可安装靠的就是这一点）。
+- 提交前确保根 `client.js` 与 `dist/client.js` 一致（clone 下来即可安装靠的就是这一点）。
 - 版本号在 `package.json`；发布标签 `vX.Y.Z`。
 
 ## 11. 常见故障速查
