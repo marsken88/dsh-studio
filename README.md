@@ -1,5 +1,7 @@
 # dsh-studio
 
+[![ci](https://github.com/marsken88/dsh-studio/actions/workflows/ci.yml/badge.svg)](https://github.com/marsken88/dsh-studio/actions/workflows/ci.yml)
+
 给一家公司用的「需求&任务工作空间」：一个常驻的 DSH 插件，把**看板 + 角色 agent + 内部市场**装进 DSH Web 的同一个页面里。
 自建 GitLab 管代码、飞书管交流，agent 负责产品 / 架构 / 研发 / 测试四个角色的具体活儿。
 
