@@ -36,6 +36,8 @@ import { configureTaskRoutes, handleTaskRoute } from './src/host/routes/tasks.js
 import { configureRequirementRoutes, handleRequirementRoute } from './src/host/routes/requirements.js'
 import { configureReleasesRoutes, handleReleasesRoute } from './src/host/routes/releases.js'
 import { configureInsightsRoutes, handleInsightsRoute } from './src/host/routes/insights.js'
+import { configureAdminRoutes, handleAdminRoute } from './src/host/routes/admin.js'
+import { configureSkillsRoutes, handleSkillsRoute } from './src/host/routes/skills.js'
 import { INTEGRATION, markHealth, escalateHealth, healthReport, projectReady, gitlabReady, gitlabRequest, gitlabSync, feishuPush, feishuBroadcast, broadcastChange, configureIntegrations } from './src/host/integrations.js'
 import { SecretStore, StudioStore } from './src/host/store.js'
 
@@ -2375,144 +2377,8 @@ function registerRoutes(webCtx, store, ctx, getDispatcher = () => undefined) {
         sendJson(res, 200, { ok: true, models: await listModels(ctx) })
         return
       }
-      if (route.startsWith('/skills')) {
-        if (activeSkills === undefined) throw new Error('技能库尚未就绪')
-        if (method === 'GET' && route === '/skills') {
-          sendJson(res, 200, { ok: true, root: skillsRoot(), skills: activeSkills.list(), onDisk: await activeSkills.visibleRoots() })
-          return
-        }
-        if (method === 'POST' && route === '/skills/save') {
-          const body = await readJsonBody(req)
-          const { skill, file, warning } = await activeSkills.save(body.skill ?? body)
-          sendJson(res, 200, { ok: true, skill, file, warning, skills: activeSkills.list() })
-          return
-        }
-        if (method === 'POST' && route === '/skills/delete') {
-          const body = await readJsonBody(req)
-          await activeSkills.remove(String(body.name ?? ''))
-          sendJson(res, 200, { ok: true, skills: activeSkills.list() })
-          return
-        }
-        if (method === 'POST' && route === '/skills/sync') {
-          const { written } = await activeSkills.syncAll()
-          sendJson(res, 200, { ok: true, written, skills: activeSkills.list() })
-          return
-        }
-        if (method === 'POST' && route === '/skills/upload') {
-          const body = await readJsonBody(req)
-          const fileName = String(body.fileName ?? body.name ?? '').trim()
-          const encoded = String(body.dataBase64 ?? '')
-          const plain = typeof body.text === 'string' ? body.text : ''
-          let text = plain
-          let sourceName = fileName
-          if (encoded !== '') {
-            const buffer = Buffer.from(encoded, 'base64')
-            if (buffer.length === 0) throw new Error('上传的文件是空的')
-            if (buffer.length > 1_400_000) throw new Error('文件太大：技能包请控制在 1.4MB 以内（正文本身上限 6 万字）')
-            if (buffer.subarray(0, 2).toString('latin1') === 'PK') {
-              const unzipped = await skillFromZip(buffer)
-              if (!unzipped.ok) throw new Error(unzipped.error)
-              text = unzipped.text
-              sourceName = unzipped.fileName
-            } else {
-              text = buffer.toString('utf8')
-            }
-          }
-          if (String(text).trim() === '') throw new Error('没读到内容：请上传 SKILL.md，或包含 SKILL.md 的 .zip')
-          const draft = skillFromMarkdown(sourceName, text)
-          if (!isSkillName(draft.name)) {
-            throw new Error('从文件里推不出合法的技能名（kebab-case）：在 frontmatter 里加一行 name: my-skill 再传')
-          }
-          const existing = activeSkills.get(draft.name)
-          if (existing !== undefined && body.overwrite !== true) {
-            throw new Error(`技能「${draft.name}」已经在库里了：换个文件名，或勾上「覆盖同名技能」再传。`)
-          }
-          const { skill, file, warning } = await activeSkills.save(draft)
-          sendJson(res, 200, { ok: true, skill, file, warning, overwritten: existing !== undefined, skills: activeSkills.list() })
-          return
-        }
-      }
-      if (method === 'POST' && route === '/config') {
-        await applyConfig(store, await readJsonBody(req))
-        sendJson(res, 200, { ok: true, state: publicState(store) })
-        return
-      }
-      if (method === 'POST' && route === '/access/save') {
-        const body = await readJsonBody(req)
-        const member = body.member !== null && typeof body.member === 'object' ? body.member : null
-        await store.mutate(state => {
-          const access = state.config.access ?? { enabled: false, agents: 'inherit', members: [] }
-          const wasEnabled = access.enabled === true
-          if (typeof body.enabled === 'boolean') access.enabled = body.enabled
-          if (body.agents === 'inherit' || body.agents === 'bypass') access.agents = body.agents
-          if (member !== null) {
-            const name = String(member.name ?? '').trim()
-            if (name !== '') {
-              const key = name.toLowerCase()
-              const rest = access.members.filter(item => item.name.toLowerCase() !== key)
-              access.members = sanitizeAccess({ members: [...rest, member] }).members
-            }
-          }
-          // 刚打开权限时，把现有专家按「成员」自动登记：否则所有 AI 会在下一张卡上被自己人拦死。
-          if (wasEnabled !== true && access.enabled === true) {
-            const known = new Set(access.members.map(item => item.name.toLowerCase()))
-            for (const expert of state.config.experts ?? []) {
-              if (expert.enabled === false) continue
-              const name = String(expert.name ?? '').trim()
-              if (name === '' || known.has(name.toLowerCase())) continue
-              known.add(name.toLowerCase())
-              access.members.push({ name, role: 'member' })
-            }
-          }
-          state.config.access = access
-        })
-        sendJson(res, 200, { ok: true, access: store.snapshot().config.access, state: publicState(store) })
-        return
-      }
-      if (method === 'POST' && route === '/access/delete') {
-        const body = await readJsonBody(req)
-        const name = String(body.name ?? '').trim().toLowerCase()
-        await store.mutate(state => {
-          state.config.access.members = state.config.access.members.filter(item => item.name.toLowerCase() !== name)
-        })
-        sendJson(res, 200, { ok: true, access: store.snapshot().config.access, state: publicState(store) })
-        return
-      }
-      if (method === 'POST' && route === '/audit/clear') {
-        await store.mutate(state => { state.audit = [] })
-        sendJson(res, 200, { ok: true, state: publicState(store) })
-        return
-      }
-      if (method === 'POST' && route === '/access/explain') {
-        const body = await readJsonBody(req)
-        const config = store.snapshot().config
-        const sessionId = String(body.sessionId ?? '')
-        const tool = String(body.tool ?? '')
-        const resolved = operatorFromSessionId(sessionId, config)
-        const who = operatorOf(req)
-        const operator = resolved ?? { id: who, name: who }
-        const verdict = checkToolAccess(config, operator, tool)
-        sendJson(res, 200, {
-          ok: true,
-          operator,
-          tool,
-          level: verdict.level,
-          allowed: verdict.denial === null,
-          reason: verdict.denial ?? '',
-          mode: config?.access?.enabled === true ? (config.access.agents ?? 'inherit') : 'off',
-        })
-        return
-      }
-      if (method === 'GET' && route === '/snapshots') {
-        sendJson(res, 200, { ok: true, storage: store.describe(), snapshots: store.snapshots() })
-        return
-      }
-      if (method === 'POST' && route === '/snapshot/restore') {
-        const body = await readJsonBody(req)
-        await store.restoreSnapshot(String(body.id ?? ''))
-        sendJson(res, 200, { ok: true, state: publicState(store) })
-        return
-      }
+      if (await handleSkillsRoute({ method, route, req, res, store, url })) return
+      if (await handleAdminRoute({ method, route, req, res, store, url })) return
       if (await handleTaskRoute({ method, route, req, res, store, url })) return
       if (handleExportRoute({ method, route, url, res, store, sendJson })) return
       if (method === 'POST' && route === '/task/coding') {
@@ -4258,6 +4124,8 @@ export function apply(ctx) {
     configureDispatcher({ feishuBroadcast, INTEGRATION, bugSla, removeWorktree, ensureWorktree, serviceOf, workProjectOf, serviceConflicts })
     configureIntegrations({ newTaskId, serviceOf, getStore: () => activeStore })
     configureExportRoutes({ sendCsv, requirementProgress, sessions: SESSIONS })
+    configureAdminRoutes({ applyConfig, checkToolAccess, operatorFromSessionId, operatorOf, publicState, readJsonBody, sendJson })
+    configureSkillsRoutes({ isSkillName, readJsonBody, sendJson, skillFromMarkdown, skillFromZip, skillsRoot, getSkills: () => activeSkills })
     configureInsightsRoutes({ getDispatcher: () => activeDispatcher, sendJson, buildMetrics, buildAnalytics, workloadReport, burndownReport })
     configureReleasesRoutes({ sendJson, readJsonBody, publicState, releaseGate, releaseNotes, releaseRequirements, releaseRuleViolations, releaseDeploys })
     configureRequirementRoutes({ sendJson, readJsonBody, createTask, publicState })
