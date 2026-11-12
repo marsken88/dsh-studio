@@ -98,13 +98,13 @@ test('host: studio tools are registered once each', () => {
 })
 
 test('client: heavy helpers live in web/src/studio and client.src.js ratchets down', () => {
-  for (const file of ['web/src/studio/markdown.js', 'web/src/studio/format.js', 'web/src/studio/labels.js', 'web/src/studio/roster.js', 'web/src/studio/fields.js', 'web/src/studio/shell.js', 'web/src/studio/card.js']) {
+  for (const file of ['web/src/studio/markdown.js', 'web/src/studio/format.js', 'web/src/studio/labels.js', 'web/src/studio/roster.js', 'web/src/studio/fields.js', 'web/src/studio/shell.js', 'web/src/studio/card.js', 'web/src/studio/board.js']) {
     assert.ok(existsSync(path(file)), file + ' missing')
   }
   const lines = read('client.src.js').split(/\r?\n/).length
   assert.ok(lines < 7800, 'client.src.js is ' + lines + ' lines; keep lifting helpers into web/src/studio')
   const maker = read('web/scripts/make-legacy.mjs')
-  for (const spec of ['./studio/markdown.js', './studio/format.js', './studio/labels.js', './studio/roster.js', './studio/fields.js', './studio/shell.js', './studio/card.js']) {
+  for (const spec of ['./studio/markdown.js', './studio/format.js', './studio/labels.js', './studio/roster.js', './studio/fields.js', './studio/shell.js', './studio/card.js', './studio/board.js']) {
     assert.ok(maker.includes(spec), 'make-legacy must keep importing ' + spec)
   }
   const legacy = read('web/src/legacy.js')
@@ -130,6 +130,7 @@ test('client: modules under web/src/studio do not call helpers left behind in cl
       ...[...code.matchAll(/const ([A-Za-z_$][\w$]*) =/g)].map((m) => m[1]),
       ...[...code.matchAll(/import \{([^}]*)\}/g)].flatMap((m) => m[1].split(',').map((part) => part.trim().split(/\s+as\s+/).pop())),
       ...[...code.matchAll(/export function create\w+\(\{([^}]*)\}\)/g)].flatMap((m) => m[1].split(',').map((part) => part.trim())),
+      ...[...code.matchAll(/export function create\w+\(([^){]*)\)/g)].flatMap((m) => m[1].split(',').map((part) => part.trim()).filter((part) => part !== '')),
       'createFields', 'createSideDrawer', 'createMarkdown',
     ])
     for (const match of code.matchAll(/(?<![\w$.#])([A-Za-z_$][\w$]*)\s*\(/g)) {
@@ -155,6 +156,53 @@ test('client: every studio export used by client.src.js is imported back by make
     }
   }
   assert.deepEqual(missing, [], 'client.src.js calls a studio export that is never imported into the generated module')
+})
+
+const stripCode = (code) => code
+  .replace(/\/\*[\s\S]*?\*\//g, ' ')
+  .replace(/\/\/[^\n]*/g, ' ')
+  .replace(/\u0060(?:\\[\s\S]|[^\u0060\\])*\u0060/g, ' ')
+  .replace(/'(?:\\[\s\S]|[^'\\])*'/g, ' ')
+  .replace(/"(?:\\[\s\S]|[^"\\])*"/g, ' ')
+
+test('client: studio modules only use names they declare, import or receive', () => {
+  const client = stripCode(read('client.src.js'))
+  const clientNames = new Set([
+    ...[...client.matchAll(/^\s*(?:async )?function ([A-Za-z_$][\w$]*)\(/gm)].map((m) => m[1]),
+    ...[...client.matchAll(/^\s*(?:const|let) ([A-Za-z_$][\w$]*) =/gm)].map((m) => m[1]),
+  ])
+  const modules = readdirSync(path('web/src/studio')).filter((name) => name.endsWith('.js'))
+  const exportOwner = new Map()
+  for (const name of modules) {
+    const code = stripCode(read('web/src/studio/' + name))
+    for (const match of code.matchAll(/export (?:async )?(?:function|const) ([A-Za-z_$][\w$]*)/g)) {
+      exportOwner.set(match[1], name)
+    }
+  }
+  const provided = new Set([
+    ...[...client.matchAll(/const \{([^}]*)\} = create\w+\(/g)].flatMap((m) =>
+      m[1].split(',').map((part) => part.trim().split(':').pop().trim()).filter((part) => part !== ''),
+    ),
+  ])
+  const known = new Set([...clientNames, ...exportOwner.keys(), ...provided])
+  const offenders = new Set()
+  for (const name of modules) {
+    const code = stripCode(read('web/src/studio/' + name))
+    const own = new Set([
+      ...[...code.matchAll(/(?:function|const|let|var) ([A-Za-z_$][\w$]*)/g)].map((m) => m[1]),
+      ...[...code.matchAll(/import \{([^}]*)\}/g)].flatMap((m) => m[1].split(',').map((part) => part.trim().split(/\s+as\s+/).pop())),
+      ...[...code.matchAll(/export function create\w+\(\{([^}]*)\}\)/g)].flatMap((m) => m[1].split(',').map((part) => part.trim())),
+      ...[...code.matchAll(/export function create\w+\(([^){]*)\)/g)].flatMap((m) => m[1].split(',').map((part) => part.trim()).filter((part) => part !== '')),
+    ])
+    const check = (used) => {
+      if (!known.has(used) || own.has(used)) return
+      if (exportOwner.get(used) === name) return
+      offenders.add(name + ' uses ' + used + ' (declared in ' + (exportOwner.get(used) ?? 'client.src.js') + ')')
+    }
+    for (const match of code.matchAll(/(?<![\w$.#])([A-Za-z_$][\w$]*)\s*\(/g)) check(match[1])
+    for (const match of code.matchAll(/h\(\s*([A-Z][\w$]*)/g)) check(match[1])
+  }
+  assert.deepEqual([...offenders], [], 'studio module uses a name it never declared, imported or received')
 })
 
 test('ui: build-time guard rejects hsl(var( and unscoped portals', () => {
