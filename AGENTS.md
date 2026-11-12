@@ -46,6 +46,8 @@ node C:/Users/hp/.dsh/dsh-runtimes/dsh-primary-runtime/dependencies/pnpm/bin/pnp
 bash /tmp/deploy-all.sh     # cp 两个文件到 /home/lyf/dsh-studio，restart dsh-web，打印 is-active
 ```
 
+> `deploy-all.sh` **只拷 `index.js` 与 `client.js`**。改了 `package.json`（包头、`engines`、`dsh.*`、`files`）、`cordis.patch.yml`、`locale/*.json` 时必须单独上传到 `/home/lyf/dsh-studio/` 再重启，否则改了个寂寞。改动前先 `cp package.json /tmp/package.json.bak` 留退路。
+
 验收三件事：`systemctl is-active dsh-web` = `active`；浏览器打开 `http://<host>/` 侧栏出现「需求&任务工作空间」；`GET /studio-api/state` 返回 200 且 `revision` 递增。
 
 ## 4. 每次改动前后的硬性检查

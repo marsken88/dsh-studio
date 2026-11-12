@@ -20,7 +20,9 @@
     "icon.svg",
     "README.md",
     "dist/client.js",
-    "client.src.js"
+    "client.src.js",
+    "AGENTS.md",
+    "docs/*.md"
   ],
   "dsh": {
     "bundle": {
@@ -32,10 +34,16 @@
       "inject": [
         "@deepseek-ai/dsh-client-ui-conversation"
       ]
+    },
+    "compatibility": {
+      "dshReleases": {
+        "0.2.2-rc.1+": "compatible"
+      }
     }
   },
   "engines": {
-    "node": ">=22"
+    "node": ">=22",
+    "dsh": ">=0.2.2-rc.1"
   },
   "license": "Apache-2.0"
 }
