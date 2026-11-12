@@ -92,3 +92,8 @@
 - **无障碍**：键盘可达性补丁已上线（`data-kb`/Enter/Space）；Windows 高对比度 `forced-colors` 只写了样式，未实机验证。
 - **多实例**：派单互斥靠 SQLite `locks` 表租约（TTL 12s），只验证过单实例 + 手工模拟双实例，未做真实多进程压测。
 - **性能**：`/studio-api/state` 单次约 665 KB（20 张卡），已开 gzip、15s 轮询 + 数据指纹判重；卡片数上千时需要分页/按需拉取（尚未实现）。
+
+## 模型与通道
+
+- 宿主默认模型在部分 provider 上没有可用通道时，会话第一轮就会 `turn/end reason.kind=error`，日志里是 `No available channel for model … 503`。插件的兜底常量是 `FALLBACK_AGENT_MODEL = 'deepseek-v4.1-flash'`（`src/host/dispatcher.js`），不跟随宿主默认。
+- 模型在 **会话创建时固化**：改专家模型不影响已有会话，要重启服务或删 `~/.dsh/sessions/<ws>/studio-*` 才会重建。

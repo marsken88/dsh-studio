@@ -190,3 +190,21 @@ test('locales: every locale file is valid JSON with a title', () => {
     assert.ok(String(dict?.meta?.title ?? '').length > 0, `${name} has no meta.title`)
   }
 })
+
+test('docs: AGENTS.md lists every host module', () => {
+  const agents = readFileSync('AGENTS.md', 'utf8')
+  for (const file of readdirSync('src/host').filter(f => f.endsWith('.js'))) {
+    assert.ok(agents.includes(file), `AGENTS.md §1 must list src/host/${file}`)
+  }
+})
+
+test('docs: compatibility.md covers the host entry points we depend on', () => {
+  const doc = readFileSync('docs/compatibility.md', 'utf8')
+  for (const needle of ['agents.create', 'presets.mount', 'followup', 'webServer.register', 'listModels', 'FALLBACK_AGENT_MODEL']) {
+    assert.ok(doc.includes(needle), `docs/compatibility.md must document ${needle}`)
+  }
+  const index = readFileSync('index.js', 'utf8')
+  const dispatcher = readFileSync('src/host/dispatcher.js', 'utf8')
+  assert.ok(dispatcher.includes('agents.create'), 'src/host/dispatcher.js actually calls agents.create')
+  assert.ok(index.includes('webServer'), 'index.js actually registers web routes')
+})
