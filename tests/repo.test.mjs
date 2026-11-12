@@ -102,7 +102,7 @@ test('client: heavy helpers live in web/src/studio and client.src.js ratchets do
     assert.ok(existsSync(path(file)), file + ' missing')
   }
   const lines = read('client.src.js').split(/\r?\n/).length
-  assert.ok(lines < 5200, 'client.src.js is ' + lines + ' lines; keep lifting helpers into web/src/studio')
+  assert.ok(lines < 4400, 'client.src.js is ' + lines + ' lines; keep lifting helpers into web/src/studio')
   const maker = read('web/scripts/make-legacy.mjs')
   for (const spec of ['./studio/markdown.js', './studio/format.js', './studio/labels.js', './studio/roster.js', './studio/fields.js', './studio/shell.js', './studio/card.js', './studio/board.js']) {
     assert.ok(maker.includes(spec), 'make-legacy must keep importing ' + spec)

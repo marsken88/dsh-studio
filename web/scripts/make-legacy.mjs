@@ -92,6 +92,8 @@ const imports = [
   "import { createEditor } from './studio/editor.js'",
   "import { ExpertsPanel, TeamsPanel, TestingPanel, EscalatePanel, EnvironmentsPanel } from './studio/panels/people.js'",
   "import { LdapPanel, CostsPanel, BusinessPanel } from './studio/panels/platform.js'",
+  "import { AccessPanel, ColumnsPanel, StoragePanel, HealthPanel } from './studio/panels/governance.js'",
+  "import { ReposPanel, BotsPanel, SkillsPanel } from './studio/panels/integrations.js'",
 ].join('\n') + '\n\n'
 writeFileSync(target, banner + imports + text)
 console.log(`make-legacy: wrote ${target} (${text.length} chars)`)
