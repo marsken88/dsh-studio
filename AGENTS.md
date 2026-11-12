@@ -7,7 +7,7 @@
 | 路径 | 是什么 | 谁能改 |
 | --- | --- | --- |
 | `index.js` | 宿主半边：`apply(ctx)`、39 个 `studio_*` 工具、`/studio-api/*` 路由、SQLite 存储、派单引擎、门禁 | ✅ 直接改 |
-| `src/host/*.js` | 宿主领域层：板列与状态、卡片/需求/版本的数据形状与 `sanitize*`、默认配置、编号生成（纯函数，无 I/O、无宿主服务） | ✅ 直接改，新逻辑优先放这里 |
+| `src/host/*.js` | 宿主层模块：`domain.js`（板列/数据形状/`sanitize*`/默认配置，纯函数）、`dispatcher.js`（派单引擎）、`executor.js`（用例执行、代码事实核对、健康检查） | ✅ 直接改，新逻辑优先放这里 |
 | `client.src.js` | 浏览器半边的手写源码（通过 `window.__ModuleLoader__` 注册面板） | ✅ 直接改（前端逻辑） |
 | `web/src/**` | shadcn/Radix 组件、样式、`legacy.js` 桥 | ✅ 直接改（样式与组件） |
 | `dist/client.js` | `pnpm build` 的产物（单文件 IIFE，注意在仓库根 `dist/`，不是 `web/dist/`） | ❌ 生成物 |
@@ -49,7 +49,7 @@ bash /tmp/deploy-all.sh     # cp 两个文件到 /home/lyf/dsh-studio，restart 
 
 > `deploy-all.sh` 拷 `index.js`、`client.js`，以及 `/tmp/src/` 下的 `src/host/*.js`。改了 `package.json`（包头、`engines`、`dsh.*`、`files`）、`cordis.patch.yml`、`locale/*.json` 时必须单独上传到 `/home/lyf/dsh-studio/` 再重启，否则改了个寂寞。改动前先 `cp package.json /tmp/package.json.bak` 留退路。
 >
-> 宿主拆成 `src/host/*.js` 以后，**部署必须带整个 `src/` 目录**：`/tmp/index.js`、`/tmp/client.js`、`/tmp/src/host/{domain,dispatcher}.js`。只传 `index.js` 会得到 `ReferenceError: sanitizeAccess is not defined`（服务 502）。
+> 宿主拆成 `src/host/*.js` 以后，**部署必须带整个 `src/` 目录**：`/tmp/index.js`、`/tmp/client.js`、`/tmp/src/host/{domain,dispatcher,executor}.js`。只传 `index.js` 会得到 `ReferenceError: sanitizeAccess is not defined`（服务 502）。
 
 验收三件事：`systemctl is-active dsh-web` = `active`；浏览器打开 `http://<host>/` 侧栏出现「需求&任务工作空间」；`GET /studio-api/state` 返回 200 且 `revision` 递增。
 
@@ -84,6 +84,7 @@ bash /tmp/deploy-all.sh     # cp 两个文件到 /home/lyf/dsh-studio，restart 
 - 路由统一挂在 `/studio-api`（`ctx.webServer.register({ kind:'prefix' })`）；新增路由记得同时更新权限分级 `accessLevelFor` 与 `/auth/*` 例外。
 - 迁移走 `config.schema` 版本号 + `#load()` 里的顺序迁移函数，禁止「就地猜测数据形状」。
 - 长任务（派单、GitLab 同步、飞书推送）不得阻塞请求线程；失败要写进任务 `history` 或审计，不许静默。
+- 拆出去的模块要宿主能力时，用 `configureDispatcher()/configureExecutor()` 注入，**不要让子模块反向 import `index.js`**（会成环）；需要活值（如 `activeDispatcher`）用 getter 注入。
 
 ## 7. 前端约定
 

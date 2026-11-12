@@ -89,17 +89,17 @@ test('host: domain layer lives in src/host and stays out of index.js', () => {
   assert.ok(index.includes("from './src/host/domain.js'"), 'index.js must import the domain layer')
   assert.ok(!/^function sanitizeRequirement\(/m.test(index), 'sanitizeRequirement must not be re-declared in index.js')
   const lines = index.split(/\r?\n/).length
-  assert.ok(lines < 8600, `index.js is still ${lines} lines; keep splitting by domain`)
+  assert.ok(lines < 6900, `index.js is still ${lines} lines; keep splitting by domain`)
 })
 
 test('host: index.js imports every domain symbol it uses', () => {
   const domain = read('src/host/domain.js')
   const exported = [...domain.matchAll(/^export\s+(?:async\s+function|function|class|const|let)\s+([A-Za-z_$][\w$]*)/gm)].map((m) => m[1])
   const index = read('index.js')
-  const block = index.match(/import \{\n([\s\S]*?)\n\} from '\.\/src\/host\/domain\.js'/)
-  assert.ok(block, 'index.js must have a domain import block')
-  const imported = new Set(block[1].split('\n').map((line) => line.trim().replace(/,$/, '')).filter(Boolean))
-  const rest = index.replace(block[0], '')
+  const blockLine = index.split(/\r?\n/).find((line) => /^import \{[^}]*\} from '\.\/src\/host\/domain\.js'/.test(line))
+  assert.ok(blockLine, 'index.js must have a domain import block')
+  const imported = new Set(blockLine.replace(/^import \{/, '').replace(/\} from .*$/, '').split(',').map((name) => name.trim()).filter(Boolean))
+  const rest = index.replace(blockLine, '')
   const missing = exported.filter((name) => new RegExp('\\b' + name + '\\b').test(rest) && !imported.has(name))
   assert.deepEqual(missing, [], 'symbols used but not imported (runtime ReferenceError): ' + missing.join(', '))
 })

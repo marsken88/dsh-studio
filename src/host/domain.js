@@ -1631,3 +1631,86 @@ export function worktreeRoot(config) {
   const workspace = String(config?.agents?.workspaceDir ?? '').trim() || join(homedir(), 'dsh-workspace')
   return join(dirname(workspace), 'dsh-worktrees')
 }
+
+export function text(value, max = 2000) {
+  if (typeof value !== 'string') return undefined
+  const trimmed = value.trim()
+  return trimmed.length === 0 ? undefined : trimmed.slice(0, max)
+}
+
+/** Coerce one arbitrary input object into a well-formed task patch. */
+export function normalizePatch(input) {
+  const patch = {}
+  if (input.title !== undefined) {
+    const title = text(input.title, 200)
+    if (title === undefined) throw new Error('title must not be empty')
+    patch.title = title
+  }
+  if (input.requirement !== undefined) patch.requirement = text(input.requirement, 20000) ?? ''
+  if (input.type !== undefined) {
+    const type = String(input.type)
+    if (!TASK_TYPES.includes(type)) throw new Error(`unknown type ${type}`)
+    patch.type = type
+  }
+  if (input.severity !== undefined) {
+    const severity = String(input.severity).toLowerCase()
+    patch.severity = severity === '' ? '' : (SEVERITIES.includes(severity) ? severity : 'p2')
+  }
+  if (input.role !== undefined) {
+    const role = String(input.role)
+    if (!ROLE_IDS.includes(role)) throw new Error(`unknown role ${role}`)
+    patch.role = role
+  }
+  if (input.status !== undefined) {
+    const status = String(input.status)
+    if (!STATUS_SET.has(status)) throw new Error(`unknown status ${status}`)
+    // 旧客户端仍把「阻塞」当一列：翻译成标记，车道保持不动。
+    if (status === LEGACY_BLOCKED_STATUS) patch.blocked = true
+    else patch.status = status
+  }
+  if (input.blocked !== undefined) patch.blocked = input.blocked === true
+  if (input.priority !== undefined) {
+    const priority = String(input.priority)
+    if (!PRIORITIES.includes(priority)) throw new Error(`unknown priority ${priority}`)
+    patch.priority = priority
+  }
+  for (const key of ['gitlabIssue', 'gitlabMR', 'owner', 'blockedReason', 'feishuThread']) {
+    if (input[key] !== undefined) patch[key] = text(input[key], 500) ?? ''
+  }
+  if (input.expert !== undefined) patch.expert = text(input.expert, 40) ?? ''
+  if (input.domain !== undefined) patch.domain = text(input.domain, 40) ?? ''
+  if (input.gitlabProject !== undefined) patch.gitlabProject = text(input.gitlabProject, 60) ?? ''
+  for (const key of ['project', 'iteration', 'parent', 'service']) {
+    if (input[key] !== undefined) patch[key] = text(input[key], 60) ?? ''
+  }
+  if (input.requirementId !== undefined) patch.requirementId = text(input.requirementId, 60) ?? ''
+  if (input.pointId !== undefined) patch.pointId = text(input.pointId, 24) ?? ''
+  if (input.override !== undefined) patch.override = text(input.override, 300) ?? ''
+  if (input.releaseId !== undefined) patch.releaseId = text(input.releaseId, 60) ?? ''
+  if (input.dueAt !== undefined) {
+    const dueAt = Number(input.dueAt)
+    patch.dueAt = Number.isFinite(dueAt) && dueAt > 0 ? dueAt : 0
+  }
+  if (input.artifacts !== undefined) {
+    patch.artifacts = sanitizeArtifacts(Array.isArray(input.artifacts) ? input.artifacts : [])
+  }
+  if (input.checklist !== undefined) {
+    patch.checklist = sanitizeChecklist(Array.isArray(input.checklist) ? input.checklist : [])
+  }
+  if (input.cases !== undefined) {
+    patch.cases = Array.isArray(input.cases)
+      ? sanitizeCases(input.cases.map(item => ({
+        ...item,
+        http: item?.http ?? (item?.url !== undefined && String(item.url).trim().length > 0
+          ? { method: item.method, url: item.url, body: item.body, expectStatus: item.expectStatus, expectContains: item.expectContains }
+          : undefined),
+      })))
+      : []
+  }
+  if (input.tags !== undefined) {
+    patch.tags = Array.isArray(input.tags) ? input.tags.map(t => String(t).slice(0, 40)).slice(0, 20) : []
+  }
+  if (input.bugSource !== undefined) patch.bugSource = sanitizeBugSource(input.bugSource)
+  return patch
+}
+
