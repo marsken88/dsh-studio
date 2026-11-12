@@ -9,7 +9,7 @@
 | `index.js` | 宿主半边：`apply(ctx)`、39 个 `studio_*` 工具、`/studio-api/*` 路由、SQLite 存储、派单引擎、门禁 | ✅ 直接改 |
 | `src/host/*.js` | 宿主层模块：`domain.js`（板列/数据形状/`sanitize*`/默认配置，纯函数）、`dispatcher.js`（派单引擎）、`executor.js`（用例执行、代码事实核对、健康检查）、`store.js`（`StudioStore`/`SecretStore`：SQLite 台账 + 快照 + 登录会话）、`integrations.js`（GitLab / 飞书 / 平台健康）、`routes/*.js`（按前缀拆出的 HTTP 处理：`exports.js` 导出 CSV、`auth.js` 统一登录、`tasks.js` 卡片/专家/列、`requirements.js` 需求/文档/公开提单、`releases.js` 版本/灰度/部署、`insights.js` 指标与工作台、`skills.js` 技能库读写上传、`admin.js` 配置/权限成员/审计/快照、`connect.js` 市场/集成健康/GitLab/仓库/飞书、`agents.js` 派单运行态与起停、`coding.js` 执行记录/失败重试/worktree/项目配置、`tools.js` 39 个 `studio_*` 工具） | ✅ 直接改，新逻辑优先放这里 |
 | `client.src.js` | 浏览器半边的手写源码（通过 `window.__ModuleLoader__` 注册面板） | ✅ 直接改（前端逻辑） |
-| `web/src/**` | shadcn/Radix 组件、样式、`legacy.js` 桥；`web/src/studio/*.js` 是从 `client.src.js` 抬出来的纯模块（`markdown.js` 渲染器、`format.js` 日期格式、`labels.js` 标签表、`roster.js` 负责人与候选人、`fields.js` 表单适配层、`shell.js` 共享抽屉、`card.js` 看板卡片、`board.js` 看板本体、`mentions.js` @ 选择器、`cases.js` 多步用例解析、`drawer.js` 卡片详情抽屉、`editor.js` 通用编辑器、`charts.js` 进度条与燃尽图、`context.js` 共享上下文（`provideClient`/`client`）、`panels/*.js` 设置页 17 个面板、`pages/*.js` 五个页面组件（看板之外的工作台/需求/版本/效能/自助提单）），由 `make-legacy` 生成的 `legacy.js` 顶部统一 import | ✅ 直接改（样式与组件） |
+| `web/src/**` | shadcn/Radix 组件、样式、`legacy.js` 桥；`web/src/studio/*.js` 是从 `client.src.js` 抬出来的纯模块（`markdown.js` 渲染器、`format.js` 日期格式、`labels.js` 标签表、`roster.js` 负责人与候选人、`fields.js` 表单适配层、`shell.js` 共享抽屉、`card.js` 看板卡片、`board.js` 看板本体、`mentions.js` @ 选择器、`cases.js` 多步用例解析、`drawer.js` 卡片详情抽屉、`editor.js` 通用编辑器、`charts.js` 进度条与燃尽图、`context.js` 共享上下文（`provideClient`/`client`）、`panels/*.js` 设置页 17 个面板、`pages/*.js` 五个页面组件（看板之外的工作台/需求/版本/效能/自助提单）；**`StudioPage` 是组合根，故意留在 `client.src.js`**，它负责顶栏、页签与「＋ 新建」菜单并调用 `provideClient()`，别为了行数把它搬走）），由 `make-legacy` 生成的 `legacy.js` 顶部统一 import | ✅ 直接改（样式与组件） |
 | `dist/client.js` | `pnpm build` 的产物（单文件 IIFE，注意在仓库根 `dist/`，不是 `web/dist/`） | ❌ 生成物 |
 | `client.js`（包根） | 上面产物自动同步过来的副本，dsh 真正加载的那个 | ❌ 生成物 |
 | `cordis.patch.yml` | bundle patch，把本包挂进 profile | ✅ |
@@ -63,7 +63,7 @@ bash /tmp/deploy-all.sh     # cp 两个文件到 /home/lyf/dsh-studio，restart 
    - 切页签用 `elementHandle.click()`（Radix Tabs 不认 DOM `.click()`）
    - 断言 DOM + `pageerror` 为空，并截图留档
 5. 涉及权限/门禁/发布的重改动，跑一遍既有 e2e 脚本并贴出数字
-6. `npm test`（28 条：`tests/repo.test.mjs` 管 manifest / 产物一致 / 宿主接口 / 领域层拆分与导入 / **导入只读绑定不许赋值** / **跨模块符号必须导入** / 迁移 / 文档 / locale；`tests/store-boot.test.mjs` 真的起一个 `StudioStore`，把「搬完代码启动就炸」这类问题挡在部署前。想连真数据验证：把生产库三个文件（`.db`/`-wal`/`-shm`）拷到临时目录，用 `new StudioStore()` + `await store.ready` 跑一遍，`tmp/boot-real.mjs` 就是这么写的）；`npm run check` = 语法 + 契约一把过
+6. `npm test`（38 条：`tests/repo.test.mjs` 管 manifest / 产物一致 / 宿主接口 / 领域层拆分与导入 / **导入只读绑定不许赋值** / **跨模块符号必须导入** / 迁移 / 文档 / locale；`tests/client-units.test.mjs` 用真实模块跑标签表/负责人/日期/格式化这些纯函数；`tests/store-boot.test.mjs` 真的起一个 `StudioStore`，把「搬完代码启动就炸」这类问题挡在部署前。想连真数据验证：把生产库三个文件（`.db`/`-wal`/`-shm`）拷到临时目录，用 `new StudioStore()` + `await store.ready` 跑一遍，`tmp/boot-real.mjs` 就是这么写的）；`npm run check` = 语法 + 契约一把过
 7. 构建期守卫：`web/scripts/guard.mjs`（`pnpm build` 自动跑两次）——禁 CSS 里出现 `hsl(var(--x))`、禁 Radix Portal 不挂 `container={portalRoot()}`、产物里必须留下 `data-dsh-studio-portal`。单独跑：`cd web && npm run guard`
 8. 真库自检：`npm run smoke:store -- ~/.dsh/dsh-studio.db`（把 `.db/-wal/-shm` 拷到临时目录起一遍真实 `StudioStore`，专抓「空库能起、真库就炸」的导入问题）
 9. CI 在 `.github/workflows/ci.yml`：语法 → 契约 → `web/` 里 `pnpm install --frozen-lockfile && pnpm build` → `cmp dist/client.js client.js` → `git diff --exit-code`（产物必须可复现，改了前端忘记构建会直接红）
