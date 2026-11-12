@@ -25,6 +25,11 @@ sudo systemctl restart dsh-web
 
 页面入口：DSH Web 左侧栏第 4 项「需求&任务工作空间」。三个页签：**看板 / 市场 / 设置**。
 
+## 开发与兼容性
+
+- 参与开发（构建链、部署、验证要求、禁区）：[AGENTS.md](AGENTS.md)
+- 依赖的 dsh 宿主接口、升级 runbook、兼容矩阵与已知限制：[docs/compatibility.md](docs/compatibility.md)
+
 ## 看板
 
 建卡与建需求的入口在页面右上角统一成一个「＋ 新建」：菜单里选「新建需求」进需求表单，选「新建任务」直接在看板上开一张卡（详见文末「新建入口合并」）。
