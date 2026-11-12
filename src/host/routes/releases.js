@@ -221,6 +221,7 @@ export async function handleReleasesRoute({ method, route, req, res, store, url 
       feishuBroadcast(
         store.snapshot().config,
         `【版本发布】${release.name} ${release.tagName} · ${count} 张卡${forcedNote === '' ? '' : `\n强制发布（${forcedNote}）`}`,
+        'release',
       ).catch(() => undefined)
     }
     host.sendJson(res, 200, { ok: true, release, state: host.publicState(store) })

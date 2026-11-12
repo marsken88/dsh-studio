@@ -63,7 +63,7 @@ bash /tmp/deploy-all.sh     # cp 两个文件到 /home/lyf/dsh-studio，restart 
    - 切页签用 `elementHandle.click()`（Radix Tabs 不认 DOM `.click()`）
    - 断言 DOM + `pageerror` 为空，并截图留档
 5. 涉及权限/门禁/发布的重改动，跑一遍既有 e2e 脚本并贴出数字
-6. `npm test`（43 条：`tests/repo.test.mjs` 管 manifest / 产物一致 / 宿主接口 / 领域层拆分与导入 / **导入只读绑定不许赋值** / **跨模块符号必须导入** / 迁移 / 文档 / locale；`tests/client-units.test.mjs` 用真实模块跑标签表/负责人/日期/命令面板检索这些纯函数；`tests/notify.test.mjs` 起一个本地 HTTP 桩验证飞书通知正文（字符串与 `{text}` 两种写法都归一到同一条消息）；`tests/store-boot.test.mjs` 真的起一个 `StudioStore`，把「搬完代码启动就炸」这类问题挡在部署前。想连真数据验证：把生产库三个文件（`.db`/`-wal`/`-shm`）拷到临时目录，用 `new StudioStore()` + `await store.ready` 跑一遍，`tmp/boot-real.mjs` 就是这么写的）；`npm run check` = 语法 + 契约一把过
+6. `npm test`（47 条：`tests/repo.test.mjs` 管 manifest / 产物一致 / 宿主接口 / 领域层拆分与导入 / **导入只读绑定不许赋值** / **跨模块符号必须导入** / 迁移 / 文档 / locale / **用了 `React.` 的组件必须从 `client()` 或工厂参数拿到 `React`**；`tests/client-units.test.mjs` 用真实模块跑标签表/负责人/日期/命令面板检索这些纯函数；`tests/notify.test.mjs` 起一个本地 HTTP 桩验证飞书通知（正文归一、`botWants` 的事件矩阵、`feishuBroadcast` 只发给订阅该事件的机器人）；`tests/store-boot.test.mjs` 真的起一个 `StudioStore`，把「搬完代码启动就炸」这类问题挡在部署前。想连真数据验证：把生产库三个文件（`.db`/`-wal`/`-shm`）拷到临时目录，用 `new StudioStore()` + `await store.ready` 跑一遍，`tmp/boot-real.mjs` 就是这么写的）；`npm run check` = 语法 + 契约一把过
 7. 构建期守卫：`web/scripts/guard.mjs`（`pnpm build` 自动跑两次）——禁 CSS 里出现 `hsl(var(--x))`、禁 Radix Portal 不挂 `container={portalRoot()}`、产物里必须留下 `data-dsh-studio-portal`。单独跑：`cd web && npm run guard`
 8. 真库自检：`npm run smoke:store -- ~/.dsh/dsh-studio.db`（把 `.db/-wal/-shm` 拷到临时目录起一遍真实 `StudioStore`，专抓「空库能起、真库就炸」的导入问题）
 9. CI 在 `.github/workflows/ci.yml`：语法 → 契约 → `web/` 里 `pnpm install --frozen-lockfile && pnpm build` → `cmp dist/client.js client.js` → `git diff --exit-code`（产物必须可复现，改了前端忘记构建会直接红）

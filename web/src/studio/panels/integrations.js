@@ -3,7 +3,7 @@
 import { client } from '../context.js'
 
 export function ReposPanel({ config, onChanged }) {
-  const { h, Editor, api, toast, confirmDialog, tipOf, TextField, ChipField, CheckField, MdField, SideDrawer } = client()
+  const { h, Editor, api, toast, confirmDialog, tipOf, TextField, ChipField, CheckField, MdField, SideDrawer , React } = client()
   const projects = config.gitlab?.projects ?? []
   const [draft, setDraft] = React.useState(null)
   const [error, setError] = React.useState(null)
@@ -105,8 +105,21 @@ export function ReposPanel({ config, onChanged }) {
   )
 }
 
+const BOT_EVENTS = [
+  { key: 'change', label: '卡片状态变化' },
+  { key: 'sla', label: '缺陷 SLA 超时' },
+  { key: 'bug', label: '自动开缺陷' },
+  { key: 'release', label: '版本发布' },
+]
+
+const botEventNames = bot => {
+  const events = bot.events !== null && typeof bot.events === 'object' ? bot.events : null
+  if (events === null) return bot.notifyOnChange === false ? [] : ['change', 'sla', 'bug', 'release']
+  return BOT_EVENTS.filter(item => events[item.key] !== false).map(item => item.label)
+}
+
 export function BotsPanel({ config, onChanged }) {
-  const { h, Editor, api, toast, confirmDialog, tipOf, TextField, ChipField, CheckField, MdField, SideDrawer } = client()
+  const { h, Editor, api, toast, confirmDialog, tipOf, TextField, ChipField, CheckField, MdField, SideDrawer , React } = client()
   const bots = config.feishu?.bots ?? []
   const [draft, setDraft] = React.useState(null)
   const [error, setError] = React.useState(null)
@@ -145,11 +158,21 @@ export function BotsPanel({ config, onChanged }) {
     } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)) } finally { setBusy(false) }
   }
   const set = (key, value) => setDraft({ ...draft, [key]: value })
+  const eventOn = key => {
+    const events = draft.events !== null && typeof draft.events === 'object' ? draft.events : null
+    if (events === null) return key === 'change' ? draft.notifyOnChange !== false : true
+    return events[key] !== false
+  }
+  const setEvent = (key, value) => {
+    const events = draft.events !== null && typeof draft.events === 'object' ? draft.events : {}
+    const next = { ...events, [key]: value }
+    setDraft({ ...draft, events: next, notifyOnChange: next.change !== false })
+  }
 
   const rows = bots.map(bot => h('div', { className: 'ds-listrow', key: bot.id },
     h('div', { className: 'ds-listrow-main' },
       h('div', {}, `${bot.name}${bot.enabled === false ? ' （已停用）' : ''}${bot.webhookSet ? '' : ' · 缺 Webhook'}`),
-      h('div', { className: 'ds-hint' }, `Webhook ${bot.webhookHint || '（未设置）'}${bot.chatId ? ' · 群 ' + bot.chatId : ''}${bot.notifyOnChange ? ' · 状态变化通知' : ''}`),
+      h('div', { className: 'ds-hint' }, `Webhook ${bot.webhookHint || '（未设置）'}${bot.chatId ? ' · 群 ' + bot.chatId : ''} · 收：${botEventNames(bot).join(' / ') || '什么都不收'}`),
     ),
     h('div', { className: 'ds-listrow-actions' },
       h('button', { className: 'ds-btn', disabled: busy, onClick: () => void test(bot) }, '测试'),
@@ -161,8 +184,8 @@ export function BotsPanel({ config, onChanged }) {
   return h('div', { className: 'ds-pane-stack' },
     h(Editor, {
       title: '飞书机器人（可以有多个）',
-      hint: '卡片状态变化时，所有启用的机器人都会收到一条消息；想按项目分群就多建几个。',
-      rows, onAdd: () => setDraft({ id: '', name: '', webhook: '', chatId: '', notifyOnChange: true, enabled: true }), addLabel: '新增机器人',
+      hint: '一个群建一个机器人，并在下面勾选它要收哪些事件；研发群只勾缺陷相关，产品群只勾版本发布。',
+      rows, onAdd: () => setDraft({ id: '', name: '', webhook: '', chatId: '', notifyOnChange: true, events: { change: true, sla: true, bug: true, release: true }, enabled: true }), addLabel: '新增机器人',
       render: row => row,
       empty: '还没有机器人。',
     }),
@@ -215,11 +238,20 @@ export function BotsPanel({ config, onChanged }) {
           h('div', { className: 'ds-label' }, '备注群 chat_id（可选）'),
           h(TextField, { className: 'ds-input', value: draft.chatId, placeholder: 'oc_…', onChange: e => set('chatId', e.target.value) }),
         ),
-        h('div', { className: 'ds-row', style: { gap: 16 } },
-          h('label', { className: 'ds-row', style: { alignItems: 'center', gap: 8, cursor: 'pointer' } },
-            h(CheckField, { checked: draft.notifyOnChange !== false, onChange: e => set('notifyOnChange', e.target.checked) }),
-            h('span', {}, '卡片状态变化时发消息'),
+        h('div', { className: 'ds-field' },
+          h('div', { className: 'ds-label' }, '收哪些事件'),
+          h('div', { className: 'ds-row', style: { gap: 16, flexWrap: 'wrap' } },
+            ...BOT_EVENTS.map(item => h('label', { key: item.key, className: 'ds-row', style: { alignItems: 'center', gap: 8, cursor: 'pointer' } },
+              h(CheckField, {
+                checked: eventOn(item.key),
+                onChange: e => setEvent(item.key, e.target.checked),
+              }),
+              h('span', {}, item.label),
+            )),
           ),
+          h('div', { className: 'ds-hint' }, '不勾任何一项就等于这个群静默（只保留测试消息）。'),
+        ),
+        h('div', { className: 'ds-row', style: { gap: 16 } },
           h('label', { className: 'ds-row', style: { alignItems: 'center', gap: 8, cursor: 'pointer' } },
             h(CheckField, { checked: draft.enabled !== false, onChange: e => set('enabled', e.target.checked) }),
             h('span', {}, '启用'),
@@ -230,7 +262,7 @@ export function BotsPanel({ config, onChanged }) {
 }
 
 export function SkillsPanel({ config, onChanged }) {
-  const { h, Editor, api, toast, confirmDialog, tipOf, TextField, ChipField, CheckField, MdField, SideDrawer } = client()
+  const { h, Editor, api, toast, confirmDialog, tipOf, TextField, ChipField, CheckField, MdField, SideDrawer , React } = client()
   const [data, setData] = React.useState(null)
   const [draft, setDraft] = React.useState(null)
   const [error, setError] = React.useState(null)

@@ -641,7 +641,17 @@ export function sanitizeBots(input) {
       name: String(raw.name ?? id).trim().slice(0, 60) || id,
       webhook: String(raw.webhook ?? '').trim().slice(0, 500),
       chatId: String(raw.chatId ?? '').trim().slice(0, 200),
-      notifyOnChange: raw.notifyOnChange !== false,
+      // 哪些事件推到这个群。老数据只有 notifyOnChange，落到 events.change 上。
+      events: (() => {
+        const events = raw.events !== null && typeof raw.events === 'object' ? raw.events : {}
+        return {
+          change: events.change !== false && raw.notifyOnChange !== false,
+          sla: events.sla !== false,
+          bug: events.bug !== false,
+          release: events.release !== false,
+        }
+      })(),
+      notifyOnChange: raw.notifyOnChange !== false && (raw.events === null || raw.events === undefined || raw.events.change !== false),
       enabled: raw.enabled !== false,
     })
   }

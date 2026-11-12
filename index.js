@@ -467,6 +467,7 @@ function publicConfig(config) {
         chatId: bot.chatId,
         webhookSet: bot.webhook.length > 0,
         webhookHint: bot.webhook.length > 8 ? `…${bot.webhook.slice(-6)}` : '',
+        events: bot.events,
         notifyOnChange: bot.notifyOnChange,
         enabled: bot.enabled,
       })),
@@ -1429,6 +1430,7 @@ async function autoBugFromCase(store, task, item, by) {
   feishuBroadcast(
     store.snapshot().config,
     `【新缺陷】${bug.code || bug.id} ${bug.title}\n来源用例：${item.title}\n从「${task.code === '' ? task.id : task.code} ${task.title}」自动开出，去「待开发」看一眼。`,
+    'bug',
   ).catch(() => undefined)
   return { bug, created: true }
 }

@@ -462,9 +462,20 @@ export async function feishuPush(webhook, body) {
   throw lastError ?? new Error('飞书推送失败')
 }
 
-/** Send one message to every enabled bot that watches card changes. */
-export async function feishuBroadcast(config, body) {
-  const bots = (config.feishu.bots ?? []).filter(bot => bot.enabled && bot.notifyOnChange && bot.webhook.length > 0)
+/** 每个群想收哪些事件由 bot.events 决定：change / sla / bug / release。 */
+export function botWants(bot, kind) {
+  if (bot === null || typeof bot !== 'object') return false
+  if (bot.enabled === false) return false
+  if (String(bot.webhook ?? '') === '') return false
+  const events = bot.events !== null && typeof bot.events === 'object' ? bot.events : null
+  if (events === null) return kind === 'change' ? bot.notifyOnChange !== false : true
+  if (kind === 'change' && bot.notifyOnChange === false) return false
+  return events[kind] !== false
+}
+
+/** Send one message to every enabled bot that subscribes to this event kind. */
+export async function feishuBroadcast(config, body, kind = 'change') {
+  const bots = (config.feishu.bots ?? []).filter(bot => botWants(bot, kind))
   const results = []
   for (const bot of bots) {
     try {

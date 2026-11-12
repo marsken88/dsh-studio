@@ -462,6 +462,7 @@ export class Dispatcher {
       await host.feishuBroadcast(
         this.store.snapshot().config,
         `【SLA 超时】${task.code || task.id} ${task.title}\n严重度 ${String(sla.severity).toUpperCase()}，超时约 ${overdueHours} 小时`,
+        'sla',
       ).catch(() => undefined)
       this.note(`SLA 超时升级 ${task.code || task.id}`)
     }

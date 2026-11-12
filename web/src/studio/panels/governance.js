@@ -6,7 +6,7 @@ import { fmtTime } from '../format.js'
 import { client } from '../context.js'
 
 export function AccessPanel({ state, config, onChanged }) {
-  const { h, sessionToken, api, toast, currentUser, confirmDialog, TextField, ChipField, CheckField, SelectField } = client()
+  const { h, sessionToken, api, toast, currentUser, confirmDialog, TextField, ChipField, CheckField, SelectField , React } = client()
   const access = config.access ?? { enabled: false, members: [] }
   const audit = state.audit ?? []
   const [draft, setDraft] = React.useState({ name: '', role: 'member' })
@@ -167,7 +167,7 @@ export function AccessPanel({ state, config, onChanged }) {
 }
 
 export function ColumnsPanel({ state, onChanged }) {
-  const { h, sessionToken, api, toast, currentUser, confirmDialog, TextField, ChipField, CheckField, SelectField } = client()
+  const { h, sessionToken, api, toast, currentUser, confirmDialog, TextField, ChipField, CheckField, SelectField , React } = client()
   const config = state.config
   const [error, setError] = React.useState(null)
   const [busy, setBusy] = React.useState(false)
@@ -265,7 +265,7 @@ export function ColumnsPanel({ state, onChanged }) {
 
 /** 数据与备份：看台账存在哪、密钥在哪，以及回滚到某个快照。 */
 export function StoragePanel({ state, onChanged }) {
-  const { h, sessionToken, api, toast, currentUser, confirmDialog, TextField, ChipField, CheckField, SelectField } = client()
+  const { h, sessionToken, api, toast, currentUser, confirmDialog, TextField, ChipField, CheckField, SelectField , React } = client()
   const [info, setInfo] = React.useState(state.storage ?? null)
   const [snapshots, setSnapshots] = React.useState([])
   const [error, setError] = React.useState(null)
@@ -335,7 +335,7 @@ export function StoragePanel({ state, onChanged }) {
 
 /** 集成健康：哪条通道在掉、什么时候掉的、还能不能补一次。 */
 export function HealthPanel({ state, config, onChanged }) {
-  const { h, sessionToken, api, toast, currentUser, confirmDialog, TextField, ChipField, CheckField, SelectField } = client()
+  const { h, sessionToken, api, toast, currentUser, confirmDialog, TextField, ChipField, CheckField, SelectField , React } = client()
   const health = state.integrations ?? { channels: [], broken: 0 }
   const [busy, setBusy] = React.useState('')
   const [note, setNote] = React.useState(null)

@@ -433,3 +433,27 @@ test('client: every studio module pulls in what it borrows from its siblings', (
   }
   assert.deepEqual(missing, [], 'studio module uses a sibling export without importing it')
 })
+
+test('client: components that use React. get React from client() or props', () => {
+  const walk = (dir) =>
+    readdirSync(path(dir), { withFileTypes: true }).flatMap((entry) =>
+      entry.isDirectory()
+        ? walk(dir + '/' + entry.name)
+        : entry.name.endsWith('.js') ? [dir + '/' + entry.name] : [])
+  const missing = []
+  for (const name of walk('web/src/studio')) {
+    const code = read(name)
+    const factoryProvidesReact = /\(\{[^}]*\bReact\b[^}]*\}\)/.test(code)
+    // 每个组件块从 "function Name(" 到下一个顶层 "export function"/"function Name(" 之前
+    const chunks = code.split(/\n(?=(?:export )?function [A-Z][\w$]*\()/)
+    for (const chunk of chunks) {
+      const head = chunk.match(/^(?:export )?function ([A-Z][\w$]*)\(/)?.[1]
+      if (head === undefined) continue
+      if (!/\bReact\./.test(chunk)) continue
+      const received = /\{[^}]*\bReact\b[^}]*\}\s*=\s*client\(\)/.test(chunk)
+        || /\{[^}]*\bReact\b[^}]*\}/.test(chunk.slice(0, chunk.indexOf('\n')))
+      if (!received && !factoryProvidesReact) missing.push(name + ' :: ' + head)
+    }
+  }
+  assert.deepEqual(missing, [], 'modules use React. without receiving it: ' + missing.join(', '))
+})

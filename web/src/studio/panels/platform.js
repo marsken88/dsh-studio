@@ -6,7 +6,7 @@ import { fmtTime } from '../format.js'
 import { client } from '../context.js'
 
 export function LdapPanel({ config, onChanged }) {
-  const { h, Editor, api, toast, confirmDialog, tipOf, TextField, CheckField, SelectField } = client()
+  const { h, Editor, api, toast, confirmDialog, tipOf, TextField, CheckField, SelectField , React } = client()
   const ldap = config.ldap ?? {}
   const [draft, setDraft] = React.useState({
     enabled: ldap.enabled === true,
@@ -210,7 +210,7 @@ export function LdapPanel({ config, onChanged }) {
 
 
 export function CostsPanel({ config, onChanged }) {
-  const { h, Editor, api, toast, confirmDialog, tipOf, TextField, CheckField, SelectField } = client()
+  const { h, Editor, api, toast, confirmDialog, tipOf, TextField, CheckField, SelectField , React } = client()
   const costs = config.costs ?? {}
   const [runs, setRuns] = React.useState(String(costs.budgetRuns ?? 500))
   const [hours, setHours] = React.useState(String(costs.budgetHours ?? 80))
@@ -265,7 +265,7 @@ export function CostsPanel({ config, onChanged }) {
 }
 
 export function BusinessPanel({ config, onChanged }) {
-  const { h, Editor, api, toast, confirmDialog, tipOf, TextField, CheckField, SelectField } = client()
+  const { h, Editor, api, toast, confirmDialog, tipOf, TextField, CheckField, SelectField , React } = client()
   const projects = config.projects ?? []
   const repos = config.gitlab?.projects ?? []
   const [draft, setDraft] = React.useState(null)
