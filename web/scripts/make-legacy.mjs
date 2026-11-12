@@ -69,9 +69,18 @@ mkdirSync(dirname(target), { recursive: true })
 
 // Modules the panel already imports. Keep this list in sync with the blocks that
 // were lifted out of client.src.js (they are plain ES modules under web/src/studio).
+const labelSource = readFileSync(resolve(here, '../src/studio/labels.js'), 'utf8')
+const labelNames = [...labelSource.matchAll(/export const ([A-Z][A-Z0-9_]+) =/g)].map((m) => m[1])
+if (labelNames.length < 10) {
+  console.error('make-legacy: labels.js looks empty; refusing to generate')
+  process.exit(1)
+}
+
 const imports = [
   "import { createMarkdown } from './studio/markdown.js'",
   "import { fmtTime, fmtDate } from './studio/format.js'",
+  'import { ' + labelNames.join(', ') + " } from './studio/labels.js'",
+  "import { buildRoster, filterRoster, ownerLabel, memberLabel, toDateInput, fromDateInput } from './studio/roster.js'",
 ].join('\n') + '\n\n'
 writeFileSync(target, banner + imports + text)
 console.log(`make-legacy: wrote ${target} (${text.length} chars)`)

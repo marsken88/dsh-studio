@@ -1238,38 +1238,9 @@ html[data-dsh-theme="light"] [class*="rightbarCol"] { background: #fafafa !impor
       return { state, error, reload }
     }
 
-    const ROLE_LABEL = { product: '产品', architect: '架构', dev: '研发', qa: '测试' }
-    const PRIORITY_LABEL = { urgent: '紧急', normal: '普通', relaxed: '宽松' }
-    const TYPE_LABEL = { requirement: '需求', bug: '缺陷', design: '设计', dev: '开发', test: '测试', ops: '运维' }
-    const SEVERITY_LABEL = { p0: 'P0 致命', p1: 'P1 严重', p2: 'P2 一般', p3: 'P3 轻微' }
-    const ARTIFACT_KINDS = ['requirement', 'design', 'mr', 'cases', 'report', 'release', 'doc', 'screenshot', 'other']
-    const ARTIFACT_KIND_LABEL = { requirement: '需求', design: '方案', mr: 'MR', cases: '用例', report: '报告', release: '发布', doc: '文档', screenshot: '截图', other: '其它' }
-    const ARTIFACT_STATUS = ['draft', 'delivered', 'accepted']
-const CASE_RESULTS = ['pending', 'pass', 'fail', 'skip']
-const CASE_RESULT_LABEL = { pending: '⬜ 未跑', pass: '✅ 通过', fail: '❌ 不通过', skip: '⏭️ 跳过' }
-const CASE_TYPES = ['functional', 'api', 'ui', 'performance', 'security', 'other']
-const CASE_TYPE_LABEL = { functional: '功能', api: '接口', ui: '界面', performance: '性能', security: '安全', other: '其它' }
-const CASE_PRIORITIES = ['p0', 'p1', 'p2', 'p3']
-    const ARTIFACT_STATUS_LABEL = { draft: '草稿', delivered: '已交付', accepted: '已验收' }
-    const CODING_REVIEW_LABEL = { pending: '待评审', approved: '评审通过', changes_requested: '要求修改' }
-    const CODING_CHANGE_LABEL = { added: '新增', modified: '修改', deleted: '删除' }
-    const PROJECT_STATUS_LABEL = { active: '进行中', paused: '暂停', archived: '已归档' }
-    const ITERATION_STATUS_LABEL = { planned: '未开始', active: '进行中', closed: '已结束' }
-    const STRATEGY_LABEL = { round_robin: '轮询', best_match: '按专长匹配', lead: '团长分派' }
 
     /** epoch 毫秒 ↔ <input type="date"> 的 yyyy-mm-dd。 */
-    function toDateInput(value) {
-      if (typeof value !== 'number' || value === 0) return ''
-      const date = new Date(value)
-      const pad = n => String(n).padStart(2, '0')
-      return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`
-    }
 
-    function fromDateInput(text) {
-      if (typeof text !== 'string' || text.trim() === '') return 0
-      const at = new Date(`${text.trim()}T23:59:00`).getTime()
-      return Number.isFinite(at) ? at : 0
-    }
 
     // ------------------------------------------------------------------ card
 
@@ -1425,25 +1396,6 @@ const CASE_PRIORITIES = ['p0', 'p1', 'p2', 'p3']
       )
     }
 
-    function memberLabel(config, member) {
-      if (member === undefined || member === null) return ''
-      if (member.kind === 'role') return `🎯 ${ROLE_LABEL[member.id] ?? member.id}`
-      if (member.kind === 'team') {
-        const team = (config.teams ?? []).find(entry => entry.id === member.id)
-        return team === undefined ? '' : `👥 ${team.name}`
-      }
-      const expert = (config.experts ?? []).find(entry => entry.id === member.id)
-      return expert === undefined ? (ROLE_LABEL[member.id] ?? String(member.id ?? '')) : `${expert.emoji} ${expert.name}`
-    }
-    function ownerLabel(config, owner) {
-      if (owner === undefined || owner === null) return ''
-      if (owner.kind === 'pool') {
-        const names = (owner.members ?? []).map(member => memberLabel(config, member)).filter(name => name !== '')
-        if (names.length === 0) return ''
-        return names.length === 1 ? names[0] : `${names[0]} 等 ${names.length} 位`
-      }
-      return memberLabel(config, owner)
-    }
 
     function Board({ state, onOpen, onMove, onWip }) {
       const config = state.config ?? {}
@@ -1634,46 +1586,7 @@ const CASE_PRIORITIES = ['p0', 'p1', 'p2', 'p3']
     // ------------------------------------------------------------ markdown
 
     const renderMarkdown = createMarkdown(h)
-    function buildRoster(config) {
-      const items = []
-      // 角色位放最前面：泳道默认按「产品经理 / 研发工程师」配，具体落到哪位
-      // 领域专家由卡片所属业务领域决定。
-      for (const role of ['product', 'architect', 'dev', 'qa']) {
-        items.push({
-          key: 'r:' + role,
-          name: '角色 · ' + (ROLE_LABEL[role] ?? role),
-          emoji: '🎯',
-          hint: '按角色位派单，具体人按卡片业务领域挑',
-          group: '角色位',
-        })
-      }
-      for (const expert of config?.experts ?? []) {
-        if (expert.enabled === false) continue
-        items.push({
-          key: 'e:' + expert.id,
-          name: expert.name,
-          emoji: expert.emoji ?? '🤖',
-          hint: [expert.description, expert.domain ? `${expert.domain} · ${ROLE_LABEL[expert.role] ?? expert.role}` : ROLE_LABEL[expert.role] ?? expert.role].filter(Boolean).join(' · '),
-          group: '专家',
-        })
-      }
-      for (const team of config?.teams ?? []) {
-        items.push({
-          key: 't:' + team.id,
-          name: team.name,
-          emoji: team.emoji ?? '👥',
-          hint: `团长 ${config?.experts?.find(expert => expert.id === team.lead)?.name ?? '未设'} · ${(team.members ?? []).length} 位成员`,
-          group: '专家团',
-        })
-      }
-      return items
-    }
 
-    function filterRoster(roster, query) {
-      const needle = String(query ?? '').trim().toLowerCase()
-      if (needle === '') return roster
-      return roster.filter(item => `${item.name} ${item.hint}`.toLowerCase().includes(needle))
-    }
 
     /** @ 选择器：一列可搜的名单，代替原来平铺的一堆按钮。 */
     function MentionPicker({ roster, query, active, onQuery, onActive, onPick, onClose }) {
