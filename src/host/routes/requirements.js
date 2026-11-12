@@ -19,6 +19,7 @@ import {
   syncRequirementArtifacts,
   taskExitGate,
 } from '../executor.js'
+import { randomBytes } from 'node:crypto'
 const INJECTED = ["createTask","publicState","readJsonBody","sendJson"]
 let host = {
   createTask: () => {},

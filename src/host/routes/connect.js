@@ -1,4 +1,5 @@
-import { INTEGRATION, feishuPush, gitlabReady, gitlabSync, healthReport } from '../integrations.js'
+import { INTEGRATION, feishuPush, gitlabReady, gitlabRequest, gitlabSync, healthReport, projectReady } from '../integrations.js'
+import { cleanId } from '../domain.js'
 const INJECTED = ["applyConfig","installedPackages","publicState","readJsonBody","resolvePackageName","runPluginCli","sendJson","getSyncTimer","upsertById"]
 let host = {
   applyConfig: () => {},

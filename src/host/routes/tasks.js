@@ -376,7 +376,7 @@ export async function handleTaskRoute({ method, route, req, res, store, url }) {
         hasSnapshot: typeof store?.snapshot,
         hasMutate: typeof store?.mutate,
         keys: Object.keys(store ?? {}).slice(0, 16),
-        runType: typeof runTaskCases,
+        runType: typeof host.runTaskCases,
       })
       return true
     }

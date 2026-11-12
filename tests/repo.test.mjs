@@ -36,6 +36,7 @@ const manifest = JSON.parse(read('package.json'))
 const hostSources = [
   'index.js',
   ...readdirSync(path('src/host')).filter((name) => name.endsWith('.js')).map((name) => 'src/host/' + name),
+  ...readdirSync(path('src/host/routes')).filter((name) => name.endsWith('.js')).map((name) => 'src/host/routes/' + name),
 ]
 const hostText = hostSources.map((file) => read(file)).join('\n')
 
@@ -130,7 +131,7 @@ test('host: domain layer lives in src/host and stays out of index.js', () => {
   assert.ok(index.includes("from './src/host/domain.js'"), 'index.js must import the domain layer')
   assert.ok(!/^function sanitizeRequirement\(/m.test(index), 'sanitizeRequirement must not be re-declared in index.js')
   const lines = index.split(/\r?\n/).length
-  assert.ok(lines < 3980, `index.js is still ${lines} lines; keep splitting by domain`)
+  assert.ok(lines < 3900, `index.js is still ${lines} lines; keep splitting by domain`)
 })
 
 test('host: index.js imports every domain symbol it uses', () => {
@@ -154,7 +155,7 @@ test('host: cross-module symbols are imported wherever they are used', () => {
   const offenders = []
   for (const file of hostSources) {
     const raw = read(file)
-    const src = raw.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/[^\n]*/g, '$1')
+    const src = raw.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/[^\n]*/g, '$1').replace(/'(?:[^'\\\n]|\\.)*'/g, "''").replace(/"(?:[^"\\\n]|\\.)*"/g, '""').replace(/`(?:[^`\\]|\\.)*`/g, '``')
     const imported = new Set()
     for (const m of src.matchAll(/import\s*\{([^}]*)\}\s*from/g)) {
       for (const part of m[1].split(',')) {

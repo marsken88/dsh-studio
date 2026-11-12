@@ -1,3 +1,4 @@
+import { sanitizeAccess } from '../domain.js'
 const INJECTED = ["applyConfig","checkToolAccess","operatorFromSessionId","operatorOf","publicState","readJsonBody","sendJson"]
 let host = {
   applyConfig: () => {},
