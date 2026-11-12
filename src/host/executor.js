@@ -1,7 +1,9 @@
 // -------------------------------------------------- 执行记录与接口测试执行器（P4）
 // 代码事实核对、用例执行、缺陷回流、健康检查。宿主级依赖通过 configureExecutor() 注入。
 
-import { CODE_PREFIX, ROLE_IDS, STATUS_IDS, STATUSES, nextRequirementCode, nextTaskCode, normalizePatch, sanitizeBaseline, sanitizeReqDoc, sanitizeRequirement, sanitizeTestRun, text } from './domain.js'
+import { CODE_PREFIX, ROLE_IDS, STATUS_IDS, STATUSES, nextRequirementCode, nextTaskCode, normalizePatch, sanitizeBaseline, sanitizeReqDoc, sanitizeRequirement, sanitizeTestRun, text,
+  canonicalAuthor,
+} from './domain.js'
 import { RUN_LOG, parseMentions } from './dispatcher.js'
 import { homedir } from 'node:os'
 import { join, resolve } from 'node:path'

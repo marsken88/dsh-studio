@@ -130,7 +130,7 @@ test('host: domain layer lives in src/host and stays out of index.js', () => {
   assert.ok(index.includes("from './src/host/domain.js'"), 'index.js must import the domain layer')
   assert.ok(!/^function sanitizeRequirement\(/m.test(index), 'sanitizeRequirement must not be re-declared in index.js')
   const lines = index.split(/\r?\n/).length
-  assert.ok(lines < 5450, `index.js is still ${lines} lines; keep splitting by domain`)
+  assert.ok(lines < 5100, `index.js is still ${lines} lines; keep splitting by domain`)
 })
 
 test('host: index.js imports every domain symbol it uses', () => {
@@ -143,6 +143,40 @@ test('host: index.js imports every domain symbol it uses', () => {
   const rest = index.replace(blockLine, '')
   const missing = exported.filter((name) => new RegExp('\\b' + name + '\\b').test(rest) && !imported.has(name))
   assert.deepEqual(missing, [], 'symbols used but not imported (runtime ReferenceError): ' + missing.join(', '))
+})
+
+test('host: cross-module symbols are imported wherever they are used', () => {
+  const modules = hostSources.filter((file) => file !== 'index.js')
+  const pool = new Map()
+  for (const file of modules) {
+    for (const m of read(file).matchAll(/^export\s+(?:async\s+function|function|class|const|let)\s+([A-Za-z_$][\w$]*)/gm)) pool.set(m[1], file)
+  }
+  const offenders = []
+  for (const file of hostSources) {
+    const raw = read(file)
+    const src = raw.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/[^\n]*/g, '$1')
+    const imported = new Set()
+    for (const m of src.matchAll(/import\s*\{([^}]*)\}\s*from/g)) {
+      for (const part of m[1].split(',')) {
+        const name = part.trim().split(/\s+as\s+/).pop()
+        if (name) imported.add(name)
+      }
+    }
+    const local = new Set()
+    for (const m of src.matchAll(/(?:^|\s)(?:async\s+)?(?:function|class|const|let|var)\s+([A-Za-z_$][\w$]*)/g)) local.add(m[1])
+    for (const m of src.matchAll(/\(([^()]*)\)\s*(?:=>|\{)/g)) {
+      for (const part of m[1].split(',')) {
+        const name = part.trim().split(/[=:]/)[0].trim()
+        if (/^[A-Za-z_$][\w$]*$/.test(name)) local.add(name)
+      }
+    }
+    for (const [name, home] of pool) {
+      if (home === file || imported.has(name) || local.has(name)) continue
+      const bare = new RegExp('(?<![.\\w$])' + name + '\\b(?!\\s*:)')
+      if (bare.test(src)) offenders.push(`${file} uses ${name} (exported by ${home}) without importing it`)
+    }
+  }
+  assert.deepEqual(offenders, [], 'missing imports throw ReferenceError only on the code path that uses them')
 })
 
 test('host: every host source stays under 2000 lines', () => {
