@@ -80,9 +80,10 @@ const imports = [
   "import { createMarkdown } from './studio/markdown.js'",
   "import { fmtTime, fmtDate } from './studio/format.js'",
   'import { ' + labelNames.join(', ') + " } from './studio/labels.js'",
-  "import { buildRoster, filterRoster, ownerLabel, memberLabel, toDateInput, fromDateInput } from './studio/roster.js'",
+  "import { buildRoster, filterRoster, ownerLabel, memberLabel, toDateInput, fromDateInput, artifactsWithoutBody, cardOwner } from './studio/roster.js'",
   "import { createFields } from './studio/fields.js'",
   "import { createSideDrawer } from './studio/shell.js'",
+  "import { createCard } from './studio/card.js'",
 ].join('\n') + '\n\n'
 writeFileSync(target, banner + imports + text)
 console.log(`make-legacy: wrote ${target} (${text.length} chars)`)

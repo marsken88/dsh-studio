@@ -2,7 +2,7 @@
    render an owner chip for a column or card. Pure data-in / string-out —
    callers pass the live config, nothing here touches the store. */
 
-import { ROLE_LABEL } from './labels.js'
+import { ROLE_LABEL, STRATEGY_LABEL } from './labels.js'
 
 export function toDateInput(value) {
   if (typeof value !== 'number' || value === 0) return ''
@@ -77,4 +77,39 @@ export function filterRoster(roster, query) {
   const needle = String(query ?? '').trim().toLowerCase()
   if (needle === '') return roster
   return roster.filter(item => `${item.name} ${item.hint}`.toLowerCase().includes(needle))
+}
+
+export function cardOwner(task, config) {
+  const experts = config.experts ?? []
+  if (task.dispatch?.state === 'running' && task.dispatch?.expert) {
+    const running = experts.find(expert => expert.id === task.dispatch.expert)
+    if (running !== undefined) return { label: `${running.emoji} ${running.name}`, note: '正在处理', expert: running }
+  }
+  const assigned = experts.find(expert => expert.id === task.expert)
+  if (assigned !== undefined) return { label: `${assigned.emoji} ${assigned.name}`, note: '卡上指派', expert: assigned }
+  const owner = config.columns?.[task.status]
+  if (owner !== undefined && Array.isArray(owner.members) && owner.members.length > 0) {
+    if (owner.members.length === 1) {
+      const only = owner.members[0]
+      const text = ownerLabel(config, { ...only, kind: only.kind })
+      if (text !== '') {
+        const expert = only.kind === 'expert' ? experts.find(entry => entry.id === only.id) : undefined
+        return { label: text, note: '本列候选人', expert }
+      }
+    }
+    const strategy = STRATEGY_LABEL[owner.strategy ?? 'round_robin'] ?? '轮询'
+    return { label: `候选池 ${owner.members.length} 人`, note: `本列候选：${owner.members.map(member => ownerLabel(config, member)).join('、')}（${strategy}）`, expert: undefined }
+  }
+  if (owner !== undefined && owner.kind !== 'none') {
+    const text = ownerLabel(config, owner)
+    if (text !== '') {
+      const expert = owner.kind === 'expert' ? experts.find(entry => entry.id === owner.id) : undefined
+      return { label: text, note: '本列负责人', expert }
+    }
+  }
+  return { label: '未指派', note: '等人认领', expert: undefined }
+}
+
+export function artifactsWithoutBody(task) {
+  return (task.artifacts ?? []).filter(item => String(item.content ?? '').trim() === '')
 }

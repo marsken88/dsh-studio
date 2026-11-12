@@ -98,13 +98,13 @@ test('host: studio tools are registered once each', () => {
 })
 
 test('client: heavy helpers live in web/src/studio and client.src.js ratchets down', () => {
-  for (const file of ['web/src/studio/markdown.js', 'web/src/studio/format.js', 'web/src/studio/labels.js', 'web/src/studio/roster.js', 'web/src/studio/fields.js', 'web/src/studio/shell.js']) {
+  for (const file of ['web/src/studio/markdown.js', 'web/src/studio/format.js', 'web/src/studio/labels.js', 'web/src/studio/roster.js', 'web/src/studio/fields.js', 'web/src/studio/shell.js', 'web/src/studio/card.js']) {
     assert.ok(existsSync(path(file)), file + ' missing')
   }
   const lines = read('client.src.js').split(/\r?\n/).length
-  assert.ok(lines < 7950, 'client.src.js is ' + lines + ' lines; keep lifting helpers into web/src/studio')
+  assert.ok(lines < 7800, 'client.src.js is ' + lines + ' lines; keep lifting helpers into web/src/studio')
   const maker = read('web/scripts/make-legacy.mjs')
-  for (const spec of ['./studio/markdown.js', './studio/format.js', './studio/labels.js', './studio/roster.js', './studio/fields.js', './studio/shell.js']) {
+  for (const spec of ['./studio/markdown.js', './studio/format.js', './studio/labels.js', './studio/roster.js', './studio/fields.js', './studio/shell.js', './studio/card.js']) {
     assert.ok(maker.includes(spec), 'make-legacy must keep importing ' + spec)
   }
   const legacy = read('web/src/legacy.js')
@@ -138,6 +138,23 @@ test('client: modules under web/src/studio do not call helpers left behind in cl
     }
   }
   assert.deepEqual([...offenders], [], 'moved module calls a helper that still lives in client.src.js')
+})
+
+test('client: every studio export used by client.src.js is imported back by make-legacy', () => {
+  const client = read('client.src.js')
+  const maker = read('web/scripts/make-legacy.mjs')
+  const modules = readdirSync(path('web/src/studio')).filter((name) => name.endsWith('.js'))
+  const missing = []
+  for (const name of modules) {
+    const code = read('web/src/studio/' + name)
+    const exports = [...code.matchAll(/export (?:async )?(?:function|const) ([A-Za-z_$][\w$]*)/g)].map((m) => m[1])
+    const line = maker.split(/\r?\n/).find((entry) => entry.includes("./studio/" + name)) ?? ''
+    for (const symbol of exports) {
+      const used = new RegExp('(?<![\\w$.#])' + symbol + '\\s*\\(').test(client)
+      if (used && !line.includes(symbol)) missing.push(name + ' exports ' + symbol + ' but make-legacy does not import it')
+    }
+  }
+  assert.deepEqual(missing, [], 'client.src.js calls a studio export that is never imported into the generated module')
 })
 
 test('ui: build-time guard rejects hsl(var( and unscoped portals', () => {
