@@ -16,7 +16,6 @@ export function configureDispatcher(services) {
 // ---------------------------------------------------------------- dispatcher
 
 /** Display labels for the four shipped roles. */
-export const ROLE_LABELS = Object.fromEntries(ROLE_IDS.map(role => [role, DEFAULT_ROLES[role].label]))
 
 /** What each role is expected to do with the card it is handed. */
 export const ROLE_BRIEF = {

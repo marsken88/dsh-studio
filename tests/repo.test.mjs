@@ -1,3 +1,25 @@
+test('host: imported bindings are never assigned to', () => {
+  const files = ['index.js', ...readdirSync('src/host').filter(f => f.endsWith('.js')).map(f => 'src/host/' + f)]
+  const offenders = []
+  for (const file of files) {
+    const src = readFileSync(file, 'utf8')
+    const imported = new Set()
+    for (const m of src.matchAll(/import\s*\{([^}]*)\}/g)) {
+      for (const part of m[1].split(',')) {
+        const name = part.trim().split(/\s+as\s+/).pop()
+        if (name) imported.add(name)
+      }
+    }
+    for (const m of src.matchAll(/import\s+([A-Za-z_$][\w$]*)\s+from/g)) imported.add(m[1])
+    for (const line of src.split(/\r?\n/)) {
+      const assign = line.match(/^\s*([A-Za-z_$][\w$]*)\s*(?:=(?![=>])|\+\+|--)/)
+      const shadowed = assign !== null && new RegExp('(?:const|let|var|function|class)\\s+' + assign[1] + '\\b').test(src)
+      if (assign && imported.has(assign[1]) && !shadowed) offenders.push(`${file}: ${line.trim().slice(0, 80)}`)
+    }
+  }
+  assert.deepEqual(offenders, [], 'assigning to an imported binding throws "Assignment to constant variable" at runtime')
+})
+
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
@@ -89,7 +111,7 @@ test('host: domain layer lives in src/host and stays out of index.js', () => {
   assert.ok(index.includes("from './src/host/domain.js'"), 'index.js must import the domain layer')
   assert.ok(!/^function sanitizeRequirement\(/m.test(index), 'sanitizeRequirement must not be re-declared in index.js')
   const lines = index.split(/\r?\n/).length
-  assert.ok(lines < 6300, `index.js is still ${lines} lines; keep splitting by domain`)
+  assert.ok(lines < 5800, `index.js is still ${lines} lines; keep splitting by domain`)
 })
 
 test('host: index.js imports every domain symbol it uses', () => {

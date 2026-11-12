@@ -7,7 +7,7 @@
 | 路径 | 是什么 | 谁能改 |
 | --- | --- | --- |
 | `index.js` | 宿主半边：`apply(ctx)`、39 个 `studio_*` 工具、`/studio-api/*` 路由、SQLite 存储、派单引擎、门禁 | ✅ 直接改 |
-| `src/host/*.js` | 宿主层模块：`domain.js`（板列/数据形状/`sanitize*`/默认配置，纯函数）、`dispatcher.js`（派单引擎）、`executor.js`（用例执行、代码事实核对、健康检查）、`integrations.js`（GitLab / 飞书 / 平台健康） | ✅ 直接改，新逻辑优先放这里 |
+| `src/host/*.js` | 宿主层模块：`domain.js`（板列/数据形状/`sanitize*`/默认配置，纯函数）、`dispatcher.js`（派单引擎）、`executor.js`（用例执行、代码事实核对、健康检查）、`store.js`（`StudioStore`/`SecretStore`：SQLite 台账 + 快照 + 登录会话）、`integrations.js`（GitLab / 飞书 / 平台健康） | ✅ 直接改，新逻辑优先放这里 |
 | `client.src.js` | 浏览器半边的手写源码（通过 `window.__ModuleLoader__` 注册面板） | ✅ 直接改（前端逻辑） |
 | `web/src/**` | shadcn/Radix 组件、样式、`legacy.js` 桥 | ✅ 直接改（样式与组件） |
 | `dist/client.js` | `pnpm build` 的产物（单文件 IIFE，注意在仓库根 `dist/`，不是 `web/dist/`） | ❌ 生成物 |
@@ -49,7 +49,7 @@ bash /tmp/deploy-all.sh     # cp 两个文件到 /home/lyf/dsh-studio，restart 
 
 > `deploy-all.sh` 拷 `index.js`、`client.js`，以及 `/tmp/src/` 下的 `src/host/*.js`。改了 `package.json`（包头、`engines`、`dsh.*`、`files`）、`cordis.patch.yml`、`locale/*.json` 时必须单独上传到 `/home/lyf/dsh-studio/` 再重启，否则改了个寂寞。改动前先 `cp package.json /tmp/package.json.bak` 留退路。
 >
-> 宿主拆成 `src/host/*.js` 以后，**部署必须带整个 `src/` 目录**：`/tmp/index.js`、`/tmp/client.js`、`/tmp/src/host/{domain,dispatcher,executor,integrations}.js`。只传 `index.js` 会得到 `ReferenceError: sanitizeAccess is not defined`（服务 502）。
+> 宿主拆成 `src/host/*.js` 以后，**部署必须带整个 `src/` 目录**：`/tmp/index.js`、`/tmp/client.js`、`/tmp/src/host/{domain,dispatcher,executor,integrations,store}.js`。只传 `index.js` 会得到 `ReferenceError: sanitizeAccess is not defined`（服务 502）。
 
 验收三件事：`systemctl is-active dsh-web` = `active`；浏览器打开 `http://<host>/` 侧栏出现「需求&任务工作空间」；`GET /studio-api/state` 返回 200 且 `revision` 递增。
 
@@ -63,7 +63,7 @@ bash /tmp/deploy-all.sh     # cp 两个文件到 /home/lyf/dsh-studio，restart 
    - 切页签用 `elementHandle.click()`（Radix Tabs 不认 DOM `.click()`）
    - 断言 DOM + `pageerror` 为空，并截图留档
 5. 涉及权限/门禁/发布的重改动，跑一遍既有 e2e 脚本并贴出数字
-6. `npm test`（`tests/repo.test.mjs`，19 条仓库契约：manifest / 产物一致 / 宿主接口 / 领域层拆分与导入 / 迁移 / 文档 / locale）；`npm run check` = 语法 + 契约一把过
+6. `npm test`（21 条：`tests/repo.test.mjs` 管 manifest / 产物一致 / 宿主接口 / 领域层拆分与导入 / **导入只读绑定不许赋值** / 迁移 / 文档 / locale；`tests/store-boot.test.mjs` 真的起一个 `StudioStore`，把「搬完代码启动就炸」这类问题挡在部署前。想连真数据验证：把生产库三个文件（`.db`/`-wal`/`-shm`）拷到临时目录，用 `new StudioStore()` + `await store.ready` 跑一遍，`tmp/boot-real.mjs` 就是这么写的）；`npm run check` = 语法 + 契约一把过
 7. CI 在 `.github/workflows/ci.yml`：语法 → 契约 → `web/` 里 `pnpm install --frozen-lockfile && pnpm build` → `cmp dist/client.js client.js` → `git diff --exit-code`（产物必须可复现，改了前端忘记构建会直接红）
 
 ## 5. 禁止事项
@@ -84,7 +84,7 @@ bash /tmp/deploy-all.sh     # cp 两个文件到 /home/lyf/dsh-studio，restart 
 - 路由统一挂在 `/studio-api`（`ctx.webServer.register({ kind:'prefix' })`）；新增路由记得同时更新权限分级 `accessLevelFor` 与 `/auth/*` 例外。
 - 迁移走 `config.schema` 版本号 + `#load()` 里的顺序迁移函数，禁止「就地猜测数据形状」。
 - 长任务（派单、GitLab 同步、飞书推送）不得阻塞请求线程；失败要写进任务 `history` 或审计，不许静默。
-- 拆出去的模块要宿主能力时，用 `configureDispatcher()/configureExecutor()/configureIntegrations()` 注入，**不要让子模块反向 import `index.js`**（会成环）；需要活值（如 `activeDispatcher`）用 getter 注入。
+- 拆出去的模块要宿主能力时，用 `configureDispatcher()/configureExecutor()/configureIntegrations()` 注入（`store.js` 不需要注入，只依赖 `domain.js`），**不要让子模块反向 import `index.js`**（会成环）；需要活值（如 `activeDispatcher`）用 getter 注入。
 
 ## 7. 前端约定
 
@@ -129,6 +129,7 @@ GIT_SSH_COMMAND="ssh -p 443" git push
 | 主按钮只剩文字 | 是否又用了 `hsl(var(--primary))`；改实色 |
 | 弹窗/抽屉看不见 | Portal 容器是否缺 `data-dsh-studio` 属性 |
 | 拖拽没反应 | 卡片是否有 `draggable`、列上是否有 `onDragOver/onDrop`、路由是否是 `/task/update` |
+| 服务每 5 分钟自杀一次 | 定时器里给**导入绑定**赋值（`larkProbeCache = …`）：ESM 导入只读，抛 `Assignment to constant variable`；改成调 `invalidateLarkProbe()` 这类 setter |
 | 点击页面卡顿 | DevTools Performance 找长任务；`keyboardPatch` 之类全量扫描是历史元凶 |
 | 派单没留言 | 会话日志里找 `turn/end reason.kind=error`；常见是模型无可用通道（503） |
 | 保存成功但字段为空 | `publicConfig`/`mergeConfig`/`sanitize*` 白名单漏字段 |

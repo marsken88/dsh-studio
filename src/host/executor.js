@@ -2,7 +2,7 @@
 // 代码事实核对、用例执行、缺陷回流、健康检查。宿主级依赖通过 configureExecutor() 注入。
 
 import { CODE_PREFIX, ROLE_IDS, STATUS_IDS, STATUSES, nextRequirementCode, nextTaskCode, normalizePatch, sanitizeBaseline, sanitizeReqDoc, sanitizeRequirement, sanitizeTestRun, text } from './domain.js'
-import { ROLE_LABELS, RUN_LOG, parseMentions } from './dispatcher.js'
+import { RUN_LOG, parseMentions } from './dispatcher.js'
 import { homedir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises'
@@ -904,6 +904,11 @@ export async function pullFeishuDoc(url) {
 /** lark-cli 探活：60 秒内复用结果，别每次调用都起进程。 */
 export let larkProbeCache = { at: 0, ok: false, hint: '' }
 
+/** Drops the cached probe so the next larkCliReady() shells out again. */
+export function invalidateLarkProbe() {
+  larkProbeCache = { at: 0, ok: false, hint: '' }
+}
+
 export async function larkCliReady() {
   const now = Date.now()
   if (now - larkProbeCache.at < 60000) return larkProbeCache
@@ -1279,28 +1284,6 @@ export async function updateTask(store, id, patch) {
 
 /** Append a comment and report who it @mentioned. */
 /** 把「架构」「🏛️ 架构师」「研发」这类历史写法收敛成专家本名，老数据与新写入都受益。 */
-export function canonicalAuthor(who, config) {
-  const raw = String(who ?? '').trim()
-  if (raw === '') return raw
-  // 去掉 emoji / 符号前缀，只留下人类可读的名字部分
-  const plain = raw.replace(/^[^\p{L}\p{N}]+/u, '').trim() || raw
-  const experts = (config?.experts ?? []).filter(entry => entry.enabled !== false)
-  const exact = experts.find(entry => entry.name === plain || entry.name === raw)
-  if (exact !== undefined) return exact.name
-  const contains = experts.find(entry => {
-    const name = String(entry.name ?? '')
-    if (name === '') return false
-    // 只允许一方完整包含另一方，避免「产品」误匹配「支付产品经理」以外的短名
-    return plain.includes(name) || (plain.length >= 2 && name.includes(plain))
-  })
-  if (contains !== undefined) return contains.name
-  const byRole = experts.find(entry => {
-    const label = ROLE_LABELS[entry.role] ?? ''
-    if (label === '') return false
-    return label === plain || label.startsWith(plain) || plain.startsWith(label)
-  })
-  return byRole === undefined ? raw : byRole.name
-}
 
 export async function commentTask(store, id, body, author, kind) {
   const content = text(body, 20000)

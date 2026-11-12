@@ -1714,3 +1714,169 @@ export function normalizePatch(input) {
   return patch
 }
 
+
+
+export function sanitizeAuditEntry(raw, index) {
+  const input = raw !== null && typeof raw === 'object' ? raw : {}
+  const route = String(input.route ?? '').slice(0, 120)
+  if (route === '') return null
+  return {
+    id: String(input.id ?? `au-${index}`).slice(0, 60),
+    at: Number.isFinite(input.at) ? Number(input.at) : 0,
+    by: String(input.by ?? '').slice(0, 40) || '人',
+    route,
+    level: ['read', 'write', 'admin'].includes(input.level) ? input.level : 'write',
+    status: Number.isFinite(input.status) ? Number(input.status) : 0,
+    ok: input.ok === true,
+    summary: String(input.summary ?? '').slice(0, 200),
+  }
+}
+
+export function sanitizeAudit(input) {
+  if (!Array.isArray(input)) return []
+  const out = []
+  for (const raw of input.slice(-1000)) {
+    const item = sanitizeAuditEntry(raw, out.length)
+    if (item !== null) out.push(item)
+  }
+  return out
+}
+
+export function sanitizeReleases(input) {
+  if (!Array.isArray(input)) return []
+  const out = []
+  const seen = new Set()
+  input.slice(0, 200).forEach((raw, index) => {
+    const item = sanitizeRelease(raw, index)
+    if (item === null) return
+    let id = item.id
+    let suffix = 1
+    while (seen.has(id)) {
+      id = `${item.id}-${suffix++}`
+    }
+    seen.add(id)
+    out.push({ ...item, id })
+  })
+  return out
+}
+
+export function sanitizeRelease(raw, index = 0) {
+  if (raw === null || typeof raw !== 'object') return null
+  const version = String(raw.version ?? '').trim().slice(0, 40)
+  const name = String(raw.name ?? '').trim().slice(0, 120)
+  if (version === '' && name === '') return null
+  return {
+    id: cleanId(raw.id ?? (version === '' ? name : version), `rel-${index}`),
+    version,
+    name,
+    project: String(raw.project ?? '').slice(0, 60),
+    status: RELEASE_STATUSES.includes(raw.status) ? raw.status : 'draft',
+    owner: String(raw.owner ?? '').slice(0, 60),
+    plannedAt: Number(raw.plannedAt) || 0,
+    releasedAt: Number(raw.releasedAt) || 0,
+    notes: String(raw.notes ?? '').slice(0, 60000),
+    approveBy: String(raw.approveBy ?? '').slice(0, 120),
+    approveAt: Number(raw.approveAt) || 0,
+    rollbackReason: String(raw.rollbackReason ?? '').slice(0, 600),
+    /** 发布时绑定的制品：Git 标签 + 提交，出问题能顺着 tag 找到当时的代码。 */
+    tagName: String(raw.tagName ?? '').slice(0, 120),
+    commitSha: String(raw.commitSha ?? '').slice(0, 64),
+    smoke: sanitizeSmoke(raw.smoke),
+    /** 审批留痕：谁在什么时候、基于什么结论批的（不记就等于没人负责）。 */
+    approvals: (Array.isArray(raw.approvals) ? raw.approvals : []).slice(0, 20).map((entry, at) => ({
+      id: String(entry?.id ?? '').trim() || `ap${at + 1}`,
+      by: String(entry?.by ?? '').slice(0, 120),
+      role: String(entry?.role ?? '').slice(0, 40),
+      at: Number(entry?.at) || 0,
+      note: String(entry?.note ?? '').slice(0, 600),
+    })).filter(entry => entry.by !== ''),
+    /** 灰度批次：先 10% 再 50% 再全量，每批谁确认的都要留下。 */
+    grayBatches: (Array.isArray(raw.grayBatches) ? raw.grayBatches : []).slice(0, 20).map((entry, at) => ({
+      id: String(entry?.id ?? '').trim() || `g${at + 1}`,
+      name: String(entry?.name ?? '').slice(0, 120) || `第 ${at + 1} 批`,
+      percent: Math.max(0, Math.min(100, Number(entry?.percent) || 0)),
+      status: ['pending', 'running', 'passed', 'rolled_back'].includes(String(entry?.status)) ? String(entry.status) : 'pending',
+      by: String(entry?.by ?? '').slice(0, 120),
+      at: Number(entry?.at) || 0,
+      note: String(entry?.note ?? '').slice(0, 600),
+    })),
+    /** 部署记录：发布、回滚、灰度推进都写在这里，时间线不用问人。 */
+    deployLog: (Array.isArray(raw.deployLog) ? raw.deployLog : []).slice(-200).map(entry => ({
+      at: Number(entry?.at) || 0,
+      by: String(entry?.by ?? '').slice(0, 120),
+      action: String(entry?.action ?? '').slice(0, 40),
+      /** 部署到的环境 id（只登记，不触发部署）。 */
+      env: String(entry?.env ?? '').slice(0, 40),
+      note: String(entry?.note ?? '').slice(0, 600),
+    })),
+    createdAt: Number(raw.createdAt) || Date.now(),
+    updatedAt: Number(raw.updatedAt) || Date.now(),
+  }
+}
+
+export const RELEASE_STATUSES = ['draft', 'candidate', 'approved', 'released', 'rolled_back']
+
+export const RELEASE_STATUS_LABEL = {
+  draft: '草稿',
+  candidate: '待发布',
+  approved: '已审批',
+  released: '已发布',
+  rolled_back: '已回滚',
+}
+
+export function sanitizeSmokeItem(raw, index) {
+  if (raw === null || typeof raw !== 'object') {
+    const plain = String(raw ?? '').trim().slice(0, 200)
+    return plain === '' ? null : { id: `s${index + 1}`, text: plain, done: false, by: '', at: 0 }
+  }
+  const label = String(raw.text ?? '').trim().slice(0, 200)
+  if (label === '') return null
+  return {
+    id: String(raw.id ?? '').trim().slice(0, 24) || `s${index + 1}`,
+    text: label,
+    done: raw.done === true,
+    by: String(raw.by ?? '').slice(0, 60),
+    at: Number(raw.at) || 0,
+  }
+}
+
+export function sanitizeSmoke(input) {
+  if (!Array.isArray(input)) return []
+  const out = []
+  const seen = new Set()
+  input.slice(0, 40).forEach((raw, index) => {
+    const item = sanitizeSmokeItem(raw, index)
+    if (item === null) return
+    let id = item.id
+    let suffix = 1
+    while (seen.has(id)) id = `${item.id}-${suffix++}`
+    seen.add(id)
+    out.push({ ...item, id })
+  })
+  return out
+}
+
+export function canonicalAuthor(who, config) {
+  const raw = String(who ?? '').trim()
+  if (raw === '') return raw
+  // 去掉 emoji / 符号前缀，只留下人类可读的名字部分
+  const plain = raw.replace(/^[^\p{L}\p{N}]+/u, '').trim() || raw
+  const experts = (config?.experts ?? []).filter(entry => entry.enabled !== false)
+  const exact = experts.find(entry => entry.name === plain || entry.name === raw)
+  if (exact !== undefined) return exact.name
+  const contains = experts.find(entry => {
+    const name = String(entry.name ?? '')
+    if (name === '') return false
+    // 只允许一方完整包含另一方，避免「产品」误匹配「支付产品经理」以外的短名
+    return plain.includes(name) || (plain.length >= 2 && name.includes(plain))
+  })
+  if (contains !== undefined) return contains.name
+  const byRole = experts.find(entry => {
+    const label = ROLE_LABELS[entry.role] ?? ''
+    if (label === '') return false
+    return label === plain || label.startsWith(plain) || plain.startsWith(label)
+  })
+  return byRole === undefined ? raw : byRole.name
+}
+
+export const ROLE_LABELS = Object.fromEntries(ROLE_IDS.map(role => [role, DEFAULT_ROLES[role].label]))
