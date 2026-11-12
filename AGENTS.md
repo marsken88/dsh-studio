@@ -7,6 +7,7 @@
 | 路径 | 是什么 | 谁能改 |
 | --- | --- | --- |
 | `index.js` | 宿主半边：`apply(ctx)`、39 个 `studio_*` 工具、`/studio-api/*` 路由、SQLite 存储、派单引擎、门禁 | ✅ 直接改 |
+| `src/host/*.js` | 宿主领域层：板列与状态、卡片/需求/版本的数据形状与 `sanitize*`、默认配置、编号生成（纯函数，无 I/O、无宿主服务） | ✅ 直接改，新逻辑优先放这里 |
 | `client.src.js` | 浏览器半边的手写源码（通过 `window.__ModuleLoader__` 注册面板） | ✅ 直接改（前端逻辑） |
 | `web/src/**` | shadcn/Radix 组件、样式、`legacy.js` 桥 | ✅ 直接改（样式与组件） |
 | `dist/client.js` | `pnpm build` 的产物（单文件 IIFE，注意在仓库根 `dist/`，不是 `web/dist/`） | ❌ 生成物 |
@@ -46,7 +47,9 @@ node C:/Users/hp/.dsh/dsh-runtimes/dsh-primary-runtime/dependencies/pnpm/bin/pnp
 bash /tmp/deploy-all.sh     # cp 两个文件到 /home/lyf/dsh-studio，restart dsh-web，打印 is-active
 ```
 
-> `deploy-all.sh` **只拷 `index.js` 与 `client.js`**。改了 `package.json`（包头、`engines`、`dsh.*`、`files`）、`cordis.patch.yml`、`locale/*.json` 时必须单独上传到 `/home/lyf/dsh-studio/` 再重启，否则改了个寂寞。改动前先 `cp package.json /tmp/package.json.bak` 留退路。
+> `deploy-all.sh` 拷 `index.js`、`client.js`，以及 `/tmp/src/` 下的 `src/host/*.js`。改了 `package.json`（包头、`engines`、`dsh.*`、`files`）、`cordis.patch.yml`、`locale/*.json` 时必须单独上传到 `/home/lyf/dsh-studio/` 再重启，否则改了个寂寞。改动前先 `cp package.json /tmp/package.json.bak` 留退路。
+>
+> 领域层拆出来以后，**宿主要传三个位置**：`/tmp/index.js`、`/tmp/client.js`、`/tmp/src/host/domain.js`。只传 `index.js` 会得到 `ReferenceError: sanitizeAccess is not defined`（服务 502）。
 
 验收三件事：`systemctl is-active dsh-web` = `active`；浏览器打开 `http://<host>/` 侧栏出现「需求&任务工作空间」；`GET /studio-api/state` 返回 200 且 `revision` 递增。
 
@@ -60,7 +63,7 @@ bash /tmp/deploy-all.sh     # cp 两个文件到 /home/lyf/dsh-studio，restart 
    - 切页签用 `elementHandle.click()`（Radix Tabs 不认 DOM `.click()`）
    - 断言 DOM + `pageerror` 为空，并截图留档
 5. 涉及权限/门禁/发布的重改动，跑一遍既有 e2e 脚本并贴出数字
-6. `npm test`（`tests/repo.test.mjs`，13 条仓库契约：manifest / 产物一致 / 宿主接口 / 迁移 / 文档 / locale）；`npm run check` = 语法 + 契约一把过
+6. `npm test`（`tests/repo.test.mjs`，17 条仓库契约：manifest / 产物一致 / 宿主接口 / 领域层拆分与导入 / 迁移 / 文档 / locale）；`npm run check` = 语法 + 契约一把过
 7. CI 在 `.github/workflows/ci.yml`：语法 → 契约 → `web/` 里 `pnpm install --frozen-lockfile && pnpm build` → `cmp dist/client.js client.js` → `git diff --exit-code`（产物必须可复现，改了前端忘记构建会直接红）
 
 ## 5. 禁止事项

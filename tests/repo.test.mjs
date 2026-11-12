@@ -11,6 +11,11 @@ const read = (p) => readFileSync(path(p), 'utf8')
 const bytes = (p) => readFileSync(path(p))
 const sha = (p) => createHash('sha256').update(bytes(p)).digest('hex')
 const manifest = JSON.parse(read('package.json'))
+const hostSources = [
+  'index.js',
+  ...readdirSync(path('src/host')).filter((name) => name.endsWith('.js')).map((name) => 'src/host/' + name),
+]
+const hostText = hostSources.map((file) => read(file)).join('\n')
 
 test('manifest: entry points exist and resolve', () => {
   for (const [key, value] of Object.entries(manifest.exports)) {
@@ -69,14 +74,51 @@ test('host: studio tools are registered once each', () => {
 })
 
 test('host: no model is hardcoded to a channel-less default', () => {
-  for (const file of ['index.js', 'client.src.js']) {
+  for (const file of hostSources) {
     assert.ok(!/model:\s*'deepseek-v4-pro'|model:\s*"deepseek-v4-pro"/.test(read(file)), `${file} still assigns deepseek-v4-pro (503 No available channel)`)
   }
-  assert.ok(read('index.js').includes('FALLBACK_AGENT_MODEL'), 'FALLBACK_AGENT_MODEL guard is missing')
+  assert.ok(hostText.includes('FALLBACK_AGENT_MODEL'), 'FALLBACK_AGENT_MODEL guard is missing')
+})
+
+test('host: domain layer lives in src/host and stays out of index.js', () => {
+  assert.ok(existsSync(path('src/host/domain.js')), 'src/host/domain.js missing')
+  const domain = read('src/host/domain.js')
+  assert.ok(domain.includes('export const STATUSES'), 'domain must export the board columns')
+  assert.ok(domain.includes('export function sanitizeRequirement('), 'domain must export requirement sanitizing')
+  const index = read('index.js')
+  assert.ok(index.includes("from './src/host/domain.js'"), 'index.js must import the domain layer')
+  assert.ok(!/^function sanitizeRequirement\(/m.test(index), 'sanitizeRequirement must not be re-declared in index.js')
+  const lines = index.split(/\r?\n/).length
+  assert.ok(lines < 9500, `index.js is still ${lines} lines; keep splitting by domain`)
+})
+
+test('host: index.js imports every domain symbol it uses', () => {
+  const domain = read('src/host/domain.js')
+  const exported = [...domain.matchAll(/^export\s+(?:async\s+function|function|class|const|let)\s+([A-Za-z_$][\w$]*)/gm)].map((m) => m[1])
+  const index = read('index.js')
+  const block = index.match(/import \{\n([\s\S]*?)\n\} from '\.\/src\/host\/domain\.js'/)
+  assert.ok(block, 'index.js must have a domain import block')
+  const imported = new Set(block[1].split('\n').map((line) => line.trim().replace(/,$/, '')).filter(Boolean))
+  const rest = index.replace(block[0], '')
+  const missing = exported.filter((name) => new RegExp('\\b' + name + '\\b').test(rest) && !imported.has(name))
+  assert.deepEqual(missing, [], 'symbols used but not imported (runtime ReferenceError): ' + missing.join(', '))
+})
+
+test('host: every host source stays under 2000 lines', () => {
+  for (const file of hostSources) {
+    if (file === 'index.js') continue
+    const lines = read(file).split(/\r?\n/).length
+    assert.ok(lines < 2000, `${file} is ${lines} lines; split it by responsibility`)
+  }
+})
+
+test('host: index.js shrinks over time (ratchet)', () => {
+  const lines = read('index.js').split(/\r?\n/).length
+  assert.ok(lines < 9500, `index.js grew to ${lines} lines; move new logic into src/host/*.js`)
 })
 
 test('state schema migration is versioned', () => {
-  const host = read('index.js')
+  const host = hostText
   const version = Number(manifest.dsh?.stateSchema ?? 0)
   assert.match(host, /schema:\s*\d+/, 'defaultConfig must declare a schema version')
   assert.match(host, /schema[^\n]{0,48}<\s*\d+/, 'at least one ordered migration must exist')
