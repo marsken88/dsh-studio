@@ -11,6 +11,7 @@ import * as LabelPrimitive from '@radix-ui/react-label'
 import { cva } from 'class-variance-authority'
 import { X, Check } from 'lucide-react'
 import { cn } from '../lib/utils.js'
+import { portalRoot } from '../lib/portal.js'
 
 const buttonVariants = cva(
   'inline-flex shrink-0 items-center justify-center gap-2 whitespace-nowrap rounded-md text-sm font-medium outline-none transition-all disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg:not([class*=\'size-\'])]:size-4 [&_svg]:shrink-0 focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50',
@@ -120,7 +121,7 @@ TabsContent.displayName = 'TabsContent'
 const Dialog = DialogPrimitive.Root
 const DialogTrigger = DialogPrimitive.Trigger
 const DialogClose = DialogPrimitive.Close
-const DialogPortal = ({ ...props }) => <DialogPrimitive.Portal {...props} />
+const DialogPortal = ({ ...props }) => <DialogPrimitive.Portal container={portalRoot()} {...props} />
 const DialogOverlay = React.forwardRef(({ className, ...props }, ref) => (
   <DialogPrimitive.Overlay
     ref={ref}

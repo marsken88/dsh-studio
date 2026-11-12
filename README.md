@@ -27,6 +27,18 @@ sudo systemctl restart dsh-web
 
 页面入口：DSH Web 左侧栏第 4 项「需求&任务工作空间」。三个页签：**看板 / 市场 / 设置**。
 
+## 质量闸门
+
+两类 HTML/CSS 抓不到的回归，现在由构建期守卫和真库自检挡住：
+
+| 命令 | 挡什么 |
+| --- | --- |
+| `cd web && npm run guard` | CSS 里写回 `hsl(var(--x))`（颜色解析失败）、Radix Portal 忘记 `container={portalRoot()}`（弹层「存在但不可见」）、产物丢失门户作用域属性 |
+| `npm run smoke:store -- ~/.dsh/dsh-studio.db` | 用生产库的 `.db/-wal/-shm` 副本在本地跑真实启动路径，抓「空库能起、真库就炸」的 `ReferenceError` |
+| `npm test` | 27 条契约：manifest、产物哈希、宿主接口、跨模块导入、只读绑定赋值、迁移与文档一致性 |
+
+`pnpm build` 已串上守卫（`make-legacy → guard --pre → vite build → sync-client → guard --post`），CI 也会跑：忘记构建或写出上面两类样式，流水线直接红。
+
 ## 开发与兼容性
 
 - 参与开发（构建链、部署、验证要求、禁区）：[AGENTS.md](AGENTS.md)

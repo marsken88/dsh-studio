@@ -4,8 +4,9 @@
   "version": "0.1.0",
   "type": "module",
   "scripts": {
-    "build": "node scripts/make-legacy.mjs && vite build && node scripts/sync-client.mjs",
-    "dev": "vite build --watch"
+    "build": "node scripts/make-legacy.mjs && node scripts/guard.mjs --pre && vite build && node scripts/sync-client.mjs && node scripts/guard.mjs --post",
+    "dev": "vite build --watch",
+    "guard": "node scripts/guard.mjs"
   },
   "dependencies": {
     "@radix-ui/react-checkbox": "^1.1.4",

@@ -22,6 +22,7 @@ test('host: imported bindings are never assigned to', () => {
 
 import test from 'node:test'
 import assert from 'node:assert/strict'
+import { execFileSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs'
 import { dirname, join } from 'node:path'
@@ -96,6 +97,11 @@ test('host: studio tools are registered once each', () => {
   assert.equal(new Set(names).size, names.length, 'duplicate studio tool name')
 })
 
+test('ui: build-time guard rejects hsl(var( and unscoped portals', () => {
+  const out = execFileSync(process.execPath, ['web/scripts/guard.mjs', '--pre'], { cwd: ROOT, encoding: 'utf8' })
+  assert.match(out, /ui guard \(pre\)/)
+  assert.match(out, /6 Radix portals|Radix portals/)
+})
 test('host: no model is hardcoded to a channel-less default', () => {
   for (const file of hostSources) {
     assert.ok(!/model:\s*'deepseek-v4-pro'|model:\s*"deepseek-v4-pro"/.test(read(file)), `${file} still assigns deepseek-v4-pro (503 No available channel)`)
@@ -221,7 +227,7 @@ test('state schema migration is versioned', () => {
 })
 
 test('client source: portal containers carry both scope attributes', () => {
-  const ui = read('web/src/components/studio-ui.jsx')
+  const ui = read('web/src/lib/portal.js')
   assert.ok(ui.includes('data-dsh-studio-portal'), 'portal root must be marked')
   assert.ok(ui.includes("setAttribute('data-dsh-studio'"), 'portal root must also join the [data-dsh-studio] scope')
 })
