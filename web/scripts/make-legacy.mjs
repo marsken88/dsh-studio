@@ -85,6 +85,9 @@ const imports = [
   "import { createSideDrawer } from './studio/shell.js'",
   "import { createCard } from './studio/card.js'",
   "import { createBoard } from './studio/board.js'",
+  "import { createMentionPicker } from './studio/mentions.js'",
+  "import { createDrawer } from './studio/drawer.js'",
+  "import { parseSteps } from './studio/cases.js'",
 ].join('\n') + '\n\n'
 writeFileSync(target, banner + imports + text)
 console.log(`make-legacy: wrote ${target} (${text.length} chars)`)
