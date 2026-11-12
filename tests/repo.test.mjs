@@ -89,7 +89,7 @@ test('host: domain layer lives in src/host and stays out of index.js', () => {
   assert.ok(index.includes("from './src/host/domain.js'"), 'index.js must import the domain layer')
   assert.ok(!/^function sanitizeRequirement\(/m.test(index), 'sanitizeRequirement must not be re-declared in index.js')
   const lines = index.split(/\r?\n/).length
-  assert.ok(lines < 9500, `index.js is still ${lines} lines; keep splitting by domain`)
+  assert.ok(lines < 8600, `index.js is still ${lines} lines; keep splitting by domain`)
 })
 
 test('host: index.js imports every domain symbol it uses', () => {
@@ -109,6 +109,25 @@ test('host: every host source stays under 2000 lines', () => {
     if (file === 'index.js') continue
     const lines = read(file).split(/\r?\n/).length
     assert.ok(lines < 2000, `${file} is ${lines} lines; split it by responsibility`)
+  }
+})
+
+test('host: node builtin calls in src/host are imported', () => {
+  const names = ['mkdir', 'mkdtemp', 'rm', 'readFile', 'writeFile', 'readdir', 'stat', 'access', 'copyFile', 'chmod', 'utimes', 'randomBytes', 'randomUUID', 'createHash', 'homedir', 'tmpdir', 'platform', 'join', 'resolve', 'dirname', 'basename', 'spawn', 'execFile', 'exec']
+  for (const file of hostSources.filter((entry) => entry.startsWith('src/host/'))) {
+    const source = read(file)
+    const imports = [...source.matchAll(/import \{([^}]*)\} from 'node:[^']+'/g)].map((m) => m[1]).join(',')
+    const imported = new Set(imports.split(',').map((name) => name.trim()).filter(Boolean))
+    for (const name of names) {
+      if (!new RegExp('(^|[^\\w.$])' + name + '\\(').test(source)) continue
+      assert.ok(imported.has(name), `${file} calls ${name}() without importing it`)
+    }
+  }
+})
+
+test('host: every src/host module evaluates without a ReferenceError', async () => {
+  for (const file of hostSources.filter((entry) => entry.startsWith('src/host/'))) {
+    await import(new URL('../' + file, import.meta.url).href)
   }
 })
 

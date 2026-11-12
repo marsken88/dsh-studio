@@ -49,7 +49,7 @@ bash /tmp/deploy-all.sh     # cp 两个文件到 /home/lyf/dsh-studio，restart 
 
 > `deploy-all.sh` 拷 `index.js`、`client.js`，以及 `/tmp/src/` 下的 `src/host/*.js`。改了 `package.json`（包头、`engines`、`dsh.*`、`files`）、`cordis.patch.yml`、`locale/*.json` 时必须单独上传到 `/home/lyf/dsh-studio/` 再重启，否则改了个寂寞。改动前先 `cp package.json /tmp/package.json.bak` 留退路。
 >
-> 领域层拆出来以后，**宿主要传三个位置**：`/tmp/index.js`、`/tmp/client.js`、`/tmp/src/host/domain.js`。只传 `index.js` 会得到 `ReferenceError: sanitizeAccess is not defined`（服务 502）。
+> 宿主拆成 `src/host/*.js` 以后，**部署必须带整个 `src/` 目录**：`/tmp/index.js`、`/tmp/client.js`、`/tmp/src/host/{domain,dispatcher}.js`。只传 `index.js` 会得到 `ReferenceError: sanitizeAccess is not defined`（服务 502）。
 
 验收三件事：`systemctl is-active dsh-web` = `active`；浏览器打开 `http://<host>/` 侧栏出现「需求&任务工作空间」；`GET /studio-api/state` 返回 200 且 `revision` 递增。
 
@@ -63,7 +63,7 @@ bash /tmp/deploy-all.sh     # cp 两个文件到 /home/lyf/dsh-studio，restart 
    - 切页签用 `elementHandle.click()`（Radix Tabs 不认 DOM `.click()`）
    - 断言 DOM + `pageerror` 为空，并截图留档
 5. 涉及权限/门禁/发布的重改动，跑一遍既有 e2e 脚本并贴出数字
-6. `npm test`（`tests/repo.test.mjs`，17 条仓库契约：manifest / 产物一致 / 宿主接口 / 领域层拆分与导入 / 迁移 / 文档 / locale）；`npm run check` = 语法 + 契约一把过
+6. `npm test`（`tests/repo.test.mjs`，19 条仓库契约：manifest / 产物一致 / 宿主接口 / 领域层拆分与导入 / 迁移 / 文档 / locale）；`npm run check` = 语法 + 契约一把过
 7. CI 在 `.github/workflows/ci.yml`：语法 → 契约 → `web/` 里 `pnpm install --frozen-lockfile && pnpm build` → `cmp dist/client.js client.js` → `git diff --exit-code`（产物必须可复现，改了前端忘记构建会直接红）
 
 ## 5. 禁止事项
@@ -74,6 +74,7 @@ bash /tmp/deploy-all.sh     # cp 两个文件到 /home/lyf/dsh-studio，restart 
 - ❌ 用 `split("\r\n")` 编辑 README（本仓库是混合行尾）：用 `split(/\r?\n/)`，写回统一 `\r\n`
 - ❌ 在 UI 线程里做「读样式 + 写属性」交替的批量循环（会触发强制同步布局，实测 685 ms 长任务）
 - ❌ 删除用户数据前不备份：先 `cp ~/.dsh/dsh-studio.db /tmp/...`，再操作
+- ❌ 从 `index.js` 往外搬代码后不回查导入：`node --check` 查不出，只有 `import()` 与运行时才会炸（新增的契约测试会拦一类，见 §4）
 
 ## 6. 后端约定（`index.js`）
 
