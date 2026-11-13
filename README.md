@@ -327,6 +327,54 @@ sudo systemctl restart dsh-web
 | `expectContains` / `expectNotContains` | 输出里必须出现 / 不能出现的内容 |
 
 两个入口：卡片抽屉用例区的 **「＋ shell」**（命令 + 期望输出两步录入），或调 `POST /studio-api/task/case` 直接写 `shell: { … }`。
+## 数据库用例（默认关闭）
+
+第三种执行方式：对着一个 SQLite 库跑一条语句，断言行数与首行某列的值。适合「库存不能被扣成负数」这类只有查库才能确认的验收。
+
+**打开方式**：设置 → 测试执行 → 打开「允许数据库用例」（`config.testing.allowDb`）。默认**只读**打开，要写入必须显式 `readOnly: false`。
+
+```json
+{ "title": "库存不能超卖", "db": {
+  "file": "/tmp/test.db",
+  "sql": "select count(*) as n from orders where stock < 0",
+  "expectRows": 1, "expectColumn": "n", "expectValue": "0" } }
+```
+
+| 字段 | 作用 |
+| --- | --- |
+| `file` / `sql` | 必填；库文件路径与语句 |
+| `params` | 绑定参数（`?` 占位） |
+| `expectRows` | 期望行数；不填不校验 |
+| `expectColumn` + `expectValue` | 校验首行某一列的值 |
+| `readOnly` | 默认 `true`；要改数据才设 `false` |
+
+## 出站 webhook（把变化告诉外部系统）
+
+卡片流转、用例失败、派单失败都会发事件，配了 webhook 就 POST 出去：
+
+```json
+{ "webhooks": [{ "id": "ci", "url": "https://ci.example/hook",
+  "events": ["task/moved", "case/failed"], "enabled": true }] }
+```
+
+事件长这样：
+
+```json
+{ "type": "task/moved", "at": 1794585755429,
+  "payload": { "taskId": "t-…", "from": "clarify", "to": "accept", "by": "agent" } }
+```
+
+约定三条：**调用方不重试**（外部抖动是常态，事件本身已进台账）、**5 秒超时**、**订阅者之间互不影响**（一个 hook 抛错不影响其它 hook，也不影响正在写库的请求）。
+
+## 数量上限（可配）
+
+以前写死在路由里：一张卡 60 条用例、一次批量跑 60 条、一张卡 40 个交付物——**超了静默丢**。现在读配置，超了会明确报错（套件回归仍然继续跑，但会标记 `truncated`）：
+
+```json
+{ "limits": { "casesPerTask": 60, "runKeys": 60, "artifactsPerTask": 40 } }
+```
+
+范围 1–500，写非法值会退回默认。
 ## 用例自动生成（从功能点长出来，不是凭空写）
 
 测试用例不用一条条手敲：需求拆了功能点、每个功能点带验收条件，平台就能照着生成。
