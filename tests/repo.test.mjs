@@ -410,6 +410,18 @@ test('host: artifacts leave the poll without their bodies', async () => {
   assert.equal(artifact.content, body, 'the stored artifact must not be stripped in place')
 })
 
+test('host: the token audit lands in the checklist too', async () => {
+  const { applySpecItem } = await import('../src/host/design.js')
+  const dirty = applySpecItem([], { violations: 17, top: [{ value: '13.3333px', count: 23 }, { value: '9px', count: 14 }] })
+  assert.equal(dirty.length, 1)
+  assert.match(dirty[0].text, /17 处待复核（13\.3333px×23、9px×14）/)
+  assert.equal(dirty[0].done, false)
+  const clean = applySpecItem(dirty, { violations: 0, top: [] })
+  assert.equal(clean.length, 1, 'same row is updated')
+  assert.equal(clean[0].id, dirty[0].id)
+  assert.equal(clean[0].done, true)
+})
+
 test('host: fidelity lands in the checklist and fails below the target', async () => {
   const { applyFidelityItem } = await import('../src/host/design.js')
   const fresh = applyFidelityItem([], 1.01)

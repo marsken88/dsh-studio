@@ -56,6 +56,21 @@ export function applyFidelityItem(checklist, percent) {
   return list
 }
 
+/** 把规范体检结果写进验收清单：0 处才勾，有野值就留成待复核并列出前两条。 */
+export function applySpecItem(checklist, spec) {
+  const list = Array.isArray(checklist) ? checklist : []
+  const count = Math.max(0, Number(spec?.violations) || 0)
+  const top = (Array.isArray(spec?.top) ? spec.top : []).slice(0, 2).map(item => `${item.value}×${item.count}`).join('、')
+  const text = count === 0
+    ? '设计规范体检：没有野值'
+    : `设计规范体检：${count} 处待复核${top === '' ? '' : `（${top}）`}`
+  const index = list.findIndex(item => String(item?.text ?? '').startsWith('设计规范体检'))
+  const item = { id: index >= 0 ? list[index].id : `k-spec-${Date.now().toString(36)}`, text, done: count === 0 }
+  if (index >= 0) list[index] = { ...list[index], ...item }
+  else list.push(item)
+  return list
+}
+
 /**
  * 进开发前的闸门：只有开了开关、且目标列在 columns 里才拦。
  * 返回 { needed, ready, blockers }；override 在调用方处理（填了原因就放行）。

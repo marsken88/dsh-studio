@@ -1,5 +1,5 @@
 import { randomBytes } from 'node:crypto'
-import { applyFidelityItem, sanitizeDesign } from '../design.js'
+import { applyFidelityItem, applySpecItem, sanitizeDesign } from '../design.js'
 import { collectCases, groupCaseKeys, loadSuites, resolveSuiteKeys, sanitizeSuite, saveSuites, summarizeRun } from '../cases.js'
 import { clearTeamMemory, loadTeamMemory } from '../team-memory.js'
 import {
@@ -105,6 +105,7 @@ export async function handleTaskRoute({ method, route, req, res, store, url }) {
       task.design = design
       // 还原度顺手写进验收清单：验收时不用再回抽屉里找数字。
       if (design !== null && design.diff !== null) task.checklist = applyFidelityItem(task.checklist, design.diff.percent)
+      if (design !== null && design.spec !== null) task.checklist = applySpecItem(task.checklist, design.spec)
       task.updatedAt = Date.now()
       task.history.push({ at: task.updatedAt, by, status: task.status, note: `设计评审：${design.status}` })
     })
