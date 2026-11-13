@@ -3,16 +3,17 @@
 import { fmtTime, fmtDate } from '../format.js'
 import { client } from '../context.js'
 
-export function DashboardPage({ state, onOpenTask, onOpenBoard }) {
+export function DashboardPage({ state, onOpenTask, onOpenBoard, onOpenCases }) {
   const { h, React, api, toast } = client()
   const [data, setData] = React.useState(null)
+  const [regression, setRegression] = React.useState(null)
   const [note, setNote] = React.useState(null)
   React.useEffect(() => {
     let alive = true
     void (async () => {
       try {
         const json = await api('/dashboard')
-        if (alive) setData(json?.dashboard ?? null)
+        if (alive) { setData(json?.dashboard ?? null); setRegression(json?.regression ?? null) }
       } catch (cause) {
         if (alive) { const detail = cause instanceof Error ? cause.message : String(cause); setNote(detail); toast(detail, 'error') }
       }
@@ -24,6 +25,16 @@ export function DashboardPage({ state, onOpenTask, onOpenBoard }) {
     return h('div', { className: 'ds-body' },
       h('div', { className: 'ds-hint' }, note === null ? '正在算今天该看什么…' : `算不出来：${note}`))
   }
+  // 最近一次回归：昨晚的定时回归就跑在这里；有失败时整条标红。
+  const regressionLine = regression === null ? null : (() => {
+    const failed = (Number(regression.failed) || 0) + (Number(regression.failedCards) || 0) > 0
+    return h('div', { className: 'ds-reg-banner', 'data-bad': failed ? '1' : '0' },
+      h('span', null, `最近回归 · ${fmtTime(regression.at)} · ${regression.by || '人'}`),
+      h('span', { className: 'ds-hint' },
+        `${regression.cards} 张卡 / ${regression.total} 条：通过 ${regression.passed}${failed ? `，不通过 ${regression.failed}` : ''}${regression.bugs > 0 ? ` · 自动开缺陷 ${regression.bugs} 张` : ''}`),
+      onOpenCases === undefined ? null : h('button', { className: 'ds-btn ds-btn-ghost', onClick: () => onOpenCases() }, '看用例'),
+    )
+  })()
   const risks = data.risks ?? {}
   const flow = data.flow ?? {}
   const ai = data.ai ?? {}
@@ -47,6 +58,7 @@ export function DashboardPage({ state, onOpenTask, onOpenBoard }) {
   )
 
   return h('div', { className: 'ds-body' },
+    regressionLine,
     h('div', { className: 'ds-kpi-grid' },
       kpi('在办卡', data.scope.open, `共 ${data.scope.tasks} 张`),
       kpi('逾期', risks.overdue, '过了期望完成时间还没完成', risks.overdue > 0),

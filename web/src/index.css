@@ -1388,6 +1388,8 @@ html body [data-dsh-studio][data-dsh-studio-portal] {
 [data-dsh-studio] .ds-palette-kind[data-kind="action"] { background: color-mix(in srgb, #7c3aed 16%, transparent); color: #7c3aed }
 [data-theme="dark"] .ds-palette-kind[data-kind="action"] { background: color-mix(in srgb, #a78bfa 22%, transparent); color: #c4b5fd }
 [data-dsh-studio] .ds-palette-label { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap }
+[data-dsh-studio] .ds-reg-banner { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 8px 12px; margin-bottom: 10px; border: 1px solid var(--ds-line, #e4e4e7); border-radius: 10px; background: var(--ds-surface-2, #f4f4f5); font-size: 12px }
+[data-dsh-studio] .ds-reg-banner[data-bad="1"] { border-color: #f3c0c2; background: #fdf2f2; color: #b42318 }
 [data-dsh-studio] .ds-reg-list { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 8px }
 [data-dsh-studio] .ds-reg-item { font-size: 11px; padding: 1px 8px; border-radius: 999px; border: 1px solid var(--ds-line, #e4e4e7); background: var(--ds-surface-2, #f4f4f5); color: var(--ds-muted, #71717a); white-space: nowrap }
 [data-dsh-studio] .ds-reg-item[data-bad="1"] { border-color: #f3c0c2; background: #fdf2f2; color: #b42318 }

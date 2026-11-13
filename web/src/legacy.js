@@ -2401,7 +2401,7 @@ function installKeyboardActivation() {
         tab === 'board'
           ? h(Board, { state, onWip: async (status, current) => { const raw = await promptDialog(`这一列的 WIP 上限（0 = 不限，最多 50）`, { title: 'WIP 上限', defaultValue: String(current) }); if (raw === null) return; const value = Math.min(50, Math.max(0, Math.trunc(Number(String(raw).trim()) || 0))); try { await api('/columns/wip', { status, wip: value }); toast(value === 0 ? '已取消 WIP 上限' : `WIP 上限设为 ${value}`); await reload() } catch (cause) { toast(cause instanceof Error ? cause.message : String(cause), 'error') } }, onMove: async (id, status) => { await api('/task/update', { id, status }); await reload() }, onOpen: setOpenId })
           : tab === 'dashboard'
-            ? h(DashboardPage, { state, onOpenTask: setOpenId, onOpenBoard: () => setTab('board') })
+            ? h(DashboardPage, { state, onOpenTask: setOpenId, onOpenBoard: () => setTab('board'), onOpenCases: () => setTab('cases') })
           : tab === 'requirements'
             ? h(RequirementsPage, { state, onOpenTask: setOpenId, onChanged: reload, createSignal: newReq, focusReq })
             : tab === 'cases'

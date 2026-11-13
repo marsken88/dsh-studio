@@ -32,7 +32,13 @@ export async function handleInsightsRoute({ method, route, req, res, store, url 
     return true
   }
   if (method === 'GET' && route === '/dashboard') {
-    host.sendJson(res, 200, { ok: true, dashboard: buildDashboard(store.snapshot()) })
+    // 最近一次回归（定时或人跑的）也一起给工作台，早上打开就知道昨晚跑成什么样。
+    const regressions = await store.readSide('regressions').catch(() => null)
+    host.sendJson(res, 200, {
+      ok: true,
+      dashboard: buildDashboard(store.snapshot()),
+      regression: Array.isArray(regressions) && regressions.length > 0 ? regressions[0] : null,
+    })
     return true
   }
   if (method === 'GET' && route === '/workload') {
