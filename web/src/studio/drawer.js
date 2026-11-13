@@ -499,6 +499,7 @@ function Drawer({ task, state, onClose, onChanged }) {
           h('div', { className: 'ds-dw-title' }, task.title),
           h('div', { className: 'ds-dw-sub' }, `${task.id} · ${columnLabel}${assignee === '' ? '' : ` · ${assignee}`} · 更新 ${fmtTime(task.updatedAt)}`),
         ),
+        h('button', { className: 'ds-btn ds-btn-ghost', disabled: busy, title: '设计稿链接 + 评审状态；被配置成设计闸门的列，评审不通过进不去', onClick: () => void editDesign() }, '设计：' + (DESIGN_LABEL[task.design?.status] ?? '未登记')),
         h('button', { className: 'ds-btn', onClick: onClose }, '关闭'),
         (Number(task.agentFailures) || 0) > 0
           ? tipOf(
@@ -874,7 +875,6 @@ function Drawer({ task, state, onClose, onChanged }) {
                     onClick: () => void verifyCoding(),
                   }, verify.busy ? '核对中…' : (verify.line === '' ? '核对代码事实' : '再核对一次')),
                 ),
-                h('button', { className: 'ds-btn ds-btn-ghost', disabled: busy, title: '设计稿链接 + 评审状态；被配置成设计闸门的列，评审不通过进不去', onClick: () => void editDesign() }, '设计：' + (DESIGN_LABEL[task.design?.status] ?? '未登记')),
                 h('button', { className: 'ds-btn ds-btn-ghost', disabled: busy, title: '拉 MR 的改动与流水线，和自报的文件数/提交数比一遍', onClick: () => void verifyGitlab() }, '从 GitLab 核对'),
               ),
               verify.line === ''
