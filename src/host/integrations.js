@@ -45,6 +45,41 @@ export function healthState(channel) {
   return HEALTH.get(channel)
 }
 
+/**
+ * 集成健康不是看板数据：放 meta 的 side 键，重启后还在，但既不动 revision 也不追加快照。
+ * 每几秒变一次的计数要是进 state，客户端会以为业务数据变了。
+ */
+const HEALTH_KEY = 'integration-health'
+let flushTimer = null
+
+/** 把内存里的健康表写回库；同一批变化只落一次盘。 */
+function flushHealth() {
+  const store = host.getStore?.()
+  if (store === undefined || store === null || typeof store.writeSide !== 'function') return
+  const saved = {}
+  for (const [channel, entry] of HEALTH) saved[channel] = { ...entry }
+  void store.writeSide(HEALTH_KEY, saved)
+}
+
+function scheduleHealthFlush() {
+  if (flushTimer !== null) return
+  flushTimer = setTimeout(() => { flushTimer = null; flushHealth() }, 2000)
+  flushTimer.unref?.()
+}
+
+/** 启动时读回上一次的健康表：重启不该让四条通道全部回到「还没用过」。 */
+export function restoreHealth() {
+  const store = host.getStore?.()
+  if (store === undefined || store === null || typeof store.readSide !== 'function') return
+  void Promise.resolve(store.readSide(HEALTH_KEY)).then(saved => {
+    if (saved === null || typeof saved !== 'object') return
+    for (const [channel, entry] of Object.entries(saved)) {
+      if (entry === null || typeof entry !== 'object') continue
+      HEALTH.set(channel, { ...healthState(channel), ...entry, channel })
+    }
+  }).catch(() => { /* 读不回来就按全新启动 */ })
+}
+
 /** Record one integration attempt. Never throws: health tracking must not break the caller. */
 export function markHealth(channel, outcome, detail = '') {
   try {
@@ -68,6 +103,7 @@ export function markHealth(channel, outcome, detail = '') {
       entry.lastError = String(detail ?? '').slice(0, 300)
       escalateHealth(channel, entry)
     }
+    scheduleHealthFlush()
   } catch {
     /* ignore */
   }

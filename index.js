@@ -42,7 +42,7 @@ import { configureConnectRoutes, handleConnectRoute } from './src/host/routes/co
 import { configureInsightsRoutes, handleInsightsRoute } from './src/host/routes/insights.js'
 import { configureAdminRoutes, handleAdminRoute } from './src/host/routes/admin.js'
 import { configureSkillsRoutes, handleSkillsRoute } from './src/host/routes/skills.js'
-import { INTEGRATION, markHealth, escalateHealth, healthReport, projectReady, gitlabReady, gitlabRequest, gitlabSync, feishuPush, feishuBroadcast, broadcastChange, configureIntegrations } from './src/host/integrations.js'
+import { INTEGRATION, markHealth, escalateHealth, healthReport, restoreHealth, projectReady, gitlabReady, gitlabRequest, gitlabSync, feishuPush, feishuBroadcast, broadcastChange, configureIntegrations } from './src/host/integrations.js'
 import { SecretStore, StudioStore } from './src/host/store.js'
 
 function upsertById(list, incoming) {
@@ -2614,6 +2614,8 @@ export function apply(ctx) {
   ctx.inject(['agents', 'sessionController', 'workspaceRegistry', 'permissionPresets', 'agentDefaultModel'], dispatcherCtx => {
     configureDispatcher({ feishuBroadcast, INTEGRATION, bugSla, removeWorktree, ensureWorktree, serviceOf, workProjectOf, serviceConflicts })
     configureIntegrations({ newTaskId, serviceOf, getStore: () => activeStore })
+  // 集成健康是旁路数据，启动时读回来，重启后不再显示成「还没用过」。
+  restoreHealth()
     configureExportRoutes({ sendCsv, requirementProgress, sessions: SESSIONS })
     configureCodingRoutes({ applyConfig, ensureWorktree, publicState, readJsonBody, removeWorktree, sendJson, serviceOf, upsertById, workProjectOf })
     configureAgentsRoutes({ publicState, readJsonBody, sendJson, getDispatcher: () => activeDispatcher })

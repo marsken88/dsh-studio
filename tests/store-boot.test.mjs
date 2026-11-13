@@ -42,3 +42,28 @@ test('store: boots, persists and reloads a state file', async () => {
     await rm(dir, { recursive: true, force: true, maxRetries: 3, retryDelay: 50 }).catch(() => {})
   }
 })
+
+test('store: side values survive a restart without bumping the revision', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'dsh-studio-side-'))
+  let store, again
+  try {
+    const file = join(dir, 'dsh-studio.json')
+    const options = { dbFile: join(dir, 'dsh-studio.db'), secrets: new SecretStore(join(dir, '.secrets.json')) }
+    store = new StudioStore(file, options)
+    await store.ready
+    const rev = store.snapshot().revision
+    await store.writeSide('integration-health', { feishu: { ok: false, failures: 3, lastError: 'webhook 404' } })
+    assert.equal(store.snapshot().revision, rev, 'side data must not bump the board revision')
+    assert.deepEqual(await store.readSide('integration-health'), { feishu: { ok: false, failures: 3, lastError: 'webhook 404' } })
+    assert.equal(await store.readSide('nope'), null)
+
+    again = new StudioStore(file, options)
+    await again.ready
+    const restored = await again.readSide('integration-health')
+    assert.equal(restored?.feishu?.failures, 3, 'health survives a restart')
+  } finally {
+    try { store?.db?.close?.() } catch { /* already closed */ }
+    try { again?.db?.close?.() } catch { /* already closed */ }
+    await rm(dir, { recursive: true, force: true, maxRetries: 3, retryDelay: 50 }).catch(() => {})
+  }
+})

@@ -344,6 +344,32 @@ export class StudioStore {
     return run
   }
 
+  /**
+   * 旁路数据（集成健康这类）：单独一个 meta 键，不进 state、不涨 revision、不占快照。
+   * 它们每几秒就会变一次，混进 state 只会让面板误以为看板数据变了。
+   */
+  async readSide(key) {
+    await this.ready
+    if (this.db === null) return null
+    try {
+      const row = this.db.prepare('SELECT value FROM meta WHERE key = ?').get('side:' + key)
+      return row === undefined || row === null ? null : JSON.parse(row.value)
+    } catch {
+      return null
+    }
+  }
+
+  async writeSide(key, value) {
+    await this.ready
+    if (this.db === null) return
+    try {
+      this.db.prepare('INSERT INTO meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value')
+        .run('side:' + key, JSON.stringify(value))
+    } catch {
+      /* 旁路数据写不进去也不能影响业务 */
+    }
+  }
+
   /** 落盘前把密钥摘掉：库里只留「有没有配」，密钥在 600 权限的单独文件里。 */
   #serialize() {
     const plain = {
