@@ -1397,6 +1397,8 @@ html body [data-dsh-studio][data-dsh-studio-portal] {
 [data-dsh-studio] .ds-diff-line[data-kind="same"] { color: var(--ds-muted, #71717a) }
 [data-dsh-studio] .ds-reg-banner { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 8px 12px; margin-bottom: 10px; border: 1px solid var(--ds-line, #e4e4e7); border-radius: 10px; background: var(--ds-surface-2, #f4f4f5); font-size: 12px }
 [data-dsh-studio] .ds-reg-banner[data-bad="1"] { border-color: #f3c0c2; background: #fdf2f2; color: #b42318 }
+[data-dsh-studio] .ds-suite { display: inline-flex; align-items: center; gap: 6px; padding: 2px 8px; border: 1px solid var(--ds-line, #e4e4e7); border-radius: 999px; background: var(--ds-surface-2, #f4f4f5); font-size: 12px }
+[data-dsh-studio] .ds-suite[data-default="1"] { border-color: #a5b4fc; background: #eef2ff; color: #3730a3 }
 [data-dsh-studio] .ds-reg-list { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 8px }
 [data-dsh-studio] .ds-reg-item { font-size: 11px; padding: 1px 8px; border-radius: 999px; border: 1px solid var(--ds-line, #e4e4e7); background: var(--ds-surface-2, #f4f4f5); color: var(--ds-muted, #71717a); white-space: nowrap }
 [data-dsh-studio] .ds-reg-item[data-bad="1"] { border-color: #f3c0c2; background: #fdf2f2; color: #b42318 }

@@ -1,5 +1,5 @@
 import { randomBytes } from 'node:crypto'
-import { collectCases, groupCaseKeys, summarizeRun } from '../cases.js'
+import { collectCases, groupCaseKeys, loadSuites, resolveSuiteKeys, sanitizeSuite, saveSuites, summarizeRun } from '../cases.js'
 import { clearTeamMemory, loadTeamMemory } from '../team-memory.js'
 import {
   CASE_HTTP_METHODS,
@@ -38,6 +38,52 @@ let host = {
 /** 卡片（任务 / 专家 / 列）相关路由。宿主能力由 configureTaskRoutes() 注入。 */
 export function configureTaskRoutes(services) {
   host = { ...host, ...(services ?? {}) }
+}
+
+/**
+ * 跑一批用例键：先探环境，再按卡分组一轮一轮跑，最后记一笔「最近回归」。
+ * /cases/run 与 /suite/run 共用这段——两处逻辑必须完全一致，否则套件和历史记录会对不上。
+ */
+async function runCaseKeys(store, keys, options = {}) {
+  const grouped = groupCaseKeys(keys)
+  if (grouped.size === 0) throw new Error('没有可跑的用例')
+  const snapshot = store.snapshot()
+  const testing = snapshot.config.testing ?? {}
+  const envs = Array.isArray(testing.envs) ? testing.envs : []
+  const env = envs.find(item => item.id === String(options.env ?? testing.defaultEnv ?? '')) ?? envs[0]
+  if (env !== undefined) {
+    const probe = await host.probeEnv(env, snapshot.config)
+    if (probe.ok !== true) throw new Error(`测试环境「${env.name || env.id}」不可达（${probe.error}）：一条用例都没跑`)
+  }
+  const by = String(options.by ?? '回归').slice(0, 40)
+  const results = []
+  for (const [taskId, caseIds] of grouped) {
+    try {
+      const out = await host.runTaskCases(store, taskId, { caseIds, env: options.env, by })
+      const card = store.snapshot().tasks.find(entry => entry.id === taskId)
+      results.push({
+        taskId,
+        taskCode: card?.code ?? '',
+        taskTitle: card?.title ?? '',
+        ok: true,
+        total: out.run.total,
+        passed: out.run.passed,
+        failed: out.run.failed,
+        bugs: (out.bugs ?? []).filter(item => item.created === true).length,
+      })
+    } catch (error) {
+      results.push({ taskId, ok: false, error: String(error?.message ?? error).slice(0, 200) })
+    }
+  }
+  const record = summarizeRun(results, by)
+  try {
+    const previous = await store.readSide('regressions')
+    const list = Array.isArray(previous) ? previous : []
+    await store.writeSide('regressions', [record, ...list].slice(0, 20))
+  } catch {
+    /* 记不下来不影响这次跑的结果 */
+  }
+  return { results, regression: record }
 }
 
 export async function handleTaskRoute({ method, route, req, res, store, url }) {
@@ -200,47 +246,48 @@ export async function handleTaskRoute({ method, route, req, res, store, url }) {
     const body = await host.readJsonBody(req)
     const keys = (Array.isArray(body.keys) ? body.keys : []).map(String).filter(key => key.length > 0).slice(0, 60)
     if (keys.length === 0) throw new Error('先勾几条用例再跑')
-    const grouped = groupCaseKeys(keys)
-    if (grouped.size === 0) throw new Error('没有可跑的用例')
-    // 先探一次环境：连不上就直接报错，不要把整批用例刷成失败。
-    const snapshot = store.snapshot()
-    const testing = snapshot.config.testing ?? {}
-    const envs = Array.isArray(testing.envs) ? testing.envs : []
-    const env = envs.find(item => item.id === String(body.env ?? testing.defaultEnv ?? '')) ?? envs[0]
-    if (env !== undefined) {
-      const probe = await host.probeEnv(env, snapshot.config)
-      if (probe.ok !== true) throw new Error(`测试环境「${env.name || env.id}」不可达（${probe.error}）：一条用例都没跑`)
-    }
-    const by = String(body.by ?? '回归').slice(0, 40)
-    const results = []
-    for (const [taskId, caseIds] of grouped) {
-      try {
-        const out = await host.runTaskCases(store, taskId, { caseIds, env: body.env, by })
-        const card = store.snapshot().tasks.find(entry => entry.id === taskId)
-        results.push({
-          taskId,
-          taskCode: card?.code ?? '',
-          taskTitle: card?.title ?? '',
-          ok: true,
-          total: out.run.total,
-          passed: out.run.passed,
-          failed: out.run.failed,
-          bugs: (out.bugs ?? []).filter(item => item.created === true).length,
-        })
-      } catch (error) {
-        results.push({ taskId, ok: false, error: String(error?.message ?? error).slice(0, 200) })
-      }
-    }
-    // 记一笔「最近回归」：放 side 键，不动 state、不涨 revision。
-    const record = summarizeRun(results, by)
-    try {
-      const previous = await store.readSide('regressions')
-      const list = Array.isArray(previous) ? previous : []
-      await store.writeSide('regressions', [record, ...list].slice(0, 20))
-    } catch {
-      /* 记不下来不影响这次跑的结果 */
-    }
-    host.sendJson(res, 200, { ok: true, results, regression: record, state: host.publicState(store) })
+    const out = await runCaseKeys(store, keys, { env: body.env, by: String(body.by ?? '回归') })
+    host.sendJson(res, 200, { ok: true, ...out, state: host.publicState(store) })
+    return true
+  }
+  if (method === 'POST' && route === '/suite/list') {
+    const suites = await loadSuites(store)
+    const cases = collectCases(store.snapshot())
+    host.sendJson(res, 200, {
+      ok: true,
+      suites,
+      counts: suites.map(suite => ({ id: suite.id, count: resolveSuiteKeys(suite, cases).length, keys: resolveSuiteKeys(suite, cases) })),
+    })
+    return true
+  }
+  if (method === 'POST' && route === '/suite/save') {
+    const body = await host.readJsonBody(req)
+    const list = await loadSuites(store)
+    const incoming = sanitizeSuite({ ...(body.suite ?? body), at: Date.now(), by: String(body.by ?? '人').slice(0, 40) })
+    const index = list.findIndex(item => item.id === incoming.id)
+    if (index >= 0) list[index] = incoming
+    else list.push(incoming)
+    const saved = await saveSuites(store, list)
+    const cases = collectCases(store.snapshot())
+    host.sendJson(res, 200, { ok: true, suites: saved, counts: saved.map(suite => ({ id: suite.id, count: resolveSuiteKeys(suite, cases).length })) })
+    return true
+  }
+  if (method === 'POST' && route === '/suite/delete') {
+    const body = await host.readJsonBody(req)
+    const list = await loadSuites(store)
+    const next = list.filter(item => item.id !== String(body.id ?? ''))
+    host.sendJson(res, 200, { ok: true, suites: await saveSuites(store, next) })
+    return true
+  }
+  if (method === 'POST' && route === '/suite/run') {
+    const body = await host.readJsonBody(req)
+    const suites = await loadSuites(store)
+    const suite = suites.find(item => item.id === String(body.id ?? ''))
+    if (suite === undefined) throw new Error('套件不存在')
+    const keys = resolveSuiteKeys(suite, collectCases(store.snapshot())).slice(0, 60)
+    if (keys.length === 0) throw new Error(`套件「${suite.name}」里没有可跑的用例`)
+    const out = await runCaseKeys(store, keys, { env: body.env, by: `套件：${suite.name}`.slice(0, 40) })
+    host.sendJson(res, 200, { ok: true, ...out, suite: { id: suite.id, name: suite.name }, state: host.publicState(store) })
     return true
   }
   if (method === 'POST' && route === '/team/memory') {
@@ -257,7 +304,15 @@ export async function handleTaskRoute({ method, route, req, res, store, url }) {
   if (method === 'POST' && route === '/cases') {
     // 跨卡用例总览：从台账现算，不落第二份数据。纯读。
     const regressions = await store.readSide('regressions').catch(() => null)
-    host.sendJson(res, 200, { ok: true, cases: collectCases(store.snapshot()), regressions: Array.isArray(regressions) ? regressions : [] })
+    const cases = collectCases(store.snapshot())
+    const suites = await loadSuites(store)
+    host.sendJson(res, 200, {
+      ok: true,
+      cases,
+      regressions: Array.isArray(regressions) ? regressions : [],
+      suites,
+      counts: suites.map(suite => ({ id: suite.id, count: resolveSuiteKeys(suite, cases).length, keys: resolveSuiteKeys(suite, cases) })),
+    })
     return true
   }
   if (method === 'POST' && route === '/task/parts') {

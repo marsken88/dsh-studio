@@ -2030,7 +2030,7 @@ async function recordLogin(store, user, ip) {
 }
 
 /** 只是读、但走 POST 的入口（前端只有一处 api() 封装，固定发 POST）。 */
-const READ_ONLY_POST_ROUTES = new Set(['/task/comments', '/task/parts', '/cases', '/team/memory'])
+const READ_ONLY_POST_ROUTES = new Set(['/task/comments', '/task/parts', '/cases', '/team/memory', '/suite/list'])
 
 /** 这个请求需要什么权限：读、写、还是管理员。 */
 function accessLevelFor(route, method) {

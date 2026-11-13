@@ -410,6 +410,28 @@ test('host: artifacts leave the poll without their bodies', async () => {
   assert.equal(artifact.content, body, 'the stored artifact must not be stripped in place')
 })
 
+test('host: a suite resolves to keys by rules and keeps hand-picked ones', async () => {
+  const { resolveSuiteKeys, sanitizeSuite } = await import('../src/host/cases.js')
+  const cases = [
+    { key: 't1:c1', http: true, requirementId: 'r1', priority: 'p0' },
+    { key: 't1:c2', http: false, requirementId: 'r1', priority: 'p0' },
+    { key: 't2:c1', http: true, requirementId: 'r2', priority: 'p2' },
+    { key: 't3:c1', http: true, requirementId: 'r1', priority: 'p2' },
+  ]
+  assert.deepEqual(resolveSuiteKeys({ rules: { httpOnly: true } }, cases), ['t1:c1', 't2:c1', 't3:c1'])
+  assert.deepEqual(resolveSuiteKeys({ rules: { httpOnly: false } }, cases), ['t1:c1', 't1:c2', 't2:c1', 't3:c1'])
+  assert.deepEqual(resolveSuiteKeys({ rules: { requirementIds: ['r1'] } }, cases), ['t1:c1', 't3:c1'])
+  assert.deepEqual(resolveSuiteKeys({ rules: { priorities: ['p0'] } }, cases), ['t1:c1'])
+  // 手工挑的用例即使不满足规则也要跑；重复键去重
+  assert.deepEqual(resolveSuiteKeys({ rules: { requirementIds: ['r2'] }, keys: ['t1:c2', 't1:c2'] }, cases), ['t1:c2', 't2:c1'])
+  const cleaned = sanitizeSuite({ name: '  ', rules: { priorities: ['P1', 'zz'] }, keys: ['坏键', 't1:c1'] })
+  assert.equal(cleaned.name, '未命名套件')
+  assert.deepEqual(cleaned.rules, { requirementIds: [], priorities: ['p1'], httpOnly: true })
+  assert.deepEqual(cleaned.keys, ['t1:c1'])
+  assert.equal(cleaned.isDefault, false)
+  assert.ok(cleaned.id.length > 0)
+})
+
 test('host: the team memory block only lists what the team actually did', async () => {
   const { teamMemoryBlock } = await import('../src/host/team-memory.js')
   assert.equal(teamMemoryBlock([]), '')

@@ -68,3 +68,68 @@ export function collectCases(state) {
   return out
 }
 
+
+// ---------------------------------------------------------------- 回归套件
+// 套件 = 一组规则（需求 / 优先级 / 是否接口用例）+ 手工挑的用例键。
+// 规则在跑的时候才解析成具体用例，所以新加的用例会自动进套件，不用回来改。
+
+const SUITES_KEY = 'suites'
+
+/** 建套件时的默认规则：只跑有 http 定义的，按卡串行。 */
+export const SUITE_DEFAULTS = { rules: { requirementIds: [], priorities: [], httpOnly: true }, keys: [] }
+
+/** 套件清洗：名字必有、规则白名单、手工键只留 "taskId:caseId" 形状的。 */
+export function sanitizeSuite(raw) {
+  const source = raw !== null && typeof raw === 'object' ? raw : {}
+  const rules = source.rules !== null && typeof source.rules === 'object' ? source.rules : {}
+  const id = String(source.id ?? '').trim() || `suite-${Math.random().toString(36).slice(2, 8)}`
+  return {
+    id,
+    name: String(source.name ?? '').trim().slice(0, 40) || '未命名套件',
+    note: String(source.note ?? '').slice(0, 200),
+    rules: {
+      requirementIds: (Array.isArray(rules.requirementIds) ? rules.requirementIds : []).map(String).filter(Boolean).slice(0, 20),
+      priorities: (Array.isArray(rules.priorities) ? rules.priorities : [])
+        .map(item => String(item).toLowerCase())
+        .filter(item => ['p0', 'p1', 'p2', 'p3'].includes(item))
+        .slice(0, 4),
+      httpOnly: rules.httpOnly !== false,
+    },
+    keys: (Array.isArray(source.keys) ? source.keys : []).map(String).filter(key => key.includes(':')).slice(0, 200),
+    isDefault: source.isDefault === true,
+    at: Number(source.at) || Date.now(),
+    by: String(source.by ?? '').slice(0, 40),
+  }
+}
+
+/** 套件解析成具体的用例键（去重）。 */
+export function resolveSuiteKeys(suite, cases) {
+  const rules = suite?.rules ?? {}
+  const requirementIds = Array.isArray(rules.requirementIds) ? rules.requirementIds.map(String) : []
+  const priorities = Array.isArray(rules.priorities) ? rules.priorities.map(String) : []
+  const httpOnly = rules.httpOnly !== false
+  const picked = new Set((Array.isArray(suite?.keys) ? suite.keys : []).map(String))
+  const out = new Set()
+  for (const row of Array.isArray(cases) ? cases : []) {
+    if (picked.has(row.key)) { out.add(row.key); continue }
+    if (httpOnly && row.http !== true) continue
+    if (requirementIds.length > 0 && !requirementIds.includes(row.requirementId)) continue
+    if (priorities.length > 0 && !priorities.includes(row.priority)) continue
+    out.add(row.key)
+  }
+  return [...out]
+}
+
+export async function loadSuites(store) {
+  const saved = await store.readSide(SUITES_KEY).catch(() => null)
+  return Array.isArray(saved) ? saved.map(sanitizeSuite) : []
+}
+
+/** 存整套：同一个时刻只允许一个默认套件（夜间跑的就是它）。 */
+export async function saveSuites(store, list) {
+  const suites = (Array.isArray(list) ? list : []).map(sanitizeSuite)
+  const firstDefault = suites.findIndex(item => item.isDefault === true)
+  if (firstDefault >= 0) suites.forEach((item, index) => { item.isDefault = index === firstDefault })
+  await store.writeSide(SUITES_KEY, suites).catch(() => {})
+  return suites
+}

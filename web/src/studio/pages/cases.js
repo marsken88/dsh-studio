@@ -7,7 +7,7 @@ import { CASE_RESULTS, CASE_RESULT_LABEL } from '../labels.js'
 import { fmtTime } from '../format.js'
 
 export function CasesPage({ state, onOpenTask }) {
-  const { h, React, api, TextField, SelectField, ChipField, CheckField } = client()
+  const { h, React, api, toast, confirmDialog, promptDialog, TextField, SelectField, ChipField, CheckField } = client()
   const [rows, setRows] = React.useState(null)
   const [error, setError] = React.useState(null)
   const [query, setQuery] = React.useState('')
@@ -15,6 +15,10 @@ export function CasesPage({ state, onOpenTask }) {
   const [result, setResult] = React.useState('__all__')
   const [selected, setSelected] = React.useState(() => new Set())
   const [running, setRunning] = React.useState(false)
+  const [suites, setSuites] = React.useState([])
+  const [suiteCounts, setSuiteCounts] = React.useState({})
+  const [suiteKeys, setSuiteKeys] = React.useState({})
+  const [suiteFilter, setSuiteFilter] = React.useState(null)
   const [note, setNote] = React.useState('')
   const [regressions, setRegressions] = React.useState([])
   const [openDetail, setOpenDetail] = React.useState(null)
@@ -24,6 +28,9 @@ export function CasesPage({ state, onOpenTask }) {
       const out = await api('/cases', {})
       setRows(Array.isArray(out.cases) ? out.cases : [])
       setRegressions(Array.isArray(out.regressions) ? out.regressions : [])
+      setSuites(Array.isArray(out.suites) ? out.suites : [])
+      setSuiteCounts(Object.fromEntries((out.counts ?? []).map(item => [item.id, item.count])))
+      setSuiteKeys(Object.fromEntries((out.counts ?? []).map(item => [item.id, item.keys ?? []])))
       setError(null)
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause))
@@ -40,13 +47,15 @@ export function CasesPage({ state, onOpenTask }) {
 
   const list = React.useMemo(() => {
     const text = query.trim().toLowerCase()
+    const only = suiteFilter === null ? null : new Set(suiteKeys[suiteFilter] ?? [])
     return (rows ?? []).filter(row => {
+      if (only !== null && !only.has(row.key)) return false
       if (requirement !== '__all__' && row.requirementId !== requirement) return false
       if (result !== '__all__' && row.result !== result) return false
       if (text === '') return true
       return `${row.id} ${row.title} ${row.taskTitle} ${row.requirementTitle} ${row.pointId}`.toLowerCase().includes(text)
     })
-  }, [rows, query, requirement, result])
+  }, [rows, query, requirement, result, suiteFilter, suiteKeys])
 
   const counts = React.useMemo(() => {
     const pass = list.filter(row => row.result === 'pass').length
@@ -86,6 +95,65 @@ export function CasesPage({ state, onOpenTask }) {
       setNote(cause instanceof Error ? cause.message : String(cause))
     } finally {
       setRunning(false)
+    }
+  }
+  const noteFor = out => {
+    const results = out?.results ?? []
+    const sum = key => results.reduce((n, item) => n + (Number(item[key]) || 0), 0)
+    const broke = results.filter(item => item.ok === false)
+    const parts = [`跑了 ${results.length} 张卡 / ${sum('total')} 条：通过 ${sum('passed')}，不通过 ${sum('failed')}`]
+    if (sum('bugs') > 0) parts.push(`自动开缺陷 ${sum('bugs')} 张`)
+    if (broke.length > 0) parts.push(`${broke.length} 张卡报错：${broke[0].error ?? ''}`)
+    return parts.join('，')
+  }
+  const runSuite = async suite => {
+    setRunning(true)
+    setNote('')
+    try {
+      const out = await api('/suite/run', { id: suite.id })
+      setNote(noteFor(out))
+      await refresh()
+    } catch (cause) {
+      setNote(cause instanceof Error ? cause.message : String(cause))
+    } finally {
+      setRunning(false)
+    }
+  }
+  const saveSuite = async () => {
+    const name = await promptDialog('套件名字（跑的就是当前筛选里的用例）', { title: '新建回归套件', defaultValue: '默认回归' })
+    if (name === null || String(name).trim() === '') return
+    try {
+      await api('/suite/save', {
+        suite: {
+          name: String(name).trim().slice(0, 40),
+          rules: { requirementIds: requirement === '__all__' ? [] : [requirement], httpOnly: true },
+          keys: [],
+          isDefault: suites.length === 0,
+        },
+        by: '人',
+      })
+      toast('已保存套件')
+      await refresh()
+    } catch (cause) {
+      toast(cause instanceof Error ? cause.message : String(cause), 'error')
+    }
+  }
+  const makeDefault = async suite => {
+    try {
+      await api('/suite/save', { suite: { ...suite, isDefault: true }, by: '人' })
+      toast(`夜间回归改跑「${suite.name}」`)
+      await refresh()
+    } catch (cause) {
+      toast(cause instanceof Error ? cause.message : String(cause), 'error')
+    }
+  }
+  const removeSuite = async suite => {
+    if (!(await confirmDialog(`删除套件「${suite.name}」？用例本身不受影响。`, { title: '删除套件', danger: true, okText: '删除' }))) return
+    try {
+      await api('/suite/delete', { id: suite.id })
+      await refresh()
+    } catch (cause) {
+      toast(cause instanceof Error ? cause.message : String(cause), 'error')
     }
   }
   const failedRunnable = list.filter(row => row.http && row.result === 'fail')
@@ -129,6 +197,22 @@ export function CasesPage({ state, onOpenTask }) {
           h('button', { className: 'ds-btn ds-btn-primary', disabled: running || picked.length === 0, onClick: () => void runSelected() }, running ? '跑着…' : `▶ 跑选中的 ${picked.length} 条`),
           h('button', { className: 'ds-btn', disabled: running || failedRunnable.length === 0, title: '只补跑上次不通过、且有接口定义的用例', onClick: () => void runFailed() }, `↻ 只跑上次失败的 ${failedRunnable.length} 条`),
           h('span', { className: 'ds-hint' }, '按卡串行跑，每张卡一轮；失败的照旧自动开缺陷（最多一次 60 条）'),
+        ),
+        h('div', { className: 'ds-row', style: { marginTop: 8, flexWrap: 'wrap', gap: 8 } },
+          h('span', { className: 'ds-hint' }, '回归套件：'),
+          suites.length === 0
+            ? h('span', { className: 'ds-hint' }, '还没有套件。把当前筛选存成套件，夜间就自动跑它。')
+            : suites.map(suite => h('span', { key: suite.id, className: 'ds-suite', 'data-default': suite.isDefault ? '1' : '0' },
+              h('span', {
+                style: { cursor: 'pointer' },
+                title: '点一下只看这个套件里的用例，再点一次取消',
+                onClick: () => setSuiteFilter(current => (current === suite.id ? null : suite.id)),
+              }, `📦 ${suite.name}${suite.isDefault ? ' · 默认' : ''} · ${suiteCounts[suite.id] ?? 0} 条${suiteFilter === suite.id ? '（只看中）' : ''}`),
+              h('button', { className: 'ds-btn ds-btn-ghost', disabled: running || (suiteCounts[suite.id] ?? 0) === 0, onClick: () => void runSuite(suite) }, '▶ 跑'),
+              suite.isDefault ? null : h('button', { className: 'ds-btn ds-btn-ghost', onClick: () => void makeDefault(suite) }, '设为默认'),
+              h('button', { className: 'ds-btn ds-btn-ghost', onClick: () => void removeSuite(suite), 'data-danger': '1' }, '删除'),
+            )),
+          h('button', { className: 'ds-btn ds-btn-ghost', onClick: () => void saveSuite() }, '＋ 存为套件'),
         ),
         note === '' ? null : h('div', { className: 'ds-hint', style: { marginTop: 6 } }, note),
         regressions.length === 0 ? null : h('div', { className: 'ds-reg-list' },

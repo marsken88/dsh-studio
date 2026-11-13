@@ -43,6 +43,32 @@ test('store: boots, persists and reloads a state file', async () => {
   }
 })
 
+test('store: suites round-trip and keep exactly one default', async () => {
+  const { mkdtemp, rm } = await import('node:fs/promises')
+  const { tmpdir } = await import('node:os')
+  const { join } = await import('node:path')
+  const { loadSuites, saveSuites } = await import('../src/host/cases.js')
+  const { StudioStore, SecretStore } = await import('../src/host/store.js')
+  const dir = await mkdtemp(join(tmpdir(), 'dsh-studio-suite-'))
+  const store = new StudioStore(join(dir, 'dsh-studio.json'), { dbFile: join(dir, 'dsh-studio.db'), secrets: new SecretStore(join(dir, '.secrets.json')) })
+  try {
+    await store.ready
+    const rev = store.snapshot().revision
+    const saved = await saveSuites(store, [
+      { id: 'a', name: '全量', isDefault: true, rules: { httpOnly: true } },
+      { id: 'b', name: '冒烟', isDefault: true, rules: { priorities: ['p0'] } },
+    ])
+    assert.deepEqual(saved.map(item => item.isDefault), [true, false], 'only the first default wins')
+    const again = await loadSuites(store)
+    assert.equal(again.length, 2)
+    assert.equal(again[1].name, '冒烟')
+    assert.equal(store.snapshot().revision, rev, 'suites must not bump the revision')
+  } finally {
+    try { store.db?.close?.() } catch { /* already closed */ }
+    await rm(dir, { recursive: true, force: true, maxRetries: 3, retryDelay: 50 }).catch(() => {})
+  }
+})
+
 test('store: team memory appends, caps and clears through the side key', async () => {
   const { mkdtemp, rm } = await import('node:fs/promises')
   const { tmpdir } = await import('node:os')
