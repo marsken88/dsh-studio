@@ -75,7 +75,10 @@ function Card({ task, onOpen, config, requirements, onPickRequirement, onPickPro
         : (task.service ?? '') !== ''
           ? h(ChipField, { className: 'ds-chip', 'data-svc-missing': '1', title: `卡上记的服务 ${task.service} 已经不在项目里了（服务被改名或删除），重新选一个` }, '📦 服务已失效')
           : null,
-      task.type === 'bug' ? h(ChipField, { className: 'ds-chip ds-chip-bug', 'data-sev': task.severity ?? 'p2' }, `BUG ${String(task.severity || 'p2').toUpperCase()}`) : null,
+      task.design === null || task.design === undefined || task.design.status === 'approved'
+    ? null
+    : h(ChipField, { className: 'ds-chip', 'data-design': task.design.status }, task.design.status === 'changes_requested' ? '设计要改' : '设计待评审'),
+  task.type === 'bug' ? h(ChipField, { className: 'ds-chip ds-chip-bug', 'data-sev': task.severity ?? 'p2' }, `BUG ${String(task.severity || 'p2').toUpperCase()}`) : null,
       task.sla !== null && task.sla !== undefined && task.status !== 'done'
         ? h(ChipField, {
             className: 'ds-chip',

@@ -5,6 +5,8 @@ import { artifactsWithoutBody, buildRoster, cardOwner, caseSummaryOf, checkSumma
 import { fmtTime } from './format.js'
 import { parseSteps } from './cases.js'
 
+const DESIGN_LABEL = { approved: '已通过', pending: '待评审', changes_requested: '要改' }
+
 export function createDrawer({ h, React, api, kit, currentUser, renderMarkdown, tipOf, tipLabel, confirmDialog, promptDialog, TextField, TextAreaField, ChipField, CheckField, SelectField, MdField, MentionPicker }) {
 function Drawer({ task, state, onClose, onChanged }) {
   const [busy, setBusy] = React.useState(false)
@@ -463,6 +465,19 @@ function Drawer({ task, state, onClose, onChanged }) {
     }
   }
   // 从 GitLab 核对：拉 MR 的 changes 与流水线，和卡上自报的值比一遍（没配 GitLab 会直接提示）。
+  // 设计评审：两步录入（链接 + 状态），存完刷新卡片。闸门在服务端，这里只管填。
+  const editDesign = async () => {
+    const link = await promptDialog('设计稿链接（Figma / 蓝湖 / 图片都行）', { title: '设计评审', defaultValue: task.design?.link ?? '' })
+    if (link === null) return
+    const status = await promptDialog('状态：pending 待评审 / changes_requested 要改 / approved 通过', { title: '设计评审', defaultValue: task.design?.status ?? 'pending' })
+    if (status === null) return
+    setBusy(true); setError(null); setNotice(null)
+    try {
+      const out = await api('/task/design', { id: task.id, design: { link, status, note: task.design?.note ?? '' } })
+      setNotice('设计已保存：' + String(out?.design?.status ?? status))
+      await onChanged()
+    } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)) } finally { setBusy(false) }
+  }
   const verifyGitlab = async () => {
     setBusy(true); setError(null); setNotice(null)
     try {
@@ -859,6 +874,7 @@ function Drawer({ task, state, onClose, onChanged }) {
                     onClick: () => void verifyCoding(),
                   }, verify.busy ? '核对中…' : (verify.line === '' ? '核对代码事实' : '再核对一次')),
                 ),
+                h('button', { className: 'ds-btn ds-btn-ghost', disabled: busy, title: '设计稿链接 + 评审状态；被配置成设计闸门的列，评审不通过进不去', onClick: () => void editDesign() }, '设计：' + (DESIGN_LABEL[task.design?.status] ?? '未登记')),
                 h('button', { className: 'ds-btn ds-btn-ghost', disabled: busy, title: '拉 MR 的改动与流水线，和自报的文件数/提交数比一遍', onClick: () => void verifyGitlab() }, '从 GitLab 核对'),
               ),
               verify.line === ''

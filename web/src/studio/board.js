@@ -50,6 +50,7 @@ function Board({ state, onOpen, onMove, onWip }) {
   }, [state, query, expertFilter, typeFilter, projectFilter, iterationFilter, serviceFilter, requirementFilter, onlyBlocked, onlyNoBody])
   const total = [...byStatus.values()].reduce((sum, list) => sum + list.length, 0)
   const bugCount = [...byStatus.values()].reduce((sum, list) => sum + list.filter(task => task.type === 'bug').length, 0)
+  const designPending = (tasks ?? []).filter(task => task.design !== null && task.design !== undefined && task.design.status !== 'approved').length
   const blockedCount = state.tasks.filter(task => (task.blocked ?? null) !== null).length
   const noBodyCount = state.tasks.filter(task => artifactsWithoutBody(task).length > 0).length
   const columns = state.statuses.filter(column => !hideEmpty || (byStatus.get(column.id) ?? []).length > 0)
@@ -145,7 +146,7 @@ function Board({ state, onOpen, onMove, onWip }) {
         }, '清除筛选')
         : null,
       h('span', { className: 'ds-stat', style: { marginLeft: 'auto' } },
-        bugCount > 0 ? `${total} 张卡 · ${bugCount} 个缺陷` : `${total} 张卡 · ${columns.length} 列`),
+        `${total} 张卡 · ${designPending > 0 ? `${designPending} 个设计待评审 · ` : ''}${bugCount > 0 ? `${bugCount} 个缺陷` : `${columns.length} 列`}`),
     ),
     h('div', {
       className: 'ds-board',
