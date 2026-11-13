@@ -88,7 +88,11 @@ function Card({ task, onOpen, config, requirements, onPickRequirement, onPickPro
       })()}`),
   task.design?.spec === null || task.design?.spec === undefined
     ? null
-    : h(ChipField, { className: 'ds-chip', 'data-spec': task.design.spec.violations }, task.design.spec.violations > 0 ? `规范 ${task.design.spec.violations} 处` : '规范达标'),
+    : h(ChipField, {
+      className: 'ds-chip',
+      'data-spec': task.design.spec.violations,
+      title: (task.design.spec.top ?? []).map(item => `${item.value} ×${item.count}${item.sample === '' ? '' : ` — ${item.sample}`}`).join('\n') || '没有野值',
+    }, task.design.spec.violations > 0 ? `规范 ${task.design.spec.violations} 处` : '规范达标'),
   task.type === 'bug' ? h(ChipField, { className: 'ds-chip ds-chip-bug', 'data-sev': task.severity ?? 'p2' }, `BUG ${String(task.severity || 'p2').toUpperCase()}`) : null,
       task.sla !== null && task.sla !== undefined && task.status !== 'done'
         ? h(ChipField, {

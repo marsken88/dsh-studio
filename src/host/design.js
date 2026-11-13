@@ -43,6 +43,8 @@ export function sanitizeDesign(raw) {
           kind: String(item?.kind ?? '').slice(0, 20),
           value: String(item?.value ?? '').slice(0, 40),
           count: Math.max(0, Number(item?.count) || 0),
+          // 谁在用这个值：修的时候不用再翻 DOM。
+          sample: String(item?.sample ?? '').slice(0, 120),
         })),
       },
   }

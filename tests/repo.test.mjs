@@ -410,6 +410,13 @@ test('host: artifacts leave the poll without their bodies', async () => {
   assert.equal(artifact.content, body, 'the stored artifact must not be stripped in place')
 })
 
+test('host: the audit summary keeps the offending element', async () => {
+  const { sanitizeDesign } = await import('../src/host/design.js')
+  const design = sanitizeDesign({ spec: { checked: 218, violations: 17, top: [{ kind: 'fontSize', value: '13.3333px', count: 23, sample: 'span.brand' }] } })
+  assert.equal(design.spec.top[0].sample, 'span.brand')
+  assert.equal(design.spec.top[0].count, 23)
+})
+
 test('host: fidelity history keeps order, caps and skips repeats', async () => {
   const { pushDiffHistory } = await import('../src/host/design.js')
   const first = pushDiffHistory([], { percent: 10, url: 'u', at: 1 })

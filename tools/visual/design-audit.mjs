@@ -7,7 +7,8 @@
  *   node tools/visual/design-audit.mjs --url <页面> [--spec design-tokens.json] [--out report.json]
  *
  * 规范文件缺省时用内置的一套（够用来发现 13px/7px 这类偷偷加的值）。仓库根可以放一份真的覆盖掉。
- * 输出：{ checked, violations: [{ kind, value, count, allowed }], summary }
+ * 输出：{ checked, violations: [{ kind, value, count, samples, allowed }], summary }
+ * samples 是「谁在用这个值」的样本（tag.class[data-*] 「文案」），修的时候不用再翻 DOM。
  */
 import { readFileSync, writeFileSync, existsSync } from 'node:fs'
 import { createRequire } from 'node:module'
@@ -55,22 +56,41 @@ const collected = await page.evaluate(() => {
   const radii = new Map()
   const spacing = new Map()
   let checked = 0
-  const bump = (map, value) => { if (value === '') return; map.set(value, (map.get(value) ?? 0) + 1) }
+  // 每个值配几个「谁在用它」的样本——光给数字，修的时候还得人肉翻 DOM。
+  const describe = el => {
+    const tag = el.tagName.toLowerCase()
+    const classes = [...el.classList].slice(0, 2).map(name => '.' + name).join('')
+    const attrs = ['data-dsh-studio', 'data-design', 'role', 'aria-label', 'title']
+      .map(name => (el.getAttribute(name) === null ? '' : `[${name}]`))
+      .join('')
+    const text = (el.textContent ?? '').trim().replace(/\s+/g, ' ').slice(0, 28)
+    return `${tag}${classes}${attrs}${text === '' ? '' : ' 「' + text + '」'}`.slice(0, 120)
+  }
+  const bump = (map, value, el) => {
+    if (value === '') return
+    const current = map.get(value) ?? { count: 0, samples: [] }
+    current.count += 1
+    if (current.samples.length < 3) {
+      const sample = describe(el)
+      if (!current.samples.includes(sample)) current.samples.push(sample)
+    }
+    map.set(value, current)
+  }
   for (const el of document.querySelectorAll('*')) {
     const style = window.getComputedStyle(el)
     if (style.display === 'none' || style.visibility === 'hidden') continue
     const box = el.getBoundingClientRect()
     if (box.width === 0 && box.height === 0) continue
     checked += 1
-    bump(fonts, style.fontSize)
-    bump(radii, style.borderRadius)
+    bump(fonts, style.fontSize, el)
+    bump(radii, style.borderRadius, el)
     for (const key of ['marginTop', 'marginBottom', 'marginLeft', 'marginRight', 'paddingTop', 'paddingBottom', 'paddingLeft', 'paddingRight', 'gap']) {
       const value = style[key]
       if (value === 'normal' || value === 'auto') continue
-      bump(spacing, value)
+      bump(spacing, value, el)
     }
   }
-  const toList = map => [...map.entries()].map(([value, count]) => ({ value, count }))
+  const toList = map => [...map.entries()].map(([value, bucket]) => ({ value, count: bucket.count, samples: bucket.samples }))
   return { checked, fonts: toList(fonts), radii: toList(radii), spacing: toList(spacing) }
 })
 await browser.close()
@@ -79,7 +99,7 @@ const violations = []
 for (const [kind, key] of [['fontSize', 'fonts'], ['radius', 'radii'], ['spacing', 'spacing']]) {
   const allowed = (spec[kind] ?? []).map(String)
   for (const item of collected[key]) {
-    if (allowed.length > 0 && !allowed.includes(item.value)) violations.push({ kind, value: item.value, count: item.count, allowed })
+    if (allowed.length > 0 && !allowed.includes(item.value)) violations.push({ kind, value: item.value, count: item.count, samples: item.samples ?? [], allowed })
   }
 }
 violations.sort((a, b) => b.count - a.count)
