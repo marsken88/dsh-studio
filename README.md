@@ -7,6 +7,17 @@
 
 运行环境：DSH `0.2.2-rc.1`，Node 22 以上，Linux/macOS（Windows 原生不支持 `link:` 安装 + systemd 托管）。
 
+## 它长什么样
+
+| 看板：八列、角色负责人、卡片带进度/评论/用例 | 用例库：跨卡聚合、套件、最近回归 |
+| --- | --- |
+| ![看板](https://raw.githubusercontent.com/marsken88/dsh-studio/main/docs/images/board.png) | ![用例库](https://raw.githubusercontent.com/marsken88/dsh-studio/main/docs/images/cases.png) |
+
+| 效能：一次通过率、返工率、按专家看质量 |
+| --- |
+| ![效能](https://raw.githubusercontent.com/marsken88/dsh-studio/main/docs/images/quality.png) |
+
+
 ## 部署
 
 仓库：https://github.com/marsken88/dsh-studio（`main` 分支，含可直接安装的构建产物 `client.js`，clone 下来就能装，不用先构建）。
