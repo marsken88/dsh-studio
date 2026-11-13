@@ -377,6 +377,29 @@ export function TestingPanel({ config, onChanged }) {
   const [busy, setBusy] = React.useState(false)
   const [error, setError] = React.useState(null)
   const [note, setNote] = React.useState(null)
+  const [flags, setFlags] = React.useState({ allowShell: testing.allowShell === true, allowDb: testing.allowDb === true })
+  const [limitsDraft, setLimitsDraft] = React.useState({
+    casesPerTask: config.limits?.casesPerTask ?? 60,
+    runKeys: config.limits?.runKeys ?? 60,
+    artifactsPerTask: config.limits?.artifactsPerTask ?? 40,
+  })
+  const [hooks, setHooks] = React.useState(() => (Array.isArray(config.webhooks) ? config.webhooks : []).map(hook => ({ ...hook })))
+  const saveFlags = async next => {
+    setFlags(next)
+    setBusy(true); setNote(null)
+    try { await api('/config', { testing: { ...testing, allowShell: next.allowShell, allowDb: next.allowDb } }); setNote('已保存'); await onChanged() }
+    catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)) } finally { setBusy(false) }
+  }
+  const saveLimits = async () => {
+    setBusy(true); setNote(null)
+    try { await api('/config', { limits: limitsDraft }); setNote('上限已保存'); toast('上限已保存'); await onChanged() }
+    catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)) } finally { setBusy(false) }
+  }
+  const saveHooks = async () => {
+    setBusy(true); setNote(null)
+    try { await api('/config', { webhooks: hooks.filter(hook => String(hook.url ?? '').trim() !== '') }); setNote('webhook 已保存'); toast('webhook 已保存'); await onChanged() }
+    catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)) } finally { setBusy(false) }
+  }
 
   const push = async next => {
     setBusy(true); setError(null); setNote(null)
@@ -449,6 +472,58 @@ export function TestingPanel({ config, onChanged }) {
 
   return h('div', { className: 'ds-pane-stack' },
     form,
+    h('div', { className: 'ds-panel' },
+      h('div', { className: 'ds-panel-head' }, '执行开关',
+        h('span', { className: 'ds-hint' }, '默认都关：打开等于把宿主机的能力交给看板使用者')),
+      h('div', { className: 'ds-panel-body' },
+        h('label', { className: 'ds-check' },
+          h(CheckField, { checked: flags.allowShell, disabled: busy, onChange: e => void saveFlags({ ...flags, allowShell: e.target.checked }) }),
+          h('span', { className: 'ds-check-text' }, '允许 shell 用例（能在宿主机执行命令）'),
+        ),
+        h('label', { className: 'ds-check', style: { marginTop: 6 } },
+          h(CheckField, { checked: flags.allowDb, disabled: busy, onChange: e => void saveFlags({ ...flags, allowDb: e.target.checked }) }),
+          h('span', { className: 'ds-check-text' }, '允许数据库用例（默认只读打开 SQLite）'),
+        ),
+      ),
+    ),
+    h('div', { className: 'ds-panel' },
+      h('div', { className: 'ds-panel-head' }, '数量上限'),
+      h('div', { className: 'ds-panel-body' },
+        h('div', { className: 'ds-row', style: { gap: 8, flexWrap: 'wrap' } },
+          h('div', { className: 'ds-field', style: { flex: 1 } },
+            h('div', { className: 'ds-label' }, '每张卡用例上限'),
+            h(TextField, { className: 'ds-input', type: 'number', value: String(limitsDraft.casesPerTask), onChange: e => setLimitsDraft({ ...limitsDraft, casesPerTask: Number(e.target.value) }) }),
+          ),
+          h('div', { className: 'ds-field', style: { flex: 1 } },
+            h('div', { className: 'ds-label' }, '一次批量跑上限'),
+            h(TextField, { className: 'ds-input', type: 'number', value: String(limitsDraft.runKeys), onChange: e => setLimitsDraft({ ...limitsDraft, runKeys: Number(e.target.value) }) }),
+          ),
+          h('div', { className: 'ds-field', style: { flex: 1 } },
+            h('div', { className: 'ds-label' }, '交付物上限'),
+            h(TextField, { className: 'ds-input', type: 'number', value: String(limitsDraft.artifactsPerTask), onChange: e => setLimitsDraft({ ...limitsDraft, artifactsPerTask: Number(e.target.value) }) }),
+          ),
+        ),
+        h('div', { className: 'ds-row', style: { justifyContent: 'flex-end', marginTop: 6 } },
+          h('button', { className: 'ds-btn ds-btn-primary', disabled: busy, onClick: () => void saveLimits() }, '保存上限'),
+        ),
+      ),
+    ),
+    h('div', { className: 'ds-panel' },
+      h('div', { className: 'ds-panel-head' }, '出站 webhook',
+        h('button', { className: 'ds-btn ds-btn-ghost', disabled: busy, onClick: () => setHooks(list => [...list, { url: '', events: ['task/moved'], enabled: true }]) }, '＋ 加一个')),
+      h('div', { className: 'ds-panel-body' },
+        hooks.length === 0
+          ? h('div', { className: 'ds-empty' }, '还没有 webhook。配一个就能把卡片流转、用例失败、门禁拦截推给 CI / IM / 工单系统。')
+          : hooks.map((hook, index) => h('div', { className: 'ds-row', key: index, style: { gap: 6, alignItems: 'center', marginBottom: 6 } },
+            h(TextField, { className: 'ds-input', style: { flex: 1 }, placeholder: 'https://ci.example/hook', value: hook.url ?? '', onChange: e => setHooks(list => list.map((item, i) => (i === index ? { ...item, url: e.target.value } : item))) }),
+            h(CheckField, { checked: hook.enabled !== false, onChange: e => setHooks(list => list.map((item, i) => (i === index ? { ...item, enabled: e.target.checked } : item))) }),
+            h('button', { className: 'ds-btn ds-btn-ghost', disabled: busy, onClick: () => setHooks(list => list.filter((_, i) => i !== index)) }, '×'),
+          )),
+        hooks.length === 0 ? null : h('div', { className: 'ds-row', style: { justifyContent: 'flex-end' } },
+          h('button', { className: 'ds-btn ds-btn-primary', disabled: busy, onClick: () => void saveHooks() }, '保存 webhook'),
+        ),
+      ),
+    ),
     h('div', { className: 'ds-panel' },
       h('div', { className: 'ds-panel-head' }, '测试环境',
         h('button', { className: 'ds-btn ds-btn-ghost', disabled: busy, onClick: () => setDraft({ name: '', baseUrl: '' }) }, '＋ 新增环境')),

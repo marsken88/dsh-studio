@@ -1,5 +1,6 @@
 // ------------------------------------------------------------------ dispatcher
 import { DEFAULT_ROLES, FALLBACK_AGENT_MODEL, ROLE_IDS, SANDBOX_MODES, STATUSES, codingSummary, normalizeStrategy, worktreeRoot } from './domain.js'
+import { emitEvent } from './events.js'
 import { loadTeamMemory, teamMemoryBlock } from './team-memory.js'
 import { mkdir } from 'node:fs/promises'
 import { randomBytes } from 'node:crypto'
@@ -345,6 +346,7 @@ export async function noteAgentFailure(store, taskId, error, by = '系统', opts
       host.INTEGRATION.lastPushError = String(cause?.message ?? cause).slice(0, 300)
     })
   }
+  emitEvent('agent/failed', { taskId, attempts: next, exhausted: plan.exhausted, error: message, by })
   return { failures: next, ...plan, message }
 }
 

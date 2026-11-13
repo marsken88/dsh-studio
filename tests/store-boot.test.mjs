@@ -43,6 +43,34 @@ test('store: boots, persists and reloads a state file', async () => {
   }
 })
 
+test('store: an agent failure emits agent/failed', async () => {
+  const { mkdtemp, rm } = await import('node:fs/promises')
+  const { tmpdir } = await import('node:os')
+  const { join } = await import('node:path')
+  const { StudioStore, SecretStore } = await import('../src/host/store.js')
+  const { noteAgentFailure } = await import('../src/host/dispatcher.js')
+  const { subscribe } = await import('../src/host/events.js')
+  const dir = await mkdtemp(join(tmpdir(), 'dsh-studio-agentfail-'))
+  const store = new StudioStore(join(dir, 'dsh-studio.json'), { dbFile: join(dir, 'dsh-studio.db'), secrets: new SecretStore(join(dir, '.secrets.json')) })
+  const seen = []
+  const off = subscribe(event => { if (event.type === 'agent/failed') seen.push(event.payload) })
+  try {
+    await store.ready
+    await store.mutate(state => {
+      state.tasks.push({ id: 't-fail', title: '出错的卡', status: 'dev', history: [], agentFailures: 0, createdAt: Date.now() })
+    })
+    await noteAgentFailure(store, 't-fail', new Error('模型通道 503'), '系统', { notify: false })
+    assert.equal(seen.length, 1)
+    assert.equal(seen[0].taskId, 't-fail')
+    assert.equal(seen[0].attempts, 1)
+    assert.match(seen[0].error, /503/)
+  } finally {
+    off()
+    try { store.db?.close?.() } catch { /* already closed */ }
+    await rm(dir, { recursive: true, force: true, maxRetries: 3, retryDelay: 50 }).catch(() => {})
+  }
+})
+
 test('store: recordRun actually writes the run log to disk', async () => {
   const { mkdtemp, rm } = await import('node:fs/promises')
   const { tmpdir } = await import('node:os')
