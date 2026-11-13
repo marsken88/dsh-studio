@@ -144,6 +144,40 @@ export function pickJsonPath(payload, path) {
   return cursor === null || cursor === undefined ? '' : String(cursor)
 }
 
+/**
+ * 开跑之前先探一下环境。环境没起的时候，一整套用例会被刷成"失败"，
+ * 需求准出还会因此被卡住——那不是用例坏了，是环境没开。
+ * 任何 HTTP 响应（含 404/500）都算"活着"，只有连不上/超时才算不可达。
+ */
+export async function probeEnv(env, config, timeoutMs = 5000) {
+  const baseUrl = String(env?.baseUrl ?? '').trim()
+  const id = String(env?.id ?? '')
+  if (baseUrl === '') return { ok: false, env: id, baseUrl: '', error: '环境没有填 baseUrl' }
+  let url
+  try {
+    url = new URL(baseUrl)
+  } catch {
+    return { ok: false, env: id, baseUrl, error: 'baseUrl 不是合法地址' }
+  }
+  const allow = Array.isArray(config?.testing?.allowHosts) ? config.testing.allowHosts : []
+  if (!hostAllowed(url.hostname, allow)) {
+    return { ok: false, env: id, baseUrl, error: `域名 ${url.hostname} 不在白名单（设置 → 测试执行 → 允许访问的域名）` }
+  }
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), Math.max(1000, Math.min(Number(timeoutMs) || 5000, 15000)))
+  const started = Date.now()
+  try {
+    const response = await fetch(baseUrl, { method: 'GET', signal: controller.signal, redirect: 'manual' })
+    return { ok: true, env: id, baseUrl, status: response.status, ms: Date.now() - started }
+  } catch (error) {
+    const code = error?.cause?.code ?? error?.code ?? error?.name
+    const reason = String(code ?? error?.message ?? error).slice(0, 120)
+    return { ok: false, env: id, baseUrl, error: reason, ms: Date.now() - started }
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
 export async function runOneCase(item, env, config, seedVars) {
   const started = Date.now()
   if (item.http == null) {
@@ -262,6 +296,11 @@ export async function runTaskCases(store, taskId, options = {}) {
   const targets = (Array.isArray(task.cases) ? task.cases : [])
     .filter(item => (wanted === null ? item.http != null : wanted.has(item.id)))
   if (targets.length === 0) throw new Error('没有可执行的用例：用例上要填 method + url（相对地址会拼环境 baseUrl）')
+
+  const probe = await probeEnv(env, config)
+  if (probe.ok !== true) {
+    throw new Error(`测试环境「${env.name || env.id}」不可达（${probe.error}）：一条用例都没跑，先把 ${probe.baseUrl || 'baseUrl'} 起来`)
+  }
 
   const by = String(options.by ?? '系统').slice(0, 40)
   const results = []

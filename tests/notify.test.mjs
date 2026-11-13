@@ -4,6 +4,7 @@ import test from 'node:test'
 
 import { feishuText, feishuPush, feishuBroadcast, botWants, healthReport } from '../src/host/integrations.js'
 import { sanitizeBots } from '../src/host/domain.js'
+import { probeEnv } from '../src/host/executor.js'
 
 test('notify: feishuText accepts strings and { text } objects alike', () => {
   assert.equal(feishuText('hello'), 'hello')
@@ -13,6 +14,27 @@ test('notify: feishuText accepts strings and { text } objects alike', () => {
   assert.equal(feishuText(undefined), '')
   assert.equal(feishuText({}), '')
   assert.equal(feishuText('x'.repeat(5000)).length, 4000)
+})
+
+test('executor: an environment that is down is reported before any case runs', async () => {
+  const config = { testing: { allowHosts: ['127.0.0.1'] } }
+  assert.equal((await probeEnv({ id: 'demo', baseUrl: '' }, config)).ok, false)
+  assert.equal((await probeEnv({ id: 'demo', baseUrl: 'not-a-url' }, config)).ok, false)
+  const blocked = await probeEnv({ id: 'demo', baseUrl: 'http://example.com' }, config)
+  assert.equal(blocked.ok, false)
+  assert.match(blocked.error, /白名单/)
+
+  const server = http.createServer((req, res) => { res.writeHead(503, { 'content-type': 'text/plain' }); res.end('down') })
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve))
+  const { port } = server.address()
+  const alive = await probeEnv({ id: 'demo', baseUrl: `http://127.0.0.1:${port}` }, config)
+  assert.equal(alive.ok, true, 'any HTTP answer counts as reachable')
+  assert.equal(alive.status, 503)
+
+  await new Promise((resolve) => server.close(resolve))
+  const dead = await probeEnv({ id: 'demo', baseUrl: `http://127.0.0.1:${port}` }, config, 1500)
+  assert.equal(dead.ok, false)
+  assert.ok(dead.error.length > 0)
 })
 
 test('notify: feishuPush posts content.text and records the healthy channel', async () => {

@@ -202,6 +202,15 @@ export async function handleTaskRoute({ method, route, req, res, store, url }) {
     if (keys.length === 0) throw new Error('先勾几条用例再跑')
     const grouped = groupCaseKeys(keys)
     if (grouped.size === 0) throw new Error('没有可跑的用例')
+    // 先探一次环境：连不上就直接报错，不要把整批用例刷成失败。
+    const snapshot = store.snapshot()
+    const testing = snapshot.config.testing ?? {}
+    const envs = Array.isArray(testing.envs) ? testing.envs : []
+    const env = envs.find(item => item.id === String(body.env ?? testing.defaultEnv ?? '')) ?? envs[0]
+    if (env !== undefined) {
+      const probe = await host.probeEnv(env, snapshot.config)
+      if (probe.ok !== true) throw new Error(`测试环境「${env.name || env.id}」不可达（${probe.error}）：一条用例都没跑`)
+    }
     const by = String(body.by ?? '回归').slice(0, 40)
     const results = []
     for (const [taskId, caseIds] of grouped) {
