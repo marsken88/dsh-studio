@@ -40,14 +40,20 @@ web/src/**  ── vite build ──▶  dist/client.js  ── sync-client.mjs 
 cd dsh-studio/web
 node C:/Users/hp/.dsh/dsh-runtimes/dsh-primary-runtime/dependencies/pnpm/bin/pnpm.cjs run build
 
-# 2) 上传：index.js + client.js → 目标机 /tmp/index.js、/tmp/client.js
-#    本机用 paramiko 脚本（tmp/deploy2.py，不入库），或等价 scp
+# 2) 部署：一条命令，传 index.js + dist/client.js + 整个 src/host，先备份再覆盖，最后自检
+cd ..
+DSH_DEPLOY_HOST=192.168.120.218 DSH_DEPLOY_USER=lyf DSH_DEPLOY_PASSWORD=*** node tools/deploy.mjs
+#    没有密码就先用 --key 或 ssh-copy-id 授权本机公钥，再：node tools/deploy.mjs --dry-run 看它要传什么
 
-# 3) 远端安装并重启（脚本已存在于目标机 /tmp/deploy-all.sh）
-bash /tmp/deploy-all.sh     # cp 两个文件到 /home/lyf/dsh-studio，restart dsh-web，打印 is-active
+# 3) 冒烟：进面板 → 页签 → 看板有卡 → 用例库有行 → pageerror 必须为空
+STUDIO_TOKEN=$(echo 1234 | sudo -S journalctl -u dsh-web -n 50 | grep -o 'token=[A-Za-z0-9_-]*' | tail -1 | cut -d= -f2) \
+  node tools/visual/smoke.mjs
 ```
 
-> `deploy-all.sh` 拷 `index.js`、`client.js`，以及 `/tmp/src/` 下的 `src/host/*.js`。改了 `package.json`（包头、`engines`、`dsh.*`、`files`）、`cordis.patch.yml`、`locale/*.json` 时必须单独上传到 `/home/lyf/dsh-studio/` 再重启，否则改了个寂寞。改动前先 `cp package.json /tmp/package.json.bak` 留退路。
+> `tools/deploy.mjs` 会打印 `active=` / `files=` / `state=`，`active` 不是 active 就以非零退出。
+> 它依赖 `ssh2`（devDependency，只给部署用，不进插件运行时）；`tools/visual/smoke.mjs` 依赖 `puppeteer-core`（同样只在 devDependencies 里），浏览器用系统 Chrome，可用 `CHROME_PATH` 指定。
+
+> 目标机上那个老的 `deploy-all.sh` 只作兜底（它拷 `/tmp/` 下的两个文件和 `src/`）。日常用 `tools/deploy.mjs`，别再手工 scp 拼路径。改了 `package.json`（包头、`engines`、`dsh.*`、`files`）、`cordis.patch.yml`、`locale/*.json` 时必须单独上传到 `/home/lyf/dsh-studio/` 再重启，否则改了个寂寞。改动前先 `cp package.json /tmp/package.json.bak` 留退路。
 >
 > 宿主拆成 `src/host/*.js` 以后，**部署必须带整个 `src/` 目录**：`/tmp/index.js`、`/tmp/client.js`、`/tmp/src/host/{domain,dispatcher,executor,integrations,store}.js` 与 `/tmp/src/host/routes/*.js`。只传 `index.js` 会得到 `ReferenceError: sanitizeAccess is not defined`（服务 502）。
 
@@ -58,12 +64,12 @@ bash /tmp/deploy-all.sh     # cp 两个文件到 /home/lyf/dsh-studio，restart 
 1. `node --check index.js && node --check client.src.js`（语法；但**查不出**运行期 `ReferenceError`，见第 11 节）
 2. 构建后 `cmp` 两个 client.js 一致
 3. 服务端行为：写一个 `tmp/*.mjs`（或 `.py`）脚本直接打 `/studio-api/*`，**不要在 PowerShell 里内联复杂 `node -e`**
-4. UI 行为：用 `tools/visual/*.mjs` 里的 headless 探针（puppeteer-core 在该目录下），必须
+4. UI 行为：先跑 `node tools/visual/smoke.mjs`（部署后冒烟，见 §3）；要验具体功能就照它的写法加探针，必须
    - 先点侧栏文字进入面板，再等 `[data-dsh-studio]`
    - 切页签用 `elementHandle.click()`（Radix Tabs 不认 DOM `.click()`）
    - 断言 DOM + `pageerror` 为空，并截图留档
 5. 涉及权限/门禁/发布的重改动，跑一遍既有 e2e 脚本并贴出数字
-6. `npm test`（71 条：`tests/repo.test.mjs` 管 manifest / 产物一致 / 宿主接口 / 领域层拆分与导入 / **导入只读绑定不许赋值** / **跨模块符号必须导入** / 迁移 / 文档 / locale / **用了 `React.` 的组件必须从 `client()` 或工厂参数拿到 `React`**；`tests/client-units.test.mjs` 用真实模块跑标签表/负责人/日期/命令面板检索这些纯函数；`tests/notify.test.mjs` 起一个本地 HTTP 桩验证飞书通知（正文归一、`botWants` 的事件矩阵、`feishuBroadcast` 只发给订阅该事件的机器人）；`tests/store-boot.test.mjs` 真的起一个 `StudioStore`，把「搬完代码启动就炸」这类问题挡在部署前。想连真数据验证：把生产库三个文件（`.db`/`-wal`/`-shm`）拷到临时目录，用 `new StudioStore()` + `await store.ready` 跑一遍，`tmp/boot-real.mjs` 就是这么写的）；`npm run check` = 语法 + 契约一把过
+6. `npm test`（73 条：`tests/repo.test.mjs` 管 manifest / 产物一致 / 宿主接口 / 领域层拆分与导入 / **导入只读绑定不许赋值** / **跨模块符号必须导入** / 迁移 / 文档 / locale / **用了 `React.` 的组件必须从 `client()` 或工厂参数拿到 `React`**；`tests/client-units.test.mjs` 用真实模块跑标签表/负责人/日期/命令面板检索这些纯函数；`tests/notify.test.mjs` 起一个本地 HTTP 桩验证飞书通知（正文归一、`botWants` 的事件矩阵、`feishuBroadcast` 只发给订阅该事件的机器人）；`tests/store-boot.test.mjs` 真的起一个 `StudioStore`，把「搬完代码启动就炸」这类问题挡在部署前。想连真数据验证：把生产库三个文件（`.db`/`-wal`/`-shm`）拷到临时目录，用 `new StudioStore()` + `await store.ready` 跑一遍，`tmp/boot-real.mjs` 就是这么写的）；`npm run check` = 语法 + 契约一把过
 7. 构建期守卫：`web/scripts/guard.mjs`（`pnpm build` 自动跑两次）——禁 CSS 里出现 `hsl(var(--x))`、禁 Radix Portal 不挂 `container={portalRoot()}`、产物里必须留下 `data-dsh-studio-portal`。单独跑：`cd web && npm run guard`
 8. 真库自检：`npm run smoke:store -- ~/.dsh/dsh-studio.db`（把 `.db/-wal/-shm` 拷到临时目录起一遍真实 `StudioStore`，专抓「空库能起、真库就炸」的导入问题）
 9. CI 在 `.github/workflows/ci.yml`：语法 → 契约 → `web/` 里 `pnpm install --frozen-lockfile && pnpm build` → `cmp dist/client.js client.js` → `git diff --exit-code`（产物必须可复现，改了前端忘记构建会直接红）
