@@ -43,6 +43,33 @@ test('store: boots, persists and reloads a state file', async () => {
   }
 })
 
+test('store: recordRun actually writes the run log to disk', async () => {
+  const { mkdtemp, rm } = await import('node:fs/promises')
+  const { tmpdir } = await import('node:os')
+  const { join } = await import('node:path')
+  const { StudioStore, SecretStore } = await import('../src/host/store.js')
+  const { attachRunLog, recordRun, RUN_LOG } = await import('../src/host/dispatcher.js')
+  const dir = await mkdtemp(join(tmpdir(), 'dsh-studio-runs-write-'))
+  const store = new StudioStore(join(dir, 'dsh-studio.json'), { dbFile: join(dir, 'dsh-studio.db'), secrets: new SecretStore(join(dir, '.secrets.json')) })
+  try {
+    await store.ready
+    RUN_LOG.length = 0
+    attachRunLog(store)
+    recordRun({ taskId: 't-write-1', expert: 'dev', expertName: '开发工程师', model: 'm', at: Date.now() })
+    // 写盘是去抖的（1.5s），等它落下去——这条测试专门盯「写入」这一步。
+    await new Promise(resolve => setTimeout(resolve, 1900))
+    const saved = await store.readSide('agent-runs')
+    assert.equal(Array.isArray(saved), true, 'runs must be written')
+    assert.equal(saved.length, 1)
+    assert.equal(saved[0].taskId, 't-write-1')
+    assert.equal(saved[0].expertName, '开发工程师')
+  } finally {
+    RUN_LOG.length = 0
+    try { store.db?.close?.() } catch { /* already closed */ }
+    await rm(dir, { recursive: true, force: true, maxRetries: 3, retryDelay: 50 }).catch(() => {})
+  }
+})
+
 test('store: the dispatch run log restores from its side key', async () => {
   const { mkdtemp, rm } = await import('node:fs/promises')
   const { tmpdir } = await import('node:os')
