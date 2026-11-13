@@ -104,6 +104,7 @@ export function CasesPage({ state, onOpenTask }) {
     const parts = [`跑了 ${results.length} 张卡 / ${sum('total')} 条：通过 ${sum('passed')}，不通过 ${sum('failed')}`]
     if (sum('bugs') > 0) parts.push(`自动开缺陷 ${sum('bugs')} 张`)
     if (broke.length > 0) parts.push(`${broke.length} 张卡报错：${broke[0].error ?? ''}`)
+    if (out?.truncated !== undefined) parts.push(`套件共 ${out.truncated.total} 条，本次只跑了前 ${out.truncated.ran} 条`)
     return parts.join('，')
   }
   const runSuite = async suite => {

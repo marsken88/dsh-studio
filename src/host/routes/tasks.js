@@ -264,8 +264,10 @@ export async function handleTaskRoute({ method, route, req, res, store, url }) {
   if (method === 'POST' && route === '/cases/run') {
     // 跨卡回归：勾中的用例按卡分组，一张卡一轮（执行器本来就是按卡跑的），再汇总。
     const body = await host.readJsonBody(req)
-    const keys = (Array.isArray(body.keys) ? body.keys : []).map(String).filter(key => key.length > 0).slice(0, 60)
-    if (keys.length === 0) throw new Error('先勾几条用例再跑')
+    const allKeys = (Array.isArray(body.keys) ? body.keys : []).map(String).filter(key => key.length > 0)
+    if (allKeys.length === 0) throw new Error('先勾几条用例再跑')
+    if (allKeys.length > 60) throw new Error(`一次最多跑 60 条（这次勾了 ${allKeys.length} 条）：分两次跑，或者把它存成套件`)
+    const keys = allKeys
     const out = await runCaseKeys(store, keys, { env: body.env, by: String(body.by ?? '回归') })
     host.sendJson(res, 200, { ok: true, ...out, state: host.publicState(store) })
     return true
@@ -304,9 +306,12 @@ export async function handleTaskRoute({ method, route, req, res, store, url }) {
     const suites = await loadSuites(store)
     const suite = suites.find(item => item.id === String(body.id ?? ''))
     if (suite === undefined) throw new Error('套件不存在')
-    const keys = resolveSuiteKeys(suite, collectCases(store.snapshot())).slice(0, 60)
-    if (keys.length === 0) throw new Error(`套件「${suite.name}」里没有可跑的用例`)
+    const allKeys = resolveSuiteKeys(suite, collectCases(store.snapshot()))
+    if (allKeys.length === 0) throw new Error(`套件「${suite.name}」里没有可跑的用例`)
+    const keys = allKeys.slice(0, 60)
     const out = await runCaseKeys(store, keys, { env: body.env, by: `套件：${suite.name}`.slice(0, 40) })
+    // 套件超过上限不报错（夜间要能跑完），但把截断这件事说出来，别让人以为全跑了。
+    if (allKeys.length > keys.length) out.truncated = { ran: keys.length, total: allKeys.length }
     host.sendJson(res, 200, { ok: true, ...out, suite: { id: suite.id, name: suite.name }, state: host.publicState(store) })
     return true
   }
@@ -374,7 +379,8 @@ export async function handleTaskRoute({ method, route, req, res, store, url }) {
         if (created === undefined) throw new Error('交付物至少要有标题')
         created.by = String(body.by ?? created.by ?? '')
         created.at = Date.now()
-        task.artifacts = [...task.artifacts, created].slice(0, 40)
+        if (task.artifacts.length >= 40) throw new Error('一张卡最多 40 个交付物：先删掉过期的再加')
+        task.artifacts = [...task.artifacts, created]
       } else if (action === 'remove') {
         task.artifacts = task.artifacts.filter(item => item.id !== String(body.artifactId ?? ''))
       } else if (action === 'update') {
@@ -503,7 +509,8 @@ export async function handleTaskRoute({ method, route, req, res, store, url }) {
         task.updatedAt = Date.now()
         return task
       }
-      task.cases = list.slice(0, 60)
+      if (list.length > 60) throw new Error(`一张卡最多 60 条用例（这次是 ${list.length} 条）：先删掉不用的再加，别让它被静默截断`)
+      task.cases = list
       task.updatedAt = Date.now()
       return task
     })
