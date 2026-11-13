@@ -11,7 +11,7 @@
  * 或者用环境变量指过去：PUPPETEER_CORE=/path/to/puppeteer-core
  *
  * token 从哪来：dsh web 启动时会在 journal 里打印 http://host:18080/?token=xxxx
- *   echo 1234 | sudo -S journalctl -u dsh-web -n 50 | grep -o 'token=[A-Za-z0-9_-]*' | tail -1
+ *   sudo journalctl -u dsh-web -n 50 | grep -o 'token=[A-Za-z0-9_-]*' | tail -1
  */
 import { createRequire } from 'node:module'
 

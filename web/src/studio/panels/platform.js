@@ -373,7 +373,7 @@ export function BusinessPanel({ config, onChanged }) {
             h('div', { className: 'ds-label' }, '默认代码目录（没有分服务时用）'),
             h(TextField, {
               className: 'ds-input', value: draft.repoPath ?? '',
-              placeholder: '/home/lyf/repos/order-center',
+              placeholder: '~/repos/order-center',
               onChange: e => set('repoPath', e.target.value),
             }),
           ),
@@ -405,7 +405,7 @@ export function BusinessPanel({ config, onChanged }) {
                   h('div', { className: 'ds-field', style: { flex: 3 } },
                     h('div', { className: 'ds-label' }, '本机 git 路径'),
                     h(TextField, {
-                      className: 'ds-input', value: service.repoPath ?? '', placeholder: '/home/lyf/repos/order-service',
+                      className: 'ds-input', value: service.repoPath ?? '', placeholder: '~/repos/order-service',
                       onChange: e => setService(index, 'repoPath', e.target.value),
                     }),
                   ),
