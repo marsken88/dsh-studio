@@ -842,7 +842,7 @@ export function registerTools(ctx, store) {
       artifactId: { type: 'string', description: 'Required for update / remove.' },
       kind: { type: 'string', description: `requirement | design | mr | cases | report | release | doc | screenshot | other` },
       title: { type: 'string', description: 'What this deliverable is.' },
-      ref: { type: 'string', description: 'Path or URL (e.g. /home/lyf/dsh-workspace/docs/x.md or the MR link).' },
+      ref: { type: 'string', description: 'Path or URL (e.g. ~/dsh-workspace/docs/x.md or the MR link).' },
       content: { type: 'string', description: '交付物正文（Markdown）。写到云盘文档里的就是这段；不填就只有标题和元信息。' },
       by: { type: 'string', description: '登记人：填你自己的专家名字（例如「架构师」）。看板靠它区分 AI 产出和人手工登记。' },
       sync: { type: 'boolean', description: '登记后是否立刻同步到飞书云盘（需求文件夹下的 .md 文档）。默认 true。' },

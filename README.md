@@ -885,7 +885,7 @@ Agent 的「我改了 A、B、C」现在可以和 worktree 里的 git 对账：
 
 ### 联调记录与网络前提（2026-11-09）
 - 本机用临时 slapd（`dc=test,dc=local`，`alice/Passw0rd!`、`bob/BobPass123`）跑过 `tools/verify-ldap.mjs`：**23/23 PASS**（配置写入、状态里无明文、测试连接、登录成功、显示名/邮箱/部门、users 记录、`/auth/me`、错密码 `badpass`、不存在 `notfound`、锁门 `/state` 与 401、带会话可访问、退出后失效、收尾关开关）；联调用的 slapd 与测试账号已卸载清空。
-- **`ldap.laiyifen.com:389` 从 `.218` 不可达**（域名解析到 `10.1.0.167/10.1.0.166`，ping 全丢、TCP 389 不通，`ldapsearch` 超时）。真实参数已经写进配置（`url / baseDN / bindDN / 密码`），但 `enabled` 与 `requireLogin` **都关着**：等这台机器能访问目录服务（内网路由 / VPN / 防火墙放行 389），到设置里点「测试连接」通过后再打开开关，否则会把所有人锁在门外。
+- **公司 LDAP（`ldap.<公司域>:389`）从目标机不可达**（解析到内网地址，ping 全丢、TCP 389 不通，`ldapsearch` 超时）。真实参数已经写进配置（`url / baseDN / bindDN / 密码`），但 `enabled` 与 `requireLogin` **都关着**：等这台机器能访问目录服务（内网路由 / VPN / 防火墙放行 389），到设置里点「测试连接」通过后再打开开关，否则会把所有人锁在门外。
 - `parseLdif` 支持 RFC 2849 的 `attr:: base64`（AD 的中文 `displayName` 就是这样编码的）；`ldapsearch` 的过滤器必须排在属性**前面**，否则会被当成属性名、搜索退化成 `(objectClass=*)` 并触发 `Size limit exceeded`。
 
 ## 本地超管账号与免登录（2026-11-09）

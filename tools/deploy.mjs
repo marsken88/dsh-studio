@@ -11,7 +11,7 @@
  *   DSH_DEPLOY_HOST=<host> DSH_DEPLOY_USER=<user> node tools/deploy.mjs --key ~/.ssh/id_ed25519
  *
  * 环境变量：DSH_DEPLOY_HOST / DSH_DEPLOY_USER / DSH_DEPLOY_PASSWORD / DSH_DEPLOY_PORT(默认 22)
- * 参数：--remote-dir <path>（默认 /home/lyf/dsh-studio）--tmp-dir（默认 /tmp）--dry-run
+ * 参数：--remote-dir <path>（默认 ~/dsh-studio）--tmp-dir（默认 /tmp）--dry-run
  *
  * 密码模式需要 ssh2（仓库故意不把它写进依赖，避免插件安装多背一个包）：
  *   pnpm add -D ssh2     # 或 npm i -D ssh2
@@ -32,7 +32,7 @@ const HOST = process.env.DSH_DEPLOY_HOST ?? ''
 const USER = process.env.DSH_DEPLOY_USER ?? ''
 const PASSWORD = process.env.DSH_DEPLOY_PASSWORD ?? ''
 const PORT = Number(process.env.DSH_DEPLOY_PORT ?? 22)
-const REMOTE_DIR = option('remote-dir', '/home/lyf/dsh-studio')
+const REMOTE_DIR = option('remote-dir', process.env.DSH_DEPLOY_DIR ?? '~/dsh-studio')
 const TMP = option('tmp-dir', '/tmp')
 const KEY = option('key', '')
 const DRY = args.includes('--dry-run')
