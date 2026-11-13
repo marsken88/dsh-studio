@@ -78,6 +78,9 @@ function Card({ task, onOpen, config, requirements, onPickRequirement, onPickPro
       task.design === null || task.design === undefined || task.design.status === 'approved'
     ? null
     : h(ChipField, { className: 'ds-chip', 'data-design': task.design.status }, task.design.status === 'changes_requested' ? '设计要改' : '设计待评审'),
+  task.design?.diff === null || task.design?.diff === undefined
+    ? null
+    : h(ChipField, { className: 'ds-chip', 'data-diff': task.design.diff.percent }, `还原度 ${Math.max(0, 100 - task.design.diff.percent).toFixed(1)}%`),
   task.type === 'bug' ? h(ChipField, { className: 'ds-chip ds-chip-bug', 'data-sev': task.severity ?? 'p2' }, `BUG ${String(task.severity || 'p2').toUpperCase()}`) : null,
       task.sla !== null && task.sla !== undefined && task.status !== 'done'
         ? h(ChipField, {

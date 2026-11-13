@@ -12,6 +12,15 @@ export function sanitizeDesign(raw) {
     note: String(raw.note ?? '').slice(0, 500),
     by: String(raw.by ?? '').slice(0, 40),
     at: Number(raw.at) || 0,
+    // 设计还原度：tools/visual/design-diff.mjs 算出来的差异百分比（0 = 一模一样）。
+    diff: raw.diff === null || raw.diff === undefined || typeof raw.diff !== 'object'
+      ? null
+      : {
+        percent: Math.min(100, Math.max(0, Number(raw.diff.percent) || 0)),
+        url: String(raw.diff.url ?? '').slice(0, 500),
+        at: Number(raw.diff.at) || 0,
+        by: String(raw.diff.by ?? '').slice(0, 40),
+      },
   }
 }
 
