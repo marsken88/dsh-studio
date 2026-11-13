@@ -410,6 +410,20 @@ test('host: artifacts leave the poll without their bodies', async () => {
   assert.equal(artifact.content, body, 'the stored artifact must not be stripped in place')
 })
 
+test('host: runners register and are picked by their match', async () => {
+  const { registerRunner, pickRunner, runnerKinds } = await import('../src/host/runners.js')
+  registerRunner('http', { match: item => item.http != null, run: () => ({ ok: true, status: 200 }) })
+  registerRunner('shell', { match: item => item.shell != null, run: () => ({ ok: true, status: 0 }) })
+  assert.deepEqual([...runnerKinds()].sort(), ['http', 'shell'], 'both built-ins stay registered')
+  assert.equal(pickRunner({ shell: {} }).kind, 'shell')
+  assert.equal(pickRunner({ http: {} }).kind, 'http')
+  assert.equal(pickRunner({ http: {}, shell: {} }).kind, 'shell', 'shell wins when a case carries both')
+  assert.equal(pickRunner({}), null)
+  registerRunner('probe-kind', { match: item => item.probe === true, run: () => ({ ok: true }) })
+  assert.equal(pickRunner({ probe: true }).kind, 'probe-kind')
+  assert.equal(pickRunner({ probe: false }), null)
+})
+
 test('host: shell cases are refused until enabled, then really run', async () => {
   const { runShellCase } = await import('../src/host/shell-runner.js')
   const item = { shell: { command: 'node -e "console.log(1)"', expectExit: 0, timeoutMs: 5000, expectContains: '', expectNotContains: '', cwd: '' } }

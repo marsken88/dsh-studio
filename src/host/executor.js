@@ -8,6 +8,7 @@ import { casesOfTasks, impactSummary } from './impact.js'
 import { designGate } from './design.js'
 import { RUN_LOG, parseMentions } from './dispatcher.js'
 import { appendTeamMemory } from './team-memory.js'
+import { pickRunner, registerRunner } from './runners.js'
 import { runShellCase } from './shell-runner.js'
 import { homedir } from 'node:os'
 import { join, resolve } from 'node:path'
@@ -182,9 +183,25 @@ export async function probeEnv(env, config, timeoutMs = 5000) {
   }
 }
 
+/**
+ * 跑一条用例：怎么跑由注册表决定（runners.js）。这里只负责挑 runner 和兜底报错，
+ * 以后加 DB / 浏览器执行器不用再改这个函数。
+ */
 export async function runOneCase(item, env, config, seedVars) {
+  const runner = pickRunner(item)
+  if (runner === null) {
+    return { ok: false, status: 0, ms: 0, error: '这条用例没有可执行的定义：http / shell 都是空的（先补一个再跑）', preview: '' }
+  }
+  return runner.run(item, env, config, seedVars)
+}
+
+// 内置两种执行器：http（打接口）与 shell（跑命令）。后面的类型用 registerRunner 往这里加。
+registerRunner('http', { match: item => item.http != null, run: (item, env, config, seedVars) => runHttpCase(item, env, config, seedVars) })
+// shell 后注册 = 匹配优先级更高：两条都填的时候按 shell 跑（它是显式选择）。
+registerRunner('shell', { match: item => item.shell != null, run: (item, env, config) => runShellCase(item, config) })
+
+async function runHttpCase(item, env, config, seedVars) {
   const started = Date.now()
-  if (item.shell !== null && item.shell !== undefined) return runShellCase(item, config)
   if (item.http == null) {
     return { ok: false, status: 0, ms: 0, error: '这条用例还没有可执行的请求定义（method/url）', preview: '' }
   }
