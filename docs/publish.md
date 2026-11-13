@@ -28,7 +28,7 @@ cd .. && cmp -s dist/client.js client.js && echo same
 **A. npm（推荐）** —— 市场条目写 `"source": "npm"`，安装时锁**最新精确版本**：
 
 ```bash
-npm publish --access public      # 或发布到公司私有 registry
+npm publish --access public      # 作用域包必须带 --access public 才公开
 ```
 
 **B. GitHub** —— 市场条目写 `"source": "github"`，安装时锁 **commit SHA**，跟踪 tag 而不是 `main`：
@@ -52,9 +52,9 @@ git tag v0.2.0 && git push origin v0.2.0
   "tags": ["多智能体", "看板", "研发流程"],
   "verified": ["0.2.2-rc.1"],
   "source": "npm",
-  "npm": "dsh-studio",
+  "npm": "@marsken/dsh-studio",
   "github": "marsken88/dsh-studio",
-  "icon": "https://cdn.jsdelivr.net/npm/dsh-studio@0/icon.svg",
+  "icon": "https://cdn.jsdelivr.net/npm/@marsken/dsh-studio@0/icon.svg",
   "homepage": "https://github.com/marsken88/dsh-studio"
 }
 ```
@@ -79,7 +79,7 @@ git tag v0.2.0 && git push origin v0.2.0
 ## 4. 装回来验一遍
 
 ```bash
-dsh plugin --profile web add dsh-studio   # npm 源
+dsh plugin --profile web add @marsken/dsh-studio   # npm 源
 dsh plugin --profile web add github:marsken88/dsh-studio#v0.2.0
 ```
 
