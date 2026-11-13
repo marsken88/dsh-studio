@@ -3,7 +3,7 @@
 
 import { PRIORITY_LABEL, ROLE_LABEL } from './labels.js'
 import { fmtDate, fmtTime } from './format.js'
-import { artifactsWithoutBody, cardOwner } from './roster.js'
+import { artifactsWithoutBody, cardOwner, commentCountOf } from './roster.js'
 
 export function createCard({ h, ChipField }) {
 function Card({ task, onOpen, config, requirements, onPickRequirement, onPickProject }) {
@@ -116,7 +116,7 @@ function Card({ task, onOpen, config, requirements, onPickRequirement, onPickPro
       })() : null,
       noBody > 0 ? h('span', { className: 'ds-card-warn', title: `${noBody} 件交付物还没写正文，云盘文档里只有标题` }, '● 缺正文') : null,
       (task.coding?.files?.length ?? 0) > 0 ? h('span', { title: 'AI Coding 改动文件数' }, `· ⌥ ${task.coding.files.length}`) : null,
-      task.comments.length > 0 ? h('span', {}, `· ${task.comments.length} 评论`) : null,
+      commentCountOf(task) > 0 ? h('span', {}, `· ${commentCountOf(task)} 评论`) : null,
       h('span', { style: { marginLeft: 'auto' } }, fmtTime(task.updatedAt)),
     ),
   )

@@ -1096,6 +1096,12 @@ export function sanitizeChecklist(input) {
   }
   return out
 }
+/** 评论正文也不随轮询走：一条讨论动辄几百字，抽屉打开时按卡取一次，轮询只给条数。 */
+export function publicComments(task) {
+  const comments = Array.isArray(task?.comments) ? task.comments : []
+  return { comments: [], commentCount: comments.length }
+}
+
 /** 轮询里只给长度：交付物正文能到几十 KB（实测占整包 57%），抽屉点「阅读 / 正文」时再单独取。 */
 export function publicArtifact(artifact) {
   const content = String(artifact?.content ?? '')

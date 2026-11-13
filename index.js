@@ -27,7 +27,7 @@ export const inject = ['tools', 'systemPrompt']
 // ------------------------------------------------------------------ domain
 
 
-import { ACCESS_ROLE_LABEL, ACCESS_ROLES, ADMIN_ROUTES, ARTIFACT_KINDS, ARTIFACT_STATUS, CASE_HTTP_METHODS, CASE_PRIORITIES, CASE_RESULTS, CASE_TYPE_LABEL, CASE_TYPES, cleanId, CODE_PREFIX, CODING_FILE_CHANGES, CODING_REVIEW_STATUS, codingSummary, COLUMN_STRATEGIES, DEFAULT_ROLES, defaultColumns, defaultConfig, defaultDeployEnvs, defaultTemplates, DEPLOY_ENV_KINDS, FALLBACK_AGENT_MODEL, hashLocalPassword, INTAKE_HTML, ISOLATION_MODES, LEGACY_BLOCKED_STATUS, LEVEL_RANK, LOCAL_DEFAULT_PASSWORD, mergeCoding, mergeConfig, mergeSection, MINE_HTML, nextRequirementCode, nextTaskCode, normalizePatch, normalizeStrategy, publicArtifact, PRIORITIES, ROLE_LABELS, canonicalAuthor, RELEASE_STATUSES, RELEASE_STATUS_LABEL, REQ_DOC_KIND_LABEL, REQ_DOC_KINDS, REQ_DOC_STATUS, REQ_REVIEW_LABEL, REQ_REVIEW_STATUS, REQ_STATUS_LABEL, REQ_STATUSES, ROLE_IDS, ROLE_LEVEL, SANDBOX_MODES, sanitizeAcceptanceItem, sanitizeAccess, sanitizeAllowHosts, sanitizeArtifact, sanitizeArtifacts, sanitizeBaseline, sanitizeBots, sanitizeBugSource, sanitizeCase, sanitizeCaseHttp, sanitizeCaseRun, sanitizeCases, sanitizeChangedFile, sanitizeChangedFiles, sanitizeChecklist, sanitizeChecklistItem, sanitizeCoding, sanitizeColumns, sanitizeCommit, sanitizeCommits, sanitizeCosts, sanitizeDeployEnvs, sanitizeEnvs, sanitizeExperts, sanitizeIterations, sanitizeLdap, sanitizeLocalAuth, sanitizeProjects, sanitizeReqDoc, sanitizeReqDocs, sanitizeRelease, sanitizeRequirement, sanitizeRequirementChange, sanitizeRequirementHistory, sanitizeRequirementPoint, sanitizeRequirementPoints, sanitizeRequirementPool, sanitizeRequirementQuestions, sanitizeRequirementReview, sanitizeRequirements, sanitizeServices, sanitizeSla, sanitizeTeams, sanitizeTemplates, sanitizeTesting, sanitizeTestRun, sanitizeTestRuns, sanitizeUsers, sanitizeWorkProjects, seedExperts, SEVERITIES, STATUS_HTML, STATUS_IDS, STATUS_SET, STATUSES, TASK_TYPES, text, verifyLocalPassword, worktreeRoot } from './src/host/domain.js'
+import { ACCESS_ROLE_LABEL, ACCESS_ROLES, ADMIN_ROUTES, ARTIFACT_KINDS, ARTIFACT_STATUS, CASE_HTTP_METHODS, CASE_PRIORITIES, CASE_RESULTS, CASE_TYPE_LABEL, CASE_TYPES, cleanId, CODE_PREFIX, CODING_FILE_CHANGES, CODING_REVIEW_STATUS, codingSummary, COLUMN_STRATEGIES, DEFAULT_ROLES, defaultColumns, defaultConfig, defaultDeployEnvs, defaultTemplates, DEPLOY_ENV_KINDS, FALLBACK_AGENT_MODEL, hashLocalPassword, INTAKE_HTML, ISOLATION_MODES, LEGACY_BLOCKED_STATUS, LEVEL_RANK, LOCAL_DEFAULT_PASSWORD, mergeCoding, mergeConfig, mergeSection, MINE_HTML, nextRequirementCode, nextTaskCode, normalizePatch, normalizeStrategy, publicArtifact, publicComments, PRIORITIES, ROLE_LABELS, canonicalAuthor, RELEASE_STATUSES, RELEASE_STATUS_LABEL, REQ_DOC_KIND_LABEL, REQ_DOC_KINDS, REQ_DOC_STATUS, REQ_REVIEW_LABEL, REQ_REVIEW_STATUS, REQ_STATUS_LABEL, REQ_STATUSES, ROLE_IDS, ROLE_LEVEL, SANDBOX_MODES, sanitizeAcceptanceItem, sanitizeAccess, sanitizeAllowHosts, sanitizeArtifact, sanitizeArtifacts, sanitizeBaseline, sanitizeBots, sanitizeBugSource, sanitizeCase, sanitizeCaseHttp, sanitizeCaseRun, sanitizeCases, sanitizeChangedFile, sanitizeChangedFiles, sanitizeChecklist, sanitizeChecklistItem, sanitizeCoding, sanitizeColumns, sanitizeCommit, sanitizeCommits, sanitizeCosts, sanitizeDeployEnvs, sanitizeEnvs, sanitizeExperts, sanitizeIterations, sanitizeLdap, sanitizeLocalAuth, sanitizeProjects, sanitizeReqDoc, sanitizeReqDocs, sanitizeRelease, sanitizeRequirement, sanitizeRequirementChange, sanitizeRequirementHistory, sanitizeRequirementPoint, sanitizeRequirementPoints, sanitizeRequirementPool, sanitizeRequirementQuestions, sanitizeRequirementReview, sanitizeRequirements, sanitizeServices, sanitizeSla, sanitizeTeams, sanitizeTemplates, sanitizeTesting, sanitizeTestRun, sanitizeTestRuns, sanitizeUsers, sanitizeWorkProjects, seedExperts, SEVERITIES, STATUS_HTML, STATUS_IDS, STATUS_SET, STATUSES, TASK_TYPES, text, verifyLocalPassword, worktreeRoot } from './src/host/domain.js'
 import { Dispatcher, RUN_LOG, claimDispatchLock, clearAgentFailure, configureDispatcher, noteAgentFailure, parseMentions, runSummary } from './src/host/dispatcher.js'
 import { buildDashboard, codingVerifyLine, commentTask, configureExecutor, ensureReqFolder, larkCliReady, invalidateLarkProbe, larkProbeCache, mutateReqDoc, pullFeishuDoc, requirementGate, requirementMatrix, requirementProgress, requirementRollup, runCommand, runSuite, runTaskCases, saveRequirement, syncArtifact, syncRequirementArtifacts, taskExitGate, updateTask, verifyCodingRecord } from './src/host/executor.js'
 import { configureAuthRoutes, handleAuthRoute } from './src/host/routes/auth.js'
@@ -1034,6 +1034,7 @@ function publicState(store) {
     config: publicConfig(state.config),
     tasks: state.tasks.map(task => ({
       ...task,
+      ...publicComments(task),
       sla: bugSla(task, state.config),
       // 正文太占地方，轮询只下发长度；抽屉点「阅读 / 正文」时走 /task/artifact 的 get 单独取。
       artifacts: (task.artifacts ?? []).map(publicArtifact),
@@ -2026,6 +2027,9 @@ async function recordLogin(store, user, ip) {
   })
 }
 
+/** 只是读、但走 POST 的入口（前端只有一处 api() 封装，固定发 POST）。 */
+const READ_ONLY_POST_ROUTES = new Set(['/task/comments'])
+
 /** 这个请求需要什么权限：读、写、还是管理员。 */
 function accessLevelFor(route, method) {
   if (method !== 'POST') return 'read'
@@ -2424,12 +2428,10 @@ function registerRoutes(webCtx, store, ctx, getDispatcher = () => undefined) {
     if (resolved !== '') req.studioActor = resolved
     const operator = operatorOf(req)
     // 登录/登出/改密绝不能受权限名单影响，否则一旦开启权限就再也登不进来。
-  // 取交付物正文走的是 POST（同一个入口的 get 动作），但它只是读：别被写档位挡住只读成员。
-  const level = route.startsWith('/auth/')
-    ? 'read'
-    : (route === '/task/artifact' && String(req.__studioBody?.action ?? '') === 'get')
-      ? 'read'
-      : accessLevelFor(route, method)
+  // 有些 POST 只是读（取交付物正文、取评论）：别被写档位挡住只读成员。
+  const readOnlyPost = READ_ONLY_POST_ROUTES.has(route)
+    || (route === '/task/artifact' && String(req.__studioBody?.action ?? '') === 'get')
+  const level = route.startsWith('/auth/') ? 'read' : readOnlyPost ? 'read' : accessLevelFor(route, method)
     let summary = ''
     if (method === 'POST') {
       try {

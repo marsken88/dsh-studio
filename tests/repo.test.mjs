@@ -410,6 +410,16 @@ test('host: artifacts leave the poll without their bodies', async () => {
   assert.equal(artifact.content, body, 'the stored artifact must not be stripped in place')
 })
 
+test('host: comments leave the poll as a count', async () => {
+  const { publicComments } = await import('../src/host/domain.js')
+  const task = { id: 't1', comments: [{ id: 'c1', body: '一' }, { id: 'c2', body: '二' }] }
+  const slim = publicComments(task)
+  assert.deepEqual(slim.comments, [], 'bodies must not travel with the poll')
+  assert.equal(slim.commentCount, 2)
+  assert.deepEqual(publicComments({ id: 't2' }), { comments: [], commentCount: 0 })
+  assert.equal(task.comments.length, 2, 'the stored task must not be stripped in place')
+})
+
 test('client: every studio module pulls in what it borrows from its siblings', () => {
   const walk = (dir) =>
     readdirSync(path(dir), { withFileTypes: true }).flatMap((entry) =>

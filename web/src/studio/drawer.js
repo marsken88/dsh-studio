@@ -1,7 +1,7 @@
 /* Card detail drawer: overview, content, plan, artifacts, tests, runs and talk. */
 
 import { ARTIFACT_KINDS, ARTIFACT_KIND_LABEL, ARTIFACT_STATUS, ARTIFACT_STATUS_LABEL, CASE_PRIORITIES, CASE_RESULT_LABEL, CASE_RESULTS, CASE_TYPES, CASE_TYPE_LABEL, CODING_REVIEW_LABEL, PRIORITY_LABEL, ROLE_LABEL, SEVERITY_LABEL, TYPE_LABEL } from './labels.js'
-import { artifactsWithoutBody, buildRoster, cardOwner, filterRoster, fromDateInput, ownerLabel, toDateInput } from './roster.js'
+import { artifactsWithoutBody, buildRoster, cardOwner, commentCountOf, filterRoster, fromDateInput, ownerLabel, toDateInput } from './roster.js'
 import { fmtTime } from './format.js'
 import { parseSteps } from './cases.js'
 
@@ -33,6 +33,8 @@ function Drawer({ task, state, onClose, onChanged }) {
   const [artRead, setArtRead] = React.useState(null)
   // 正文不随轮询下发（一条能到几十 KB），点「阅读 / 正文」时才单独取，取过的缓存在这里。
   const [artBodies, setArtBodies] = React.useState({})
+  // 评论正文同样不随轮询下发（一条讨论动辄几百字），抽屉打开时按卡取一次。
+  const [commentList, setCommentList] = React.useState(null)
   React.useEffect(() => { setArtBodies({}); setArtRead(null); setArtEdit(null) }, [task.id])
   const [newCase, setNewCase] = React.useState({ title: '', expected: '', steps: '', stepsText: '', type: 'functional', priority: 'p2', preconditions: '' })
   const [caseRun, setCaseRun] = React.useState({ busy: false, note: '' })
@@ -76,7 +78,17 @@ function Drawer({ task, state, onClose, onChanged }) {
     if (artEdit !== null && artEdit.id === item.id) { setArtEdit(null); return }
     try { setArtEdit({ id: item.id, content: await loadArtifactBody(item) }) } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)) }
   }
-  const comments = task.comments ?? []
+  const commentTotal = commentCountOf(task)
+  const comments = commentList ?? (Array.isArray(task.comments) ? task.comments : [])
+  // 条数变了（比如刚发了一条）就再取一次；没评论的卡不发请求。
+  React.useEffect(() => {
+    if (commentTotal === 0) { setCommentList([]); return undefined }
+    let alive = true
+    void api('/task/comments', { id: task.id }).then(json => {
+      if (alive) setCommentList(Array.isArray(json?.comments) ? json.comments : [])
+    }).catch(() => { if (alive) setCommentList([]) })
+    return () => { alive = false }
+  }, [task.id, commentTotal])
   const [pane, setPane] = React.useState('overview')
   React.useEffect(() => { setPane('overview') }, [task.id])
   // 切页签时把内容滚回顶部，否则从长页面切到「讨论」会停在中间，看起来像只显示了半截。
@@ -92,7 +104,7 @@ function Drawer({ task, state, onClose, onChanged }) {
     { id: 'deliver', label: '交付物', count: artifacts.length > 0 ? artifacts.length : '', hint: '文档 / MR / 用例 / 报告；空的交付物会被准出拦下' },
     { id: 'test', label: '测试', count: cases.length > 0 ? `${casePass}/${cases.length}` : (checklist.length > 0 ? `☑${doneCount}/${checklist.length}` : ''), hint: '验收清单、用例执行记录；失败的用例会自动开缺陷' },
     { id: 'coding', label: '执行记录', count: coding === null ? '' : (coding.review?.status === 'approved' ? '✓ 已评审' : ''), hint: 'AI 的分支、提交、改动文件；可以「核对代码事实」' },
-    { id: 'discuss', label: '讨论', count: comments.length > 0 ? comments.length : '', hint: '评论；在评论里 @ 专家或专家团即派单' },
+    { id: 'discuss', label: '讨论', count: commentTotal > 0 ? commentTotal : '', hint: '评论；在评论里 @ 专家或专家团即派单' },
   ]
   const [draft, setDraft] = React.useState({ title: task.title, requirement: task.requirement, gitlabIssue: task.gitlabIssue, gitlabMR: task.gitlabMR?.url ?? '', pointId: task.pointId ?? '' })
 
@@ -1178,11 +1190,13 @@ function Drawer({ task, state, onClose, onChanged }) {
       ),
       ),
       h('div', { className: 'ds-sec', style: hideWhen('discuss') },
-        h('div', { className: 'ds-sec-head' }, `评论（${task.comments.length}）`, h('span', { className: 'ds-hint' }, '最新的在最上面')),
-        task.comments.length === 0
+        h('div', { className: 'ds-sec-head' }, `评论（${commentTotal}）`, h('span', { className: 'ds-hint' }, '最新的在最上面')),
+        commentTotal === 0
           ? h('div', { className: 'ds-empty' }, '还没有评论。在下面输入，或用 @专家名 直接点名派活。')
-          : h('div', { className: 'ds-comments' },
-            task.comments.slice().reverse().map(item => {
+          : commentList === null
+            ? h('div', { className: 'ds-hint', style: { padding: '8px 2px' } }, '载入评论…')
+            : h('div', { className: 'ds-comments' },
+            commentList.slice().reverse().map(item => {
               const experts = state.config?.experts ?? []
               const expert = experts.find(entry => entry.name === item.author)
                 ?? experts.find(entry => item.author !== undefined && item.author !== ''

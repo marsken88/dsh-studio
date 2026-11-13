@@ -193,6 +193,15 @@ export async function handleTaskRoute({ method, route, req, res, store, url }) {
     host.sendJson(res, 200, { ok: true, state: host.publicState(store) })
     return true
   }
+  if (method === 'POST' && route === '/task/comments') {
+    // 评论正文不随 /state 下发，抽屉打开时按卡取一次；纯读，不改台账。
+    const body = await host.readJsonBody(req)
+    const id = String(body.id ?? '')
+    const task = store.snapshot().tasks.find(t => t.id === id)
+    if (task === undefined) throw new Error(`no task ${id}`)
+    host.sendJson(res, 200, { ok: true, comments: task.comments ?? [] })
+    return true
+  }
   if (method === 'POST' && route === '/task/artifact') {
     const body = await host.readJsonBody(req)
     const id = String(body.id ?? '')

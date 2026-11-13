@@ -110,6 +110,12 @@ export function cardOwner(task, config) {
   return { label: '未指派', note: '等人认领', expert: undefined }
 }
 
+/** 评论正文不随轮询下发，只给条数；两种形状（老数据带 comments、新数据带 commentCount）都要能算。 */
+export function commentCountOf(task) {
+  if (typeof task?.commentCount === 'number') return task.commentCount
+  return Array.isArray(task?.comments) ? task.comments.length : 0
+}
+
 /** 正文可能没随轮询下发（只给 contentLength），两种形状都要能判断「有没有正文」。 */
 export function artifactsWithoutBody(task) {
   return (task.artifacts ?? []).filter(item => {

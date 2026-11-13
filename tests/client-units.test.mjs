@@ -362,6 +362,14 @@ test('palette: actions carry their shortcut so a row can print it', async () => 
   assert.ok(filterItems(items, 'alt').some((item) => item.id === 'new-task'))
 })
 
+test('roster: commentCountOf works with a count, a list, or neither', async () => {
+  const { commentCountOf } = await import('../web/src/studio/roster.js')
+  assert.equal(commentCountOf({ commentCount: 7, comments: [] }), 7)
+  assert.equal(commentCountOf({ comments: [{ id: 'a' }, { id: 'b' }] }), 2)
+  assert.equal(commentCountOf({}), 0)
+  assert.equal(commentCountOf(null), 0)
+})
+
 test('roster: artifactsWithoutBody reads contentLength when the body is not shipped', async () => {
   const { artifactsWithoutBody } = await import('../web/src/studio/roster.js')
   const task = { artifacts: [
