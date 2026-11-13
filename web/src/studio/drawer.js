@@ -265,6 +265,24 @@ function Drawer({ task, state, onClose, onChanged }) {
     try { await api('/task/checklist', { id: task.id, action: 'remove', itemId: item.id }); await onChanged() }
     catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)) } finally { setBusy(false) }
   }
+  // shell 用例：两步录入（命令 + 期望输出），断言退出码 0。真跑要服务端打开 allowShell。
+  const addShellCase = async () => {
+    const command = await promptDialog('shell 命令（断言退出码 0）', { title: '加一条 shell 用例', defaultValue: '' })
+    if (command === null || String(command).trim() === '') return
+    const expect = await promptDialog('期望输出里包含什么（可留空）', { title: '加一条 shell 用例', defaultValue: '' })
+    if (expect === null) return
+    setBusy(true); setError(null)
+    try {
+      const expectText = String(expect ?? '').trim()
+      const item = {
+        title: ('shell: ' + String(command).trim()).slice(0, 60),
+        expected: expectText === '' ? '退出码 0' : ('退出码 0 且输出包含 ' + expectText),
+        shell: { command: String(command).trim(), expectExit: 0, expectContains: expectText },
+      }
+      await api('/task/case', { id: task.id, action: 'add', cases: [item] })
+      await onChanged()
+    } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)) } finally { setBusy(false) }
+  }
   const addCase = async () => {
     const title = newCase.title.trim()
     if (title === '') return
@@ -1114,7 +1132,9 @@ function Drawer({ task, state, onClose, onChanged }) {
                   (item.steps ?? []).length === 0 ? null : h('span', { className: 'ds-hint' }, `步骤 ${item.steps.length} 条`),
                 ),
                 item.expected === '' ? null : h('div', { className: 'ds-art-ref' }, `期望：${item.expected}`),
-                item.http == null ? null : h('div', { className: 'ds-art-ref' }, `接口：${item.http.method} ${item.http.url} → 期望 ${item.http.expectStatus}${item.http.expectContains ? ` 且含 «${item.http.expectContains}»` : ''}`),
+              item.shell == null
+                ? (item.http == null ? null : h('div', { className: 'ds-art-ref' }, `接口：${item.http.method} ${item.http.url} → 期望 ${item.http.expectStatus}${item.http.expectContains ? ` 且含 «${item.http.expectContains}»` : ''}`))
+                : h('div', { className: 'ds-art-ref' }, 'shell：' + item.shell.command),
                 item.lastRun == null ? null : h('div', { className: 'ds-art-ref' }, `${item.lastRun.ok ? '✅' : '❌'} 最近执行：${item.lastRun.status === 0 ? item.lastRun.error : `${item.lastRun.status} · ${item.lastRun.ms}ms`}（${new Date(item.lastRun.at).toLocaleString('zh-CN')}）`),
                 item.lastRun?.response ? h('div', { className: 'ds-code-note' }, `响应片段：${String(item.lastRun.response).slice(0, 400)}${String(item.lastRun.response).length > 400 ? '…' : ''}`) : null,
                 (item.lastRun?.steps ?? []).length === 0 ? null : h('div', { className: 'ds-art-ref' }, `步骤：${item.lastRun.steps.map(step => `${step.ok ? '✅' : '❌'} ${step.method} ${step.url}${step.status === 0 ? '' : ` → ${step.status}`}`).join('；')}`),
@@ -1159,6 +1179,7 @@ function Drawer({ task, state, onClose, onChanged }) {
               className: 'ds-input', style: { flex: 1 }, value: newCase.expected, placeholder: '期望结果，例如 第 5 次返回 429 并锁定 10 分钟',
               onChange: event => setNewCase({ ...newCase, expected: event.target.value }),
             }),
+            h('button', { className: 'ds-btn ds-btn-ghost', disabled: busy, title: '加一条 shell 用例：跑命令看退出码与输出（需要先在设置里打开 allowShell）', onClick: () => void addShellCase() }, '＋ shell'),
             h('button', { className: 'ds-btn', disabled: busy || newCase.title.trim() === '', onClick: () => void addCase() }, '＋ 加用例'),
           ),
           h('div', { className: 'ds-row', style: { gap: 8, flexWrap: 'wrap', marginTop: 6 } },
