@@ -117,6 +117,7 @@ export const ACTION_ITEMS = [
   { id: 'theme:light', label: '切换主题：明亮', hint: '浅色界面', keys: '主题 明亮 light theme 浅色' },
   { id: 'theme:dark', label: '切换主题：深色', hint: '深色界面', keys: '主题 深色 dark theme 夜间' },
   { id: 'theme:system', label: '切换主题：跟随系统', hint: '跟随宿主或操作系统的深浅色', keys: '主题 系统 system theme 自动' },
+  { id: 'card-advance-note', label: '推进并留言', hint: '选一张卡 → 写一句 → 推进到下一列', keys: '推进 留言 advance note 交接 换列 card' },
   { id: 'card-advance', label: '把卡片推进到下一列', hint: '选一张卡 → 推进到下一状态', keys: '推进 advance 下一列 换列 移动 move card' },
   { id: 'card-dispatch', label: '把卡片派给专家', hint: '选一张卡 → 选一位专家跑起来', keys: '派单 dispatch assign 执行 run 专家 expert card' },
   { id: 'card-comment', label: '给卡片留言', hint: '选一张卡 → 写一句讨论', keys: '留言 comment 讨论 评论 card' },
@@ -133,6 +134,31 @@ export function actionItems() {
     hint: action.hint,
     search: (action.label + ' ' + action.hint + ' ' + action.keys).toLowerCase(),
   }))
+}
+
+/** 最近用过的动作置顶，其余保持原顺序；recents 里不存在的 id 直接忽略。 */
+export function sortByRecent(items, recents) {
+  if (!Array.isArray(recents) || recents.length === 0) return items.slice()
+  const rank = new Map()
+  recents.forEach((id, index) => { if (!rank.has(id)) rank.set(id, index) })
+  const front = []
+  const rest = []
+  for (const item of items) {
+    const hit = item.kind === 'action' ? rank.get(item.id) : undefined
+    if (hit === undefined) rest.push(item)
+    else front.push({ item, hit })
+  }
+  front.sort((a, b) => a.hit - b.hit)
+  return [...front.map((entry) => entry.item), ...rest]
+}
+
+export const RECENT_ACTIONS_KEY = 'dsh-studio:recent-actions'
+export const RECENT_LIMIT = 6
+
+/** 把刚用过的动作记到最前面（保持去重与上限）。 */
+export function rememberAction(recents, id, limit = RECENT_LIMIT) {
+  const next = [id, ...(Array.isArray(recents) ? recents : []).filter((entry) => entry !== id)]
+  return next.slice(0, limit)
 }
 
 export function paletteItems(state) {
@@ -162,6 +188,7 @@ const KIND_LABEL = { task: '卡片', requirement: '需求', release: '版本', e
 
 const CARD_FLOWS = {
   'card-advance': { step: 'card', title: '推进到下一列' },
+  'card-advance-note': { step: 'card', title: '推进并留言' },
   'card-dispatch': { step: 'card', title: '派给专家' },
   'card-comment': { step: 'card', title: '给卡片留言' },
 }
@@ -181,15 +208,30 @@ export function createPalette({ h, React }) {
     const [query, setQuery] = React.useState('')
     const [active, setActive] = React.useState(0)
     const [flow, setFlow] = React.useState(null)
+    const [recents, setRecents] = React.useState(() => {
+      try {
+        const stored = window.localStorage.getItem(RECENT_ACTIONS_KEY)
+        const parsed = stored === null ? [] : JSON.parse(stored)
+        return Array.isArray(parsed) ? parsed.filter((id) => typeof id === 'string') : []
+      } catch (error) {
+        return []
+      }
+    })
+    const remember = (item) => {
+      if (item === null || item === undefined || item.kind !== 'action') return
+      const next = rememberAction(recents, item.id)
+      setRecents(next)
+      try { window.localStorage.setItem(RECENT_ACTIONS_KEY, JSON.stringify(next)) } catch (error) { /* 隐私模式下写不进去，忽略 */ }
+    }
     const inputRef = React.useRef(null)
     const all = React.useMemo(() => paletteItems(state), [state])
     const cards = React.useMemo(() => searchItems(state).filter((item) => item.kind === 'task'), [state])
     const experts = React.useMemo(() => searchItems(state).filter((item) => item.kind === 'expert'), [state])
     const list = React.useMemo(() => {
-      if (flow === null) return filterItems(all, query)
+      if (flow === null) return sortByRecent(filterItems(all, query), query === '' ? recents : [])
       if (flow.step === 'expert') return filterItems(experts, query)
       return filterItems(cards, query)
-    }, [flow, all, cards, experts, query])
+    }, [flow, all, cards, experts, query, recents])
 
     React.useEffect(() => { inputRef.current?.focus() }, [])
     React.useEffect(() => { setActive(0) }, [query])
@@ -203,6 +245,7 @@ export function createPalette({ h, React }) {
     const pick = (item) => {
       if (item === undefined) return
       if (flow === null) {
+        remember(item)
         if (item.kind === 'action' && CARD_FLOWS[item.id] !== undefined) { start(item.id); return }
         onPick(item)
         onClose()
@@ -279,7 +322,7 @@ export function createPalette({ h, React }) {
             },
               h('span', { className: 'ds-palette-kind', 'data-kind': item.kind }, KIND_LABEL[item.kind] ?? item.kind),
               h('span', { className: 'ds-palette-label' }, clip(item.label, 80)),
-              item.hint === '' ? null : h('span', { className: 'ds-palette-hint' }, clip(item.hint, 40)),
+              item.hint === '' ? null : h('span', { className: 'ds-palette-hint' }, clip((item.kind === 'action' && query === '' && recents.includes(item.id) ? '最近用过 · ' : '') + item.hint, 40)),
             )),
         ),
       ),

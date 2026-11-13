@@ -136,20 +136,39 @@ test('palette: filterItems matches words, ranks prefixes first and stops when em
 test('palette: actions are searchable next to records', async () => {
   const { actionItems, paletteItems } = await import('../web/src/studio/palette.js')
   const actions = actionItems()
-  assert.equal(actions.length, 32)
-  assert.equal(new Set(actions.map((item) => item.id)).size, 32, 'action ids must be unique')
+  assert.equal(actions.length, 33)
+  assert.equal(new Set(actions.map((item) => item.id)).size, 33, 'action ids must be unique')
   for (const item of actions) {
     assert.equal(item.kind, 'action')
     assert.ok(item.label.length > 0 && item.search.length > 0)
   }
   const state = { tasks: [{ id: 't1', code: 'DEV-001', title: '退款对账', status: 'dev' }], requirements: [], releases: [], statuses: [{ id: 'dev', label: '开发中' }] }
   const all = paletteItems(state)
-  assert.equal(all.length, 33, '32 actions + one task')
+  assert.equal(all.length, 34, '33 actions + one task')
   assert.equal(filterItems(all, '新建需求')[0].id, 'new-requirement')
   assert.equal(filterItems(all, '导出')[0].kind, 'action')
   assert.equal(filterItems(all, '主题').length, 3)
   assert.equal(filterItems(all, 'DEV-001')[0].kind, 'task')
   assert.deepEqual(filterItems(all, '不存在的词'), [])
+})
+
+test('palette: recently used actions move to the top and stay bounded', async () => {
+  const { sortByRecent, rememberAction, RECENT_LIMIT, actionItems } = await import('../web/src/studio/palette.js')
+  const actions = actionItems()
+  const first = actions[0].id
+  const second = actions[1].id
+  const sorted = sortByRecent(actions, [second, first])
+  assert.equal(sorted[0].id, second)
+  assert.equal(sorted[1].id, first)
+  assert.equal(sorted.length, actions.length)
+  assert.equal(sortByRecent(actions, []).map((item) => item.id).join(), actions.map((item) => item.id).join())
+  assert.equal(sortByRecent(actions, ['no-such-action']).length, actions.length)
+
+  assert.deepEqual(rememberAction([], 'refresh'), ['refresh'])
+  assert.deepEqual(rememberAction(['refresh', 'new-task'], 'refresh'), ['refresh', 'new-task'])
+  assert.deepEqual(rememberAction(['a', 'b', 'c'], 'd', 3), ['d', 'a', 'b'])
+  const overflow = Array.from({ length: RECENT_LIMIT + 3 }, (_, index) => 'id-' + index).reduce((acc, id) => rememberAction(acc, id), [])
+  assert.equal(overflow.length, RECENT_LIMIT)
 })
 
 test('palette: card flows resolve the next column and stop at the last one', async () => {

@@ -2155,6 +2155,19 @@ function installKeyboardActivation() {
             await api('/task/update', { id: item.cardId, status: next })
             toast('已把「' + cardName + '」推进到「' + statusLabel(next) + '」')
             await reload(true)
+            setOpenId(item.cardId)
+            return
+          }
+          if (item.action === 'card-advance-note') {
+            const next = nextStatusOf(state, item.cardId)
+            if (next === null) { toast('这张卡已经在最后一列了', 'error'); return }
+            const note = await promptDialog('推进「' + cardName + '」到「' + statusLabel(next) + '」并留一句话', { title: '推进并留言', placeholder: '例如：评审通过，转测试' })
+            if (note === null || String(note).trim() === '') return
+            await api('/task/comment', { id: item.cardId, body: String(note).trim() })
+            await api('/task/update', { id: item.cardId, status: next })
+            toast('已推进到「' + statusLabel(next) + '」并留言')
+            await reload(true)
+            setOpenId(item.cardId)
             return
           }
           if (item.action === 'card-dispatch') {
