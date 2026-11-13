@@ -410,6 +410,24 @@ test('host: artifacts leave the poll without their bodies', async () => {
   assert.equal(artifact.content, body, 'the stored artifact must not be stripped in place')
 })
 
+test('host: fidelity lands in the checklist and fails below the target', async () => {
+  const { applyFidelityItem } = await import('../src/host/design.js')
+  const fresh = applyFidelityItem([], 1.01)
+  assert.equal(fresh.length, 1)
+  assert.match(fresh[0].text, /设计还原度 ≥ 95%（当前 99\.0%）/)
+  assert.equal(fresh[0].done, true)
+  const bad = applyFidelityItem([], 20)
+  assert.equal(bad[0].done, false)
+  // 第二次只更新那一行，不再堆一行
+  const twice = applyFidelityItem(fresh, 30)
+  assert.equal(twice.length, 1)
+  assert.equal(twice[0].id, fresh[0].id)
+  assert.equal(twice[0].done, false)
+  const mixed = applyFidelityItem([{ id: 'k1', text: '别的项', done: true }], 0)
+  assert.equal(mixed.length, 2)
+  assert.equal(mixed[0].text, '别的项')
+})
+
 test('host: the design gate only blocks when it is switched on', async () => {
   const { designGate, sanitizeDesign } = await import('../src/host/design.js')
   const off = { design: { enabled: false } }

@@ -24,6 +24,24 @@ export function sanitizeDesign(raw) {
   }
 }
 
+/** 还原度低于这个值就算没还原。 */
+export const FIDELITY_TARGET = 95
+
+/**
+ * 把还原度写进验收清单：找到「设计还原度」那一行就更新，没有就补一行。
+ * 低于 FIDELITY_TARGET 就留成未勾——验收时人一眼能看到差在哪。
+ */
+export function applyFidelityItem(checklist, percent) {
+  const list = Array.isArray(checklist) ? checklist : []
+  const score = Math.max(0, 100 - (Number(percent) || 0))
+  const text = `设计还原度 ≥ ${FIDELITY_TARGET}%（当前 ${score.toFixed(1)}%）`
+  const index = list.findIndex(item => String(item?.text ?? '').startsWith('设计还原度'))
+  const item = { id: index >= 0 ? list[index].id : `k-fidelity-${Date.now().toString(36)}`, text, done: score >= FIDELITY_TARGET }
+  if (index >= 0) list[index] = { ...list[index], ...item }
+  else list.push(item)
+  return list
+}
+
 /**
  * 进开发前的闸门：只有开了开关、且目标列在 columns 里才拦。
  * 返回 { needed, ready, blockers }；override 在调用方处理（填了原因就放行）。
