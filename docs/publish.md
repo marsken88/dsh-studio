@@ -84,3 +84,40 @@ dsh plugin --profile web add github:marsken88/dsh-studio#v0.2.0
 ```
 
 装完重启 dsh，跑 `node tools/visual/smoke.mjs`（需要 token 与 Chrome）确认九项检查全过。
+
+## 踩坑记录（2026-11-13 首次发布 @marsken/dsh-studio@0.1.0）
+
+这一节是实发时真撞上的，下次照做能省一圈：
+
+**1. 先查名字，别想当然。**
+
+```bash
+npm view dsh-studio version     # → 0.0.1，别人 8 月占的位
+npm view @<你的用户名>/dsh-studio version   # → 404 说明可用
+```
+
+npm 不允许覆盖别人的包名，撞名只能改作用域包（`@user/name`）或换名。
+
+**2. 账号开了 2FA 时，普通 token 发不出去。**
+
+```
+npm error 403 Two-factor authentication or granular access token with bypass 2fa enabled is required to publish packages.
+```
+
+两条路：①生成 **Granular Access Token** 并勾上 **Bypass two-factor authentication**（推荐，之后 CI/脚本都能用）；②本机 `npm publish` 手输 6 位验证码。
+
+**3. 发布成功 ≠ 立刻可查。**
+
+`npm publish` 打出 `+ @marsken/dsh-studio@0.1.0` 之后，registry 仍会 404 **约 10 分钟**（npm 提示 `being processed`）。别急着重发，先轮询：
+
+```bash
+curl -s -o /dev/null -w '%{http_code}\n' https://registry.npmjs.org/@marsken%2Fdsh-studio   # 等到 200
+npm view @marsken/dsh-studio version                                                      # 再确认版本号
+curl -s -o /dev/null -w '%{http_code} %{size_download}\n' $(npm view @marsken/dsh-studio dist.tarball)
+```
+
+**4. 凭据用完即删、发完即换。**
+
+token 只写进临时 npmrc（放在仓库外或 `tmp/` 且不提交），发完立刻 `rm`；发完去 npm 后台 revoke 重新生成——凡是贴进聊天/工单/日志的 token 都当作已泄露。
+
+**5. 作用域包必须带 `--access public`**，否则默认私有，市场里别人装不了（表现为 anonymous 访问 404）。
