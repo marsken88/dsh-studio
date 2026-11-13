@@ -260,7 +260,7 @@ export function defaultConfig() {
     /** 统一登录：LDAP。bindPassword 只进密钥文件，落库时清空。 */
     ldap: {
       enabled: false,
-      url: 'ldap://ldap.laiyifen.com:389',
+      url: 'ldap://localhost:389',
       baseDN: 'DC=LYF,DC=COM',
       bindDN: 'cn=root',
       bindPassword: '',
@@ -293,7 +293,7 @@ export function sanitizeLdap(raw) {
   const timeout = Number(input.timeoutMs)
   return {
     enabled: input.enabled === true,
-    url: /^ldaps?:\/\/[^\s]+$/i.test(url) ? url : 'ldap://ldap.laiyifen.com:389',
+    url: /^ldaps?:\/\/[^\s]+$/i.test(url) ? url : 'ldap://localhost:389',
     baseDN: baseDN === '' ? 'DC=LYF,DC=COM' : baseDN,
     bindDN: bindDN === '' ? 'cn=root' : bindDN,
     bindPassword: String(input.bindPassword ?? '').trim().slice(0, 200),

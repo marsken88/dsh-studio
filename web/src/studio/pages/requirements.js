@@ -953,7 +953,7 @@ export     function RequirementsPage({ state, onOpenTask, onChanged, createSigna
               h('div', { className: 'ds-row', style: { gap: 10 } },
                 h('div', { className: 'ds-field', style: { flex: '1 1 auto' } },
                   h('div', { className: 'ds-label' }, '飞书文档链接'),
-                  h(TextField, { className: 'ds-input', value: docForm.url, placeholder: 'https://laiyifen.feishu.cn/wiki/…', onChange: e => setDocForm({ ...docForm, url: e.target.value }) }),
+                  h(TextField, { className: 'ds-input', value: docForm.url, placeholder: 'https://<租户>.feishu.cn/wiki/…', onChange: e => setDocForm({ ...docForm, url: e.target.value }) }),
                 ),
                 h('div', { className: 'ds-field', style: { flex: '0 0 auto', justifyContent: 'flex-end' } },
                   h('div', { className: 'ds-label' }, ' '),

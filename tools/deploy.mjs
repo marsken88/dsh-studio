@@ -7,8 +7,8 @@
  * 这里一次把 index.js、dist/client.js 和整个 src/host 传上去，先备份再覆盖，最后自检。
  *
  * 用法：
- *   DSH_DEPLOY_HOST=192.168.120.218 DSH_DEPLOY_USER=lyf DSH_DEPLOY_PASSWORD=*** node tools/deploy.mjs
- *   DSH_DEPLOY_HOST=192.168.120.218 DSH_DEPLOY_USER=lyf node tools/deploy.mjs --key ~/.ssh/id_ed25519
+ *   DSH_DEPLOY_HOST=<host> DSH_DEPLOY_USER=<user> DSH_DEPLOY_PASSWORD=*** node tools/deploy.mjs
+ *   DSH_DEPLOY_HOST=<host> DSH_DEPLOY_USER=<user> node tools/deploy.mjs --key ~/.ssh/id_ed25519
  *
  * 环境变量：DSH_DEPLOY_HOST / DSH_DEPLOY_USER / DSH_DEPLOY_PASSWORD / DSH_DEPLOY_PORT(默认 22)
  * 参数：--remote-dir <path>（默认 /home/lyf/dsh-studio）--tmp-dir（默认 /tmp）--dry-run

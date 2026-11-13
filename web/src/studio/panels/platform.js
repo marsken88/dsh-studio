@@ -10,7 +10,7 @@ export function LdapPanel({ config, onChanged }) {
   const ldap = config.ldap ?? {}
   const [draft, setDraft] = React.useState({
     enabled: ldap.enabled === true,
-    url: ldap.url ?? 'ldap://ldap.laiyifen.com:389',
+    url: ldap.url ?? 'ldap://localhost:389',
     baseDN: ldap.baseDN ?? 'DC=LYF,DC=COM',
     bindDN: ldap.bindDN ?? 'cn=root',
     bindPassword: '',

@@ -703,7 +703,7 @@ node /tmp/verify-dashboard.mjs  # 工作台风险计数 / flaky 不开缺陷 / �
 - 每个 MR 会拉 `/pipelines` 与 `/changes`：流水线状态写进 `gitlabMR.pipeline`，改动文件写进 `coding.files`（研发没自报时自动补，提交按 MR 的 commits 计）。
 - **`opened` 且卡在「开发中」→ 自动推进到「待评审」**；**`merged` 且在「开发中/待评审」→ 自动推进到「待测试」**，两次都带一条评论说明来源；流水线失败追加一条失败评论。
 - 卡状态流转、阻塞、解除也会回写一条到 MR 的 notes（`broadcastChange`）。
-- 用 `tools/mock-gitlab.mjs`（127.0.0.1:18098）验证过 7/7：匹配、流水线、改动文件、自动推进都通；**真实 `git.lyf.com` 还需要令牌**（Role Developer+、scope `api`）。
+- 用 `tools/mock-gitlab.mjs`（127.0.0.1:18098）验证过 7/7：匹配、流水线、改动文件、自动推进都通；**真实 GitLab 还需要令牌**（Role Developer+、scope `api`）。
 
 ### 工具数
 

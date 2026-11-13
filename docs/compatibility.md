@@ -87,8 +87,8 @@
 
 ## 7. 已知限制与未验证项
 
-- **LDAP**：`ldap.laiyifen.com:389` 从目标机不可达（解析到 10.1.0.167/166，ping 全丢），只做过本地 slapd 联调；线上登录实际走「本地超管」（`admin` / 默认口令，scrypt 存储）。
-- **GitLab**：`git.lyf.com/RD_ARCH/ai_review` 未配置真实令牌（需 Role Developer+ 与 `api` scope），MR 回写只做过离线/模拟验证。
+- **LDAP**：公司 LDAP（`ldap.<公司域>:389`）从目标机不可达（解析到 10.1.0.167/166，ping 全丢），只做过本地 slapd 联调；线上登录实际走「本地超管」（`admin` / 默认口令，scrypt 存储）。
+- **GitLab**：公司 GitLab（`git.<公司域>/<group>/<repo>`）未配置真实令牌（需 Role Developer+ 与 `api` scope），MR 回写只做过离线/模拟验证。
 - **发布门禁**：`releaseGate` 硬拦截不能被 `force` 跳过（`force` 只跳过规则项且必须给 `forceNote`）——这是设计选择，不是缺陷。
 - **UI/设备自动化**：POS（Windows/Android）真机自动化未接入。
 - **无障碍**：键盘可达性补丁已上线（`data-kb`/Enter/Space）；Windows 高对比度 `forced-colors` 只写了样式，未实机验证。

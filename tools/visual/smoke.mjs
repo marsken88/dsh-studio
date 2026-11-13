@@ -4,7 +4,7 @@
  *
  * 用法：
  *   STUDIO_TOKEN=xxxx node tools/visual/smoke.mjs
- *   node tools/visual/smoke.mjs xxxx --base http://192.168.120.218:18080
+ *   node tools/visual/smoke.mjs xxxx --base http://<host>:18080
  *
  * 需要 puppeteer-core（仓库故意不把它写进依赖）：
  *   pnpm add -D puppeteer-core
@@ -21,7 +21,7 @@ const option = (name, fallback) => {
   return at >= 0 && args[at + 1] !== undefined ? args[at + 1] : fallback
 }
 const token = args.find(item => !item.startsWith('--') && item !== option('base', '')) ?? process.env.STUDIO_TOKEN ?? ''
-const baseUrl = option('base', process.env.STUDIO_BASE ?? 'http://192.168.120.218:18080')
+const baseUrl = option('base', process.env.STUDIO_BASE ?? 'http://127.0.0.1:18080')
 if (token === '') {
   console.error('缺少 token：STUDIO_TOKEN=xxxx node tools/visual/smoke.mjs（或作为第一个参数传）')
   process.exit(2)

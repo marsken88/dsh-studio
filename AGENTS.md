@@ -44,18 +44,18 @@ node C:/Users/hp/.dsh/dsh-runtimes/dsh-primary-runtime/dependencies/pnpm/bin/pnp
 
 # 2) 部署：一条命令，传 index.js + dist/client.js + 整个 src/host，先备份再覆盖，最后自检
 cd ..
-DSH_DEPLOY_HOST=192.168.120.218 DSH_DEPLOY_USER=lyf DSH_DEPLOY_PASSWORD=*** node tools/deploy.mjs
+DSH_DEPLOY_HOST=<host> DSH_DEPLOY_USER=<user> DSH_DEPLOY_PASSWORD=*** node tools/deploy.mjs
 #    没有密码就先用 --key 或 ssh-copy-id 授权本机公钥，再：node tools/deploy.mjs --dry-run 看它要传什么
 
 # 3) 冒烟：进面板 → 页签 → 看板有卡 → 用例库有行 → pageerror 必须为空
-STUDIO_TOKEN=$(echo 1234 | sudo -S journalctl -u dsh-web -n 50 | grep -o 'token=[A-Za-z0-9_-]*' | tail -1 | cut -d= -f2) \
+STUDIO_TOKEN=$(sudo journalctl -u dsh-web -n 50 | grep -o 'token=[A-Za-z0-9_-]*' | tail -1 | cut -d= -f2) \
   node tools/visual/smoke.mjs
 ```
 
 > `tools/deploy.mjs` 会打印 `active=` / `files=` / `state=`，`active` 不是 active 就以非零退出。
 > 它依赖 `ssh2`（devDependency，只给部署用，不进插件运行时）；`tools/visual/smoke.mjs` 依赖 `puppeteer-core`（同样只在 devDependencies 里），浏览器用系统 Chrome，可用 `CHROME_PATH` 指定。
 
-> 目标机上那个老的 `deploy-all.sh` 只作兜底（它拷 `/tmp/` 下的两个文件和 `src/`）。日常用 `tools/deploy.mjs`，别再手工 scp 拼路径。改了 `package.json`（包头、`engines`、`dsh.*`、`files`）、`cordis.patch.yml`、`locale/*.json` 时必须单独上传到 `/home/lyf/dsh-studio/` 再重启，否则改了个寂寞。改动前先 `cp package.json /tmp/package.json.bak` 留退路。
+> 目标机上那个老的 `deploy-all.sh` 只作兜底（它拷 `/tmp/` 下的两个文件和 `src/`）。日常用 `tools/deploy.mjs`，别再手工 scp 拼路径。改了 `package.json`（包头、`engines`、`dsh.*`、`files`）、`cordis.patch.yml`、`locale/*.json` 时必须单独上传到插件目录（`~/dsh-studio/` 或 profile 的 `node_modules` 下）再重启，否则改了个寂寞。改动前先 `cp package.json /tmp/package.json.bak` 留退路。
 >
 > 宿主拆成 `src/host/*.js` 以后，**部署必须带整个 `src/` 目录**：`/tmp/index.js`、`/tmp/client.js`、`/tmp/src/host/{domain,dispatcher,executor,integrations,store}.js` 与 `/tmp/src/host/routes/*.js`。只传 `index.js` 会得到 `ReferenceError: sanitizeAccess is not defined`（服务 502）。
 
@@ -128,7 +128,7 @@ git remote -v          # origin = ssh://git@ssh.github.com:443/marsken88/dsh-stu
 GIT_SSH_COMMAND="ssh -p 443" git push
 ```
 - 一个提交只做一件事，标题一句话说清（英文或中文均可，与既有历史保持同风格）。
-- **改完即推，不在本地攒**：每完成一件事（一个提交）就 `git push`。攒着会让三处对不上——远端、目标机 `.218` 上跑的、以及仓库里的，别人 `git clone` 拿到的还是旧版。历史上曾经一口气攒了 18 个提交才推，属于反面案例。
+- **改完即推，不在本地攒**：每完成一件事（一个提交）就 `git push`。攒着会让三处对不上——远端、目标机上跑的、以及仓库里的，别人 `git clone` 拿到的还是旧版。历史上曾经一口气攒了 18 个提交才推，属于反面案例。
 - 提交前确保根 `client.js` 与 `dist/client.js` 一致（clone 下来即可安装靠的就是这一点）。
 - 版本号在 `package.json`；发布标签 `vX.Y.Z`。
 
