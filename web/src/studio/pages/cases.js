@@ -50,7 +50,8 @@ export function CasesPage({ state, onOpenTask }) {
   const counts = React.useMemo(() => {
     const pass = list.filter(row => row.result === 'pass').length
     const fail = list.filter(row => row.result === 'fail').length
-    return { pass, fail, rest: list.length - pass - fail }
+    const skip = list.filter(row => row.result === 'skip').length
+    return { pass, fail, skip, rest: list.length - pass - fail - skip }
   }, [list])
 
   const requirements = state.requirements ?? []
@@ -92,7 +93,7 @@ export function CasesPage({ state, onOpenTask }) {
       h('div', { className: 'ds-panel-head' },
         h('span', null, '用例总览'),
         h('span', { className: 'ds-hint' }, '全公司的用例按卡片汇总：点一行跳回那张卡；用例本身仍在卡片的「测试」里维护'),
-        h(ChipField, { className: 'ds-chip', style: { marginLeft: 'auto' } }, `${list.length} 条 · ✅ ${counts.pass} · ❌ ${counts.fail} · ⬜ ${counts.rest}`),
+        h(ChipField, { className: 'ds-chip', style: { marginLeft: 'auto' } }, `${list.length} 条 · ✅ ${counts.pass} · ❌ ${counts.fail}${counts.skip > 0 ? ` · ⏭️ ${counts.skip}` : ''}${counts.rest > 0 ? ` · ⬜ ${counts.rest}` : ''}`),
         h('button', { className: 'ds-btn ds-btn-ghost', onClick: () => void refresh() }, '刷新'),
       ),
       h('div', { className: 'ds-panel-body' },
