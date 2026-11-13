@@ -121,3 +121,14 @@ curl -s -o /dev/null -w '%{http_code} %{size_download}\n' $(npm view @marsken/ds
 token 只写进临时 npmrc（放在仓库外或 `tmp/` 且不提交），发完立刻 `rm`；发完去 npm 后台 revoke 重新生成——凡是贴进聊天/工单/日志的 token 都当作已泄露。
 
 **5. 作用域包必须带 `--access public`**，否则默认私有，市场里别人装不了（表现为 anonymous 访问 404）。
+## 发布记录
+
+| 版本 | 时间 | 内容 |
+| --- | --- | --- |
+| `0.1.0` | 2026-11-13 | 首个公开版：看板 / 需求 / 用例回归 / 效能 / 设计评审四期 |
+| `0.1.1` | 2026-11-13 | 补三张 README 截图（npm 页可看图）；默认值与文档去掉公司内网信息 |
+
+两条硬规矩，每次发版都过一遍：
+
+1. `npm run check` + `pnpm build` + `cmp -s dist/client.js client.js`（产物必须逐字节一致）；
+2. 发完**在临时 profile 里装一遍**并跑 `dsh --profile <tmp> --dump-config | grep dsh-studio`，确认宿主真认到了，然后把 profile 删掉。
