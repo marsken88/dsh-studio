@@ -80,7 +80,12 @@ function Card({ task, onOpen, config, requirements, onPickRequirement, onPickPro
     : h(ChipField, { className: 'ds-chip', 'data-design': task.design.status }, task.design.status === 'changes_requested' ? '设计要改' : '设计待评审'),
   task.design?.diff === null || task.design?.diff === undefined
     ? null
-    : h(ChipField, { className: 'ds-chip', 'data-diff': task.design.diff.percent }, `还原度 ${Math.max(0, 100 - task.design.diff.percent).toFixed(1)}%`),
+    : h(ChipField, { className: 'ds-chip', 'data-diff': task.design.diff.percent }, `还原度 ${Math.max(0, 100 - task.design.diff.percent).toFixed(1)}%${(() => {
+        const history = task.design.diffHistory ?? []
+        if (history.length < 2) return ''
+        const delta = (history[0].percent - history[1].percent)
+        return delta === 0 ? '（持平）' : delta > 0 ? `（−${delta.toFixed(1)}）` : `（+${Math.abs(delta).toFixed(1)}）`
+      })()}`),
   task.design?.spec === null || task.design?.spec === undefined
     ? null
     : h(ChipField, { className: 'ds-chip', 'data-spec': task.design.spec.violations }, task.design.spec.violations > 0 ? `规范 ${task.design.spec.violations} 处` : '规范达标'),

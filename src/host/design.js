@@ -21,6 +21,16 @@ export function sanitizeDesign(raw) {
         at: Number(raw.diff.at) || 0,
         by: String(raw.diff.by ?? '').slice(0, 40),
       },
+    // 还原度历史：最近 10 次。只留最新一次看不出「是在变好还是变坏」。
+    diffHistory: (Array.isArray(raw.diffHistory) ? raw.diffHistory : [])
+      .filter(item => item !== null && typeof item === 'object')
+      .slice(0, 10)
+      .map(item => ({
+        percent: Math.min(100, Math.max(0, Number(item.percent) || 0)),
+        url: String(item.url ?? '').slice(0, 500),
+        at: Number(item.at) || 0,
+        by: String(item.by ?? '').slice(0, 40),
+      })),
     // 设计规范体检（design-audit.mjs）的结果摘要：查了多少元素、几处野值、最扎眼的前三条。
     spec: raw.spec === null || raw.spec === undefined || typeof raw.spec !== 'object'
       ? null
@@ -36,6 +46,15 @@ export function sanitizeDesign(raw) {
         })),
       },
   }
+}
+
+/** 新的还原度插到最前面；和上一条完全一样就不重复记（重复跑同一次截图不该刷屏）。 */
+export function pushDiffHistory(history, entry) {
+  const list = (Array.isArray(history) ? history : []).filter(item => item !== null && typeof item === 'object')
+  const next = { percent: Math.min(100, Math.max(0, Number(entry?.percent) || 0)), url: String(entry?.url ?? '').slice(0, 500), at: Number(entry?.at) || Date.now(), by: String(entry?.by ?? '').slice(0, 40) }
+  const last = list[0]
+  if (last !== undefined && last.percent === next.percent && last.url === next.url) return list.slice(0, 10)
+  return [next, ...list].slice(0, 10)
 }
 
 /** 还原度低于这个值就算没还原。 */

@@ -410,6 +410,21 @@ test('host: artifacts leave the poll without their bodies', async () => {
   assert.equal(artifact.content, body, 'the stored artifact must not be stripped in place')
 })
 
+test('host: fidelity history keeps order, caps and skips repeats', async () => {
+  const { pushDiffHistory } = await import('../src/host/design.js')
+  const first = pushDiffHistory([], { percent: 10, url: 'u', at: 1 })
+  assert.equal(first.length, 1)
+  const second = pushDiffHistory(first, { percent: 5, url: 'u', at: 2 })
+  assert.equal(second.length, 2)
+  assert.equal(second[0].percent, 5)
+  const same = pushDiffHistory(second, { percent: 5, url: 'u', at: 3 })
+  assert.equal(same.length, 2, 'identical rerun does not pile up')
+  let full = []
+  for (let i = 0; i < 15; i += 1) full = pushDiffHistory(full, { percent: i, url: 'u', at: i })
+  assert.equal(full.length, 10, 'capped at ten')
+  assert.equal(full[0].percent, 14)
+})
+
 test('host: a merge request survives the patch normalizer', async () => {
   const { normalizePatch } = await import('../src/host/domain.js')
   const fromObject = normalizePatch({ gitlabMR: { iid: 42, title: 'feat: x', state: 'opened', url: 'https://git/x/-/merge_requests/42' } })

@@ -1,5 +1,5 @@
 import { randomBytes } from 'node:crypto'
-import { applyFidelityItem, applySpecItem, sanitizeDesign } from '../design.js'
+import { applyFidelityItem, applySpecItem, pushDiffHistory, sanitizeDesign } from '../design.js'
 import { collectCases, groupCaseKeys, loadSuites, resolveSuiteKeys, sanitizeSuite, saveSuites, summarizeRun } from '../cases.js'
 import { clearTeamMemory, loadTeamMemory } from '../team-memory.js'
 import {
@@ -98,10 +98,14 @@ export async function handleTaskRoute({ method, route, req, res, store, url }) {
     const body = await host.readJsonBody(req)
     const id = String(body.id ?? '')
     const by = String(body.by ?? '人').slice(0, 40)
-    const design = sanitizeDesign({ ...(body.design ?? {}), by, at: Date.now() })
+    let design = sanitizeDesign({ ...(body.design ?? {}), by, at: Date.now() })
     const saved = await store.mutate(state => {
       const task = state.tasks.find(entry => entry.id === id)
       if (task === undefined) throw new Error(`no task ${id}`)
+      // 合并而不是覆盖：只带 diff 的调用不该把 link/status/spec 抹掉，顺带记一条历史。
+      const merged = sanitizeDesign({ ...(task.design ?? {}), ...(body.design !== null && typeof body.design === 'object' ? body.design : {}), by, at: Date.now() })
+      if (merged !== null && merged.diff !== null) merged.diffHistory = pushDiffHistory(task.design?.diffHistory ?? [], merged.diff)
+      design = merged
       task.design = design
       // 还原度顺手写进验收清单：验收时不用再回抽屉里找数字。
       if (design !== null && design.diff !== null) task.checklist = applyFidelityItem(task.checklist, design.diff.percent)
