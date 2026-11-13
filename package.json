@@ -1,10 +1,13 @@
 {
   "name": "dsh-studio",
   "version": "0.1.0",
-  "private": true,
   "type": "module",
   "description": "DSH Studio: role-based multi-agent workspace (product / architect / developer / QA) with a live work board, GitLab + Feishu connection settings, all configurable from the web GUI.",
   "main": "index.js",
+  "keywords": ["dsh", "dsh-plugin", "ai-agents", "kanban", "multi-agent", "requirements", "regression"],
+  "icon": "./icon.svg",
+  "repository": { "type": "git", "url": "git+https://github.com/marsken88/dsh-studio.git" },
+  "homepage": "https://github.com/marsken88/dsh-studio#readme",
   "scripts": {
     "test": "node --test tests/repo.test.mjs tests/store-boot.test.mjs tests/client-units.test.mjs tests/notify.test.mjs",
     "check": "node --check index.js && node --check client.src.js && node --test tests/repo.test.mjs tests/store-boot.test.mjs tests/client-units.test.mjs tests/notify.test.mjs",

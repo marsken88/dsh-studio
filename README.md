@@ -13,10 +13,11 @@
 
 ```bash
 # 1) 拉到宿主机
-git clone https://github.com/marsken88/dsh-studio.git /home/lyf/dsh-studio
+# 1) 拉到本机任意目录
+git clone https://github.com/marsken88/dsh-studio.git ~/dsh-studio
 
 # 2) 装进目标 profile（会写 profile 的 package.json + bundles，走 pnpm link）
-dsh plugin --profile web add link:/home/lyf/dsh-studio
+dsh plugin --profile web add link:~/dsh-studio
 
 # 3) 确认挂载
 dsh --profile web --dump-config | grep -A2 'dsh-studio'
@@ -43,6 +44,7 @@ sudo systemctl restart dsh-web
 
 - 参与开发（构建链、部署、验证要求、禁区）：[AGENTS.md](AGENTS.md)
 上手第一天（三条命令，已在全新 clone 上验证过）：[docs/quickstart.md](docs/quickstart.md)
+发布到插件市场（npm / GitHub 发版 + 收录条目 + 自查清单）：[docs/publish.md](docs/publish.md)
 - 依赖的 dsh 宿主接口、升级 runbook、兼容矩阵与已知限制：[docs/compatibility.md](docs/compatibility.md)
 
 ## 看板
@@ -382,7 +384,7 @@ DSH 自带操作系统级沙箱（`dsh-sandbox-local`，Linux 上走 bwrap，退
 - `worktreeRoot` 留空 = 工作区同级目录 `dsh-worktrees`。
 - 「卡完成时」选 `on_done` 会自动 `git worktree remove --force` + `git branch -D`；默认 `manual`，留着等人看 diff。
 - 抽屉里有「代码隔离」区块：`建 worktree` / `看 git worktree 列表` / `回收 worktree`，也可以走 `POST /studio-api/task/worktree {id, action}`。
-- 真机验证（`tools/verify-worktree.mjs`，14/14 PASS）：建卡 → 自动出现 `/home/lyf/dsh-worktrees/DEV-001` + 分支 `task/DEV-001` → 主工作区保持干净 → 回收后目录与分支都清掉。
+- 真机验证（`tools/verify-worktree.mjs`，14/14 PASS）：建卡 → 自动出现 `<workspaceDir>/DEV-001` + 分支 `task/DEV-001` → 主工作区保持干净 → 回收后目录与分支都清掉。
 - 多服务验证（`tools/verify-services.mjs`，20/20 PASS）：一个项目挂两个服务（两个真实 git 仓库），卡选服务 B → worktree 只建在 B 的仓库、分支 `task/<编号>` 只存在于 B、A 仓库没有多余 worktree；老项目自动迁移成默认服务；建卡/改卡传非法服务被清空；删掉服务后卡上的 `service` 被清空；回收后配置复原（脚本会先读基线，发现有卡挂着读不到的项目就直接 ABORT，避免用空列表冲掉真项目）。
 - **服务依赖（2026-11-09）**：项目表单里每条服务下面多一行「依赖」chip，勾上它依赖的**同项目内**服务（最多 10 条，自己不能依赖自己，互依赖会自动留一条边去环）。规则：被依赖服务的卡没全部完成时，本服务的卡过不了准出——门禁多一条「依赖服务还没完成：<服务>（N 张：卡号/标题）」；派单提示词写「本服务依赖：A、B（这些服务的改动先落地…）」；项目列表行显示「N 条依赖」，任务详情「服务」行也带「依赖 …」。智能体侧 `studio_project_save` 的 `services[]` 支持 `dependsOn: []`。
 - 服务依赖验证（`tools/verify-service-deps.mjs`，18/18 PASS）：保存带依赖的项目 → 依赖落库、自依赖丢弃、未知服务丢弃、互依赖只留一条边 → 建上游/下游/无依赖三张卡 → 只有下游卡的门禁出现「依赖服务还没完成」，上游与无关服务不受影响 → 上游推到完成后下游不再被拦（推完成要过门禁，脚本用 `override` 写明原因是「只用来代表上游服务已完成」）。
@@ -1017,7 +1019,7 @@ pnpm build            # make-legacy → vite build → sync-client，一次跑�
 
 所以：**只改前端逻辑 → 改 `client.src.js`；改样式/组件 → 改 `web/src/**`**；两边都要在 `web/` 里跑一次 `pnpm build`，根目录 `client.js` 会自动同步，然后提交。
 
-部署只有两步：把 `dist/client.js` 传成 `/tmp/client.js`，跑 `bash /tmp/deploy-all.sh`（`index.js` 有改动需重启 `dsh-web.service`；只换前端不用重启）。
+部署到另一台机器只需要 `index.js` + `dist/client.js` + 整个 `src/host`：用 `node tools/deploy.mjs`（目标机、账号从环境变量传，脚本会备份、自检、`active` 不对就非零退出），具体命令见 `docs/quickstart.md`。
 
 ### 已验证
 
