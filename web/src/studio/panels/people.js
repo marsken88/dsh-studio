@@ -514,10 +514,23 @@ export function TestingPanel({ config, onChanged }) {
       h('div', { className: 'ds-panel-body' },
         hooks.length === 0
           ? h('div', { className: 'ds-empty' }, '还没有 webhook。配一个就能把卡片流转、用例失败、门禁拦截推给 CI / IM / 工单系统。')
-          : hooks.map((hook, index) => h('div', { className: 'ds-row', key: index, style: { gap: 6, alignItems: 'center', marginBottom: 6 } },
+          : hooks.map((hook, index) => h('div', { key: index, style: { marginBottom: 8 } },
+            h('div', { className: 'ds-row', style: { gap: 6, alignItems: 'center' } },
             h(TextField, { className: 'ds-input', style: { flex: 1 }, placeholder: 'https://ci.example/hook', value: hook.url ?? '', onChange: e => setHooks(list => list.map((item, i) => (i === index ? { ...item, url: e.target.value } : item))) }),
             h(CheckField, { checked: hook.enabled !== false, onChange: e => setHooks(list => list.map((item, i) => (i === index ? { ...item, enabled: e.target.checked } : item))) }),
-            h('button', { className: 'ds-btn ds-btn-ghost', disabled: busy, onClick: () => setHooks(list => list.filter((_, i) => i !== index)) }, '×'),
+              h('button', { className: 'ds-btn ds-btn-ghost', disabled: busy, onClick: () => setHooks(list => list.filter((_, i) => i !== index)) }, '×'),
+            ),
+            h('div', { className: 'ds-row', style: { gap: 10, flexWrap: 'wrap', marginTop: 2 } },
+              ['task/moved', 'case/failed', 'gate/blocked', 'agent/failed'].map(name => h('label', { className: 'ds-check', key: name },
+                h(CheckField, {
+                  checked: (hook.events ?? []).includes(name),
+                  onChange: e => setHooks(list => list.map((item, i) => (i === index
+                    ? { ...item, events: e.target.checked ? Array.from(new Set([...(item.events ?? []), name])) : (item.events ?? []).filter(x => x !== name) }
+                    : item))),
+                }),
+                h('span', { className: 'ds-check-text', style: { fontSize: 12 } }, name),
+              )),
+            ),
           )),
         hooks.length === 0 ? null : h('div', { className: 'ds-row', style: { justifyContent: 'flex-end' } },
           h('button', { className: 'ds-btn ds-btn-primary', disabled: busy, onClick: () => void saveHooks() }, '保存 webhook'),

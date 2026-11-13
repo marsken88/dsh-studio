@@ -266,6 +266,24 @@ function Drawer({ task, state, onClose, onChanged }) {
     catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)) } finally { setBusy(false) }
   }
   // shell 用例：两步录入（命令 + 期望输出），断言退出码 0。真跑要服务端打开 allowShell。
+  // 数据库用例：库文件 + SQL + 期望值，三步录入。真跑要服务端打开 allowDb。
+  const addDbCase = async () => {
+    const file = await promptDialog('SQLite 库文件路径', { title: '加一条数据库用例', defaultValue: '' })
+    if (file === null || String(file).trim() === '') return
+    const sql = await promptDialog('SQL 语句（返回的行用来断言）', { title: '加一条数据库用例', defaultValue: 'select 1 as n' })
+    if (sql === null || String(sql).trim() === '') return
+    const expect = await promptDialog('首行 n 列的期望值（可留空）', { title: '加一条数据库用例', defaultValue: '' })
+    if (expect === null) return
+    setBusy(true); setError(null)
+    try {
+      const spec = { file: String(file).trim(), sql: String(sql).trim() }
+      const expectText = String(expect ?? '').trim()
+      if (expectText !== '') { spec.expectColumn = 'n'; spec.expectValue = expectText }
+      const title = ('db: ' + spec.sql).slice(0, 60)
+      await api('/task/case', { id: task.id, action: 'add', cases: [{ title: title, expected: expectText === '' ? '能执行' : ('n = ' + expectText), db: spec }] })
+      await onChanged()
+    } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)) } finally { setBusy(false) }
+  }
   const addShellCase = async () => {
     const command = await promptDialog('shell 命令（断言退出码 0）', { title: '加一条 shell 用例', defaultValue: '' })
     if (command === null || String(command).trim() === '') return
@@ -1134,7 +1152,9 @@ function Drawer({ task, state, onClose, onChanged }) {
                 item.expected === '' ? null : h('div', { className: 'ds-art-ref' }, `期望：${item.expected}`),
               item.shell == null
                 ? (item.http == null ? null : h('div', { className: 'ds-art-ref' }, `接口：${item.http.method} ${item.http.url} → 期望 ${item.http.expectStatus}${item.http.expectContains ? ` 且含 «${item.http.expectContains}»` : ''}`))
-                : h('div', { className: 'ds-art-ref' }, 'shell：' + item.shell.command),
+                : item.shell != null
+                  ? h('div', { className: 'ds-art-ref' }, 'shell：' + item.shell.command)
+                  : h('div', { className: 'ds-art-ref' }, 'db：' + item.db.sql),
                 item.lastRun == null ? null : h('div', { className: 'ds-art-ref' }, `${item.lastRun.ok ? '✅' : '❌'} 最近执行：${item.lastRun.status === 0 ? item.lastRun.error : `${item.lastRun.status} · ${item.lastRun.ms}ms`}（${new Date(item.lastRun.at).toLocaleString('zh-CN')}）`),
                 item.lastRun?.response ? h('div', { className: 'ds-code-note' }, `响应片段：${String(item.lastRun.response).slice(0, 400)}${String(item.lastRun.response).length > 400 ? '…' : ''}`) : null,
                 (item.lastRun?.steps ?? []).length === 0 ? null : h('div', { className: 'ds-art-ref' }, `步骤：${item.lastRun.steps.map(step => `${step.ok ? '✅' : '❌'} ${step.method} ${step.url}${step.status === 0 ? '' : ` → ${step.status}`}`).join('；')}`),
@@ -1180,6 +1200,7 @@ function Drawer({ task, state, onClose, onChanged }) {
               onChange: event => setNewCase({ ...newCase, expected: event.target.value }),
             }),
             h('button', { className: 'ds-btn ds-btn-ghost', disabled: busy, title: '加一条 shell 用例：跑命令看退出码与输出（需要先在设置里打开 allowShell）', onClick: () => void addShellCase() }, '＋ shell'),
+            h('button', { className: 'ds-btn ds-btn-ghost', disabled: busy, title: '加一条数据库用例：查库断言行数与某列值（需要先在设置里打开 allowDb）', onClick: () => void addDbCase() }, '＋ 数据库'),
             h('button', { className: 'ds-btn', disabled: busy || newCase.title.trim() === '', onClick: () => void addCase() }, '＋ 加用例'),
           ),
           h('div', { className: 'ds-row', style: { gap: 8, flexWrap: 'wrap', marginTop: 6 } },
