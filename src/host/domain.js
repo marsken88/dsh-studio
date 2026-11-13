@@ -211,6 +211,8 @@ export function defaultConfig() {
     templates: defaultTemplates(),
     gitlab: { url: '', token: '', group: '', project: '', syncEnabled: false, syncLabel: '', lastSyncAt: 0, lastSyncError: '', projects: [] },
     feishu: { appId: '', appSecret: '', chatId: '', baseToken: '', tableId: '', webhook: '', notifyOnChange: true, bots: [], driveFolder: 'IuJPfTCtWlDrzwdCFmLc71aynbg', autoSyncArtifacts: true, escalateWebhook: '', escalateAfter: 3 },
+    /** 设计评审闸门：打开后，卡进 columns 里的列之前设计必须 approved。 */
+    design: { enabled: false, columns: ['dev'] },
     /** 成本闸门：只统计「跑了多少次、花了多少机上时间」，宿主没把 token 用量回传给插件。 */
     costs: { budgetRuns: 500, budgetHours: 80, warnAt: 80 },
     roles: {

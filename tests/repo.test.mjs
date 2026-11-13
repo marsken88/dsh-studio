@@ -410,6 +410,24 @@ test('host: artifacts leave the poll without their bodies', async () => {
   assert.equal(artifact.content, body, 'the stored artifact must not be stripped in place')
 })
 
+test('host: the design gate only blocks when it is switched on', async () => {
+  const { designGate, sanitizeDesign } = await import('../src/host/design.js')
+  const off = { design: { enabled: false } }
+  assert.equal(designGate(off, {}, 'dev').needed, false)
+  const on = { design: { enabled: true, columns: ['dev'] } }
+  const pendingTask = { design: { status: 'pending' } }
+  const gate = designGate(on, pendingTask, 'dev')
+  assert.equal(gate.needed, true)
+  assert.equal(gate.ready, false)
+  assert.match(gate.blockers[0], /设计/)
+  assert.equal(designGate(on, { design: { status: 'approved' } }, 'dev').ready, true)
+  assert.equal(designGate(on, {}, 'review').needed, false, 'other columns are not gated')
+  assert.equal(designGate(on, {}, 'dev').ready, false, 'no design record blocks too')
+  assert.equal(sanitizeDesign(null), null)
+  assert.equal(sanitizeDesign({ status: 'nonsense' }).status, 'pending')
+  assert.equal(sanitizeDesign({ link: '  http://x  ', status: 'approved' }).link, 'http://x')
+})
+
 test('host: a requirement change lists the cases that must be re-run', async () => {
   const { casesOfTasks, impactSummary } = await import('../src/host/impact.js')
   const tasks = [

@@ -1,4 +1,5 @@
 import { randomBytes } from 'node:crypto'
+import { sanitizeDesign } from '../design.js'
 import { collectCases, groupCaseKeys, loadSuites, resolveSuiteKeys, sanitizeSuite, saveSuites, summarizeRun } from '../cases.js'
 import { clearTeamMemory, loadTeamMemory } from '../team-memory.js'
 import {
@@ -90,6 +91,22 @@ export async function handleTaskRoute({ method, route, req, res, store, url }) {
   if (method === 'POST' && route === '/task/create') {
     const task = await host.createTask(store, await host.readJsonBody(req))
     host.sendJson(res, 200, { ok: true, task, state: host.publicState(store) })
+    return true
+  }
+  if (method === 'POST' && route === '/task/design') {
+    // 设计评审：链接 / 状态 / 意见。不走通用 patch，避免被白名单挡掉。
+    const body = await host.readJsonBody(req)
+    const id = String(body.id ?? '')
+    const by = String(body.by ?? '人').slice(0, 40)
+    const design = sanitizeDesign({ ...(body.design ?? {}), by, at: Date.now() })
+    const saved = await store.mutate(state => {
+      const task = state.tasks.find(entry => entry.id === id)
+      if (task === undefined) throw new Error(`no task ${id}`)
+      task.design = design
+      task.updatedAt = Date.now()
+      task.history.push({ at: task.updatedAt, by, status: task.status, note: `设计评审：${design.status}` })
+    })
+    host.sendJson(res, 200, { ok: true, design, state: host.publicState(store) })
     return true
   }
   if (method === 'POST' && route === '/task/update') {

@@ -5,6 +5,7 @@ import { CODE_PREFIX, ROLE_IDS, STATUS_IDS, STATUSES, nextRequirementCode, nextT
   canonicalAuthor,
 } from './domain.js'
 import { casesOfTasks, impactSummary } from './impact.js'
+import { designGate } from './design.js'
 import { RUN_LOG, parseMentions } from './dispatcher.js'
 import { appendTeamMemory } from './team-memory.js'
 import { homedir } from 'node:os'
@@ -1244,6 +1245,14 @@ export async function updateTask(store, id, patch) {
       if (!gate.ready) {
         throw new Error(`准出没过：${gate.blockers.join('；')}。确实要收口就在推进时填 override 写明原因。`)
       }
+    }
+  }
+  if (normalized.status !== undefined && override === '') {
+    // 设计闸门：开了开关的项目，进开发列之前设计必须评审通过。
+    const current = store.snapshot().tasks.find(entry => entry.id === id)
+    if (current !== undefined) {
+      const gate = designGate(store.snapshot().config, current, normalized.status)
+      if (gate.needed === true && gate.ready !== true) throw new Error(`进开发被拦：${gate.blockers.join('；')}`)
     }
   }
   let result

@@ -480,6 +480,7 @@ function publicConfig(config) {
     testing: config.testing,
     access: config.access,
     sla: config.sla,
+    design: config.design,
     costs: config.costs,
     /** 部署环境：只用于登记「版本上过哪个环境」，不触发部署。 */
     environments: config.environments ?? defaultDeployEnvs(),
@@ -1148,6 +1149,13 @@ async function applyConfig(store, patch) {
       if (typeof f.autoSyncArtifacts === 'boolean') config.feishu.autoSyncArtifacts = f.autoSyncArtifacts
       if (typeof f.escalateWebhook === 'string') config.feishu.escalateWebhook = f.escalateWebhook.trim().slice(0, 500)
       if (Number.isFinite(Number(f.escalateAfter))) config.feishu.escalateAfter = Math.max(1, Math.min(Math.round(Number(f.escalateAfter)), 20))
+    }
+    if (patch.design !== undefined) {
+      const next = { ...config.design, ...(patch.design ?? {}) }
+      config.design = {
+        enabled: next.enabled === true,
+        columns: (Array.isArray(next.columns) ? next.columns : ['dev']).map(String).slice(0, 8),
+      }
     }
     if (patch.costs !== undefined) config.costs = sanitizeCosts({ ...config.costs, ...patch.costs })
     if (patch.ldap !== undefined && typeof patch.ldap === 'object') {

@@ -1,0 +1,31 @@
+// 设计评审（一期）：卡上的设计状态 + 「进开发前必须评审过」的闸门。纯函数，方便单测。
+
+export const DESIGN_STATUS = ['pending', 'approved', 'changes_requested']
+
+/** 设计区：链接、评审状态、评审意见。没填过就是 null。 */
+export function sanitizeDesign(raw) {
+  if (raw === null || raw === undefined || typeof raw !== 'object') return null
+  const status = DESIGN_STATUS.includes(String(raw.status ?? '')) ? String(raw.status) : 'pending'
+  return {
+    link: String(raw.link ?? '').trim().slice(0, 500),
+    status,
+    note: String(raw.note ?? '').slice(0, 500),
+    by: String(raw.by ?? '').slice(0, 40),
+    at: Number(raw.at) || 0,
+  }
+}
+
+/**
+ * 进开发前的闸门：只有开了开关、且目标列在 columns 里才拦。
+ * 返回 { needed, ready, blockers }；override 在调用方处理（填了原因就放行）。
+ */
+export function designGate(config, task, nextStatus) {
+  const design = config?.design ?? {}
+  const columns = Array.isArray(design.columns) && design.columns.length > 0 ? design.columns : ['dev']
+  const needed = design.enabled === true && columns.includes(String(nextStatus ?? ''))
+  if (needed !== true) return { needed: false, ready: true, blockers: [] }
+  const state = String(task?.design?.status ?? '')
+  if (state === 'approved') return { needed: true, ready: true, blockers: [] }
+  const label = { pending: '还没评审', changes_requested: '评审要求修改' }[state] ?? '还没有设计记录'
+  return { needed: true, ready: false, blockers: [`设计${label}：先把设计稿放进卡片并让评审通过（或填 override 说明原因）`] }
+}
