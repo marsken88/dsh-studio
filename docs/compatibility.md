@@ -6,7 +6,7 @@
 
 | 项 | 值 |
 | --- | --- |
-| dsh-studio | `package.json` `version: 0.1.0` |
+| dsh-studio | `package.json` `version: 0.1.1` |
 | DeepSeek Harness | `0.2.2-rc.1`（`dsh --version`） |
 | Node | `v24.22.2`（Linux 目标机）；本机 Windows `v24.19.0` |
 | 目标系统 | Ubuntu 24.04，`dsh web` 监听 `18080`，nginx `:80` 反代并注入 `dsh-auth-*` cookie |
@@ -87,7 +87,7 @@
 
 ## 7. 已知限制与未验证项
 
-- **LDAP**：公司 LDAP（`ldap.<公司域>:389`）从目标机不可达（解析到 10.1.0.167/166，ping 全丢），只做过本地 slapd 联调；线上登录实际走「本地超管」（`admin` / 默认口令，scrypt 存储）。
+- **LDAP**：公司 LDAP（`ldap.<公司域>:389`）从目标机不可达（解析到内网地址，ping 全丢），只做过本地 slapd 联调；线上登录实际走「本地超管」（`admin` / 默认口令，scrypt 存储）。
 - **GitLab**：公司 GitLab（`git.<公司域>/<group>/<repo>`）未配置真实令牌（需 Role Developer+ 与 `api` scope），MR 回写只做过离线/模拟验证。
 - **发布门禁**：`releaseGate` 硬拦截不能被 `force` 跳过（`force` 只跳过规则项且必须给 `forceNote`）——这是设计选择，不是缺陷。
 - **UI/设备自动化**：POS（Windows/Android）真机自动化未接入。
