@@ -81,6 +81,9 @@ function Card({ task, onOpen, config, requirements, onPickRequirement, onPickPro
   task.design?.diff === null || task.design?.diff === undefined
     ? null
     : h(ChipField, { className: 'ds-chip', 'data-diff': task.design.diff.percent }, `还原度 ${Math.max(0, 100 - task.design.diff.percent).toFixed(1)}%`),
+  task.design?.spec === null || task.design?.spec === undefined
+    ? null
+    : h(ChipField, { className: 'ds-chip', 'data-spec': task.design.spec.violations }, task.design.spec.violations > 0 ? `规范 ${task.design.spec.violations} 处` : '规范达标'),
   task.type === 'bug' ? h(ChipField, { className: 'ds-chip ds-chip-bug', 'data-sev': task.severity ?? 'p2' }, `BUG ${String(task.severity || 'p2').toUpperCase()}`) : null,
       task.sla !== null && task.sla !== undefined && task.status !== 'done'
         ? h(ChipField, {

@@ -21,6 +21,20 @@ export function sanitizeDesign(raw) {
         at: Number(raw.diff.at) || 0,
         by: String(raw.diff.by ?? '').slice(0, 40),
       },
+    // 设计规范体检（design-audit.mjs）的结果摘要：查了多少元素、几处野值、最扎眼的前三条。
+    spec: raw.spec === null || raw.spec === undefined || typeof raw.spec !== 'object'
+      ? null
+      : {
+        checked: Math.max(0, Number(raw.spec.checked) || 0),
+        violations: Math.max(0, Number(raw.spec.violations) || 0),
+        at: Number(raw.spec.at) || 0,
+        by: String(raw.spec.by ?? '').slice(0, 40),
+        top: (Array.isArray(raw.spec.top) ? raw.spec.top : []).slice(0, 5).map(item => ({
+          kind: String(item?.kind ?? '').slice(0, 20),
+          value: String(item?.value ?? '').slice(0, 40),
+          count: Math.max(0, Number(item?.count) || 0),
+        })),
+      },
   }
 }
 
