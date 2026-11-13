@@ -410,6 +410,38 @@ test('host: artifacts leave the poll without their bodies', async () => {
   assert.equal(artifact.content, body, 'the stored artifact must not be stripped in place')
 })
 
+test('host: quality counts rework from backwards moves, failures and reopens', async () => {
+  const { taskRework, buildQuality } = await import('../src/host/quality.js')
+  assert.equal(taskRework({ history: [{ status: 'clarify' }, { status: 'dev' }] }).rework, false)
+  const back = taskRework({ history: [{ status: 'dev' }, { status: 'review' }, { status: 'dev' }] })
+  assert.equal(back.rework, true)
+  assert.equal(back.backwards, 1)
+  assert.equal(taskRework({ agentFailures: 2 }).rework, false, 'AI 失败单独统计，不算返工')
+  assert.equal(taskRework({ agentFailures: 2 }).failures, 2)
+  assert.equal(taskRework({ reopenCount: 1 }).reopens, 1)
+
+  const state = {
+    config: { experts: [{ id: 'dev', name: '开发', emoji: '🛠' }] },
+    tasks: [
+      { expert: 'dev', status: 'done', history: [{ status: 'dev' }, { status: 'done' }] },
+      { expert: 'dev', status: 'done', history: [{ status: 'dev' }, { status: 'review' }, { status: 'dev' }] },
+      { expert: 'dev', status: 'dev', agentFailures: 1 },
+      { status: 'dev' },
+    ],
+  }
+  const quality = buildQuality(state, { byExpert: [{ key: '开发', runs: 4, ms: 8000 }] })
+  assert.equal(quality.experts.length, 1)
+  assert.equal(quality.experts[0].dispatched, 4)
+  assert.equal(quality.experts[0].avgMs, 2000)
+  assert.equal(quality.experts[0].cards, 3)
+  assert.equal(quality.experts[0].done, 2)
+  assert.equal(quality.experts[0].firstPass, 1)
+  assert.equal(quality.experts[0].firstPassRate, 50)
+  assert.equal(quality.experts[0].reworkRate, 33, 'only backwards moves count as rework')
+  assert.equal(quality.totals.failures, 1)
+  assert.equal(quality.cost.wired, false)
+})
+
 test('host: a suite resolves to keys by rules and keeps hand-picked ones', async () => {
   const { resolveSuiteKeys, sanitizeSuite } = await import('../src/host/cases.js')
   const cases = [

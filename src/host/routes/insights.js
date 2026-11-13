@@ -12,6 +12,8 @@ let host = {
   workloadReport: () => {},
 }
 /** 度量与工作台（指标、分析、工作量、燃尽、成本）相关路由。宿主能力由 configureInsightsRoutes() 注入。 */
+import { buildQuality } from '../quality.js'
+
 export function configureInsightsRoutes(services) {
   host = { ...host, ...(services ?? {}) }
 }
@@ -39,6 +41,11 @@ export async function handleInsightsRoute({ method, route, req, res, store, url 
       dashboard: buildDashboard(store.snapshot()),
       regression: Array.isArray(regressions) && regressions.length > 0 ? regressions[0] : null,
     })
+    return true
+  }
+  if (method === 'GET' && route === '/quality') {
+    // AI 质量：派单量 / 一次通过率 / 返工率 / 平均耗时。成本未接入（见 README 口径）。
+    host.sendJson(res, 200, { ok: true, quality: buildQuality(store.snapshot(), runSummary()) })
     return true
   }
   if (method === 'GET' && route === '/workload') {

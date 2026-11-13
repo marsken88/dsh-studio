@@ -12,6 +12,7 @@ export function AnalyticsPage({ state, onOpenTask }) {
   const [load, setLoad] = React.useState(null)
   const [burn, setBurn] = React.useState(null)
   const [costs, setCosts] = React.useState(null)
+  const [quality, setQuality] = React.useState(null)
 
   React.useEffect(() => {
     let alive = true
@@ -20,12 +21,13 @@ export function AnalyticsPage({ state, onOpenTask }) {
       .then(out => { if (alive) { setData(out.analytics); setError(null) } })
       .catch(cause => { if (alive) setError(cause instanceof Error ? cause.message : String(cause)) })
     const suffix = project === '' ? '' : `&project=${encodeURIComponent(project)}`
-    Promise.all([api('/workload'), api(`/burndown?days=14${suffix}`), api('/costs')])
-      .then(([loadOut, burnOut, costOut]) => {
+    Promise.all([api('/workload'), api(`/burndown?days=14${suffix}`), api('/costs'), api('/quality')])
+      .then(([loadOut, burnOut, costOut, qualityOut]) => {
         if (!alive) return
         setLoad(loadOut.workload ?? null)
         setBurn(burnOut.burndown ?? null)
         setCosts({ ...(costOut.costs ?? {}), budget: costOut.budget ?? null })
+        setQuality(qualityOut.quality ?? null)
       })
       .catch(() => {})
     return () => { alive = false }
@@ -136,6 +138,25 @@ export function AnalyticsPage({ state, onOpenTask }) {
       h('span', { className: 'ds-hint' }, 'AI 交的东西被验收多少 · 谁手上压得最多 · 派单花了多少 · 哪些卡来回折腾'),
     ),
     h('div', { className: 'ds-an-grid' },
+      h('div', { className: 'ds-panel ds-span-4' },
+        h('div', { className: 'ds-panel-head' }, '按专家看质量', h('span', { className: 'ds-hint' }, '派单量来自运行日志（内存最近 300 条）')),
+        h('div', { className: 'ds-panel-body' },
+          quality === null
+            ? h('div', { className: 'ds-hint' }, '还没算出来')
+            : (quality.experts ?? []).length === 0
+              ? h('div', { className: 'ds-hint' }, '还没有派出过活')
+              : h('div', null,
+                (quality.experts ?? []).slice(0, 8).map(item => h('div', { className: 'ds-an-kv', key: item.expert },
+                  h('span', {}, `${item.label} · ${item.dispatched} 次`),
+                  h('b', { 'data-warn': item.reworkRate !== null && item.reworkRate >= 40 ? '1' : '0' },
+                    `${item.done}/${item.cards} 完成 · 一次过 ${item.firstPassRate === null ? '—' : item.firstPassRate + '%'}`),
+                )),
+                h('div', { className: 'ds-hint', style: { marginTop: 6 } },
+                  `合计：派单 ${quality.totals.dispatched} 次 · 平均耗时 ${quality.totals.avgMs > 0 ? Math.round(quality.totals.avgMs / 1000) + ' 秒' : '—'} · 返工率 ${quality.totals.reworkRate === null ? '—' : quality.totals.reworkRate + '%'} · AI 失败 ${quality.totals.failures} 次 · 缺陷重开 ${quality.totals.reopens} 次`),
+                h('div', { className: 'ds-hint' }, quality.cost?.note ?? ''),
+              ),
+        ),
+      ),
       h('div', { className: 'ds-panel ds-span-4' },
         h('div', { className: 'ds-panel-head' }, 'AI 产出质量'),
         h('div', { className: 'ds-panel-body' },
