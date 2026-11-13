@@ -1096,52 +1096,6 @@ export function sanitizeChecklist(input) {
   }
   return out
 }
-/** 把 "taskId:caseId" 的键按卡分组（跨卡回归就是这么拆成一轮一轮跑的）；坏键直接丢掉。 */
-export function groupCaseKeys(keys) {
-  const byTask = new Map()
-  for (const key of Array.isArray(keys) ? keys : []) {
-    const raw = String(key ?? '')
-    const at = raw.indexOf(':')
-    if (at <= 0 || at === raw.length - 1) continue
-    const taskId = raw.slice(0, at)
-    const caseId = raw.slice(at + 1)
-    if (!byTask.has(taskId)) byTask.set(taskId, [])
-    byTask.get(taskId).push(caseId)
-  }
-  return byTask
-}
-
-/** 跨卡用例总览：把每张卡上的用例摊成一张表，带上卡片与需求的上下文。纯函数，方便单测。 */
-export function collectCases(state) {
-  const requirementById = new Map((state?.requirements ?? []).map(item => [item.id, item]))
-  const out = []
-  for (const task of state?.tasks ?? []) {
-    const requirement = requirementById.get(task.requirementId)
-    for (const item of task.cases ?? []) {
-      out.push({
-        key: `${task.id}:${item.id}`,
-        id: item.id,
-        title: item.title ?? '',
-        expected: item.expected ?? '',
-        result: item.result ?? 'pending',
-        type: item.type ?? 'functional',
-        priority: item.priority ?? 'p2',
-        pointId: item.pointId ?? '',
-        http: item.http !== null && item.http !== undefined,
-        lastRunAt: item.lastRun?.at ?? 0,
-        taskId: task.id,
-        taskTitle: task.title ?? '',
-        taskCode: task.code ?? '',
-        taskStatus: task.status ?? '',
-        requirementId: task.requirementId ?? '',
-        requirementTitle: requirement?.title ?? '',
-        requirementCode: requirement?.code ?? '',
-      })
-    }
-  }
-  return out
-}
-
 /** 用例与验收清单同理：轮询只给计数，抽屉打开时按卡取正文。 */
 export function publicCases(task) {
   const cases = Array.isArray(task?.cases) ? task.cases : []

@@ -1,4 +1,5 @@
 import { randomBytes } from 'node:crypto'
+import { collectCases, groupCaseKeys, summarizeRun } from '../cases.js'
 import {
   CASE_HTTP_METHODS,
   CASE_PRIORITIES,
@@ -8,9 +9,7 @@ import {
   STATUS_SET,
   CASE_RESULTS,
   cleanId,
-  collectCases,
   defaultColumns,
-  groupCaseKeys,
   sanitizeArtifact,
   sanitizeCaseHttp,
   sanitizeCases,
@@ -231,12 +230,22 @@ export async function handleTaskRoute({ method, route, req, res, store, url }) {
         results.push({ taskId, ok: false, error: String(error?.message ?? error).slice(0, 200) })
       }
     }
-    host.sendJson(res, 200, { ok: true, results, state: host.publicState(store) })
+    // 记一笔「最近回归」：放 side 键，不动 state、不涨 revision。
+    const record = summarizeRun(results, by)
+    try {
+      const previous = await store.readSide('regressions')
+      const list = Array.isArray(previous) ? previous : []
+      await store.writeSide('regressions', [record, ...list].slice(0, 20))
+    } catch {
+      /* 记不下来不影响这次跑的结果 */
+    }
+    host.sendJson(res, 200, { ok: true, results, regression: record, state: host.publicState(store) })
     return true
   }
   if (method === 'POST' && route === '/cases') {
     // 跨卡用例总览：从台账现算，不落第二份数据。纯读。
-    host.sendJson(res, 200, { ok: true, cases: collectCases(store.snapshot()) })
+    const regressions = await store.readSide('regressions').catch(() => null)
+    host.sendJson(res, 200, { ok: true, cases: collectCases(store.snapshot()), regressions: Array.isArray(regressions) ? regressions : [] })
     return true
   }
   if (method === 'POST' && route === '/task/parts') {

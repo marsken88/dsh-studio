@@ -410,8 +410,19 @@ test('host: artifacts leave the poll without their bodies', async () => {
   assert.equal(artifact.content, body, 'the stored artifact must not be stripped in place')
 })
 
+test('host: a regression summary adds up the per-card results', async () => {
+  const { summarizeRun } = await import('../src/host/cases.js')
+  const record = summarizeRun([
+    { taskId: 't1', ok: true, total: 4, passed: 3, failed: 1, bugs: 1 },
+    { taskId: 't2', ok: false, error: '环境不可达' },
+    { taskId: 't3', ok: true, total: 2, passed: 2, failed: 0, bugs: 0 },
+  ], '定时回归', 1700000000000)
+  assert.deepEqual(record, { at: 1700000000000, by: '定时回归', cards: 3, failedCards: 1, total: 6, passed: 5, failed: 1, bugs: 1 })
+  assert.equal(summarizeRun(null, '').cards, 0)
+})
+
 test('host: case keys group by card and bad keys drop out', async () => {
-  const { groupCaseKeys } = await import('../src/host/domain.js')
+  const { groupCaseKeys } = await import('../src/host/cases.js')
   const grouped = groupCaseKeys(['t1:c1', 't1:c2', 't2:c9', 'broken', ':c1', 't3:'])
   assert.deepEqual([...grouped.keys()], ['t1', 't2'])
   assert.deepEqual(grouped.get('t1'), ['c1', 'c2'])
@@ -421,7 +432,7 @@ test('host: case keys group by card and bad keys drop out', async () => {
 })
 
 test('host: the case library flattens cards with their context', async () => {
-  const { collectCases } = await import('../src/host/domain.js')
+  const { collectCases } = await import('../src/host/cases.js')
   const state = {
     requirements: [{ id: 'r1', title: '报表导出', code: 'REQ-001' }],
     tasks: [

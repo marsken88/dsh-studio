@@ -16,11 +16,13 @@ export function CasesPage({ state, onOpenTask }) {
   const [selected, setSelected] = React.useState(() => new Set())
   const [running, setRunning] = React.useState(false)
   const [note, setNote] = React.useState('')
+  const [regressions, setRegressions] = React.useState([])
 
   const refresh = React.useCallback(async () => {
     try {
       const out = await api('/cases', {})
       setRows(Array.isArray(out.cases) ? out.cases : [])
+      setRegressions(Array.isArray(out.regressions) ? out.regressions : [])
       setError(null)
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause))
@@ -122,6 +124,15 @@ export function CasesPage({ state, onOpenTask }) {
           h('span', { className: 'ds-hint' }, '按卡串行跑，每张卡一轮；失败的照旧自动开缺陷（最多一次 60 条）'),
         ),
         note === '' ? null : h('div', { className: 'ds-hint', style: { marginTop: 6 } }, note),
+        regressions.length === 0 ? null : h('div', { className: 'ds-reg-list' },
+          h('span', { className: 'ds-hint' }, '最近回归：'),
+          regressions.slice(0, 4).map(item => h('span', {
+            key: String(item.at),
+            className: 'ds-reg-item',
+            'data-bad': (Number(item.failed) || 0) + (Number(item.failedCards) || 0) > 0 ? '1' : '0',
+            title: `${new Date(item.at).toLocaleString('zh-CN')} · ${item.by || '人'}`,
+          }, `${fmtTime(item.at)} ${item.by || ''} · ${item.cards} 卡 / ${item.total} 条 · ✅${item.passed} ❌${item.failed}${item.bugs > 0 ? ` 🐞${item.bugs}` : ''}`)),
+        ),
         error !== null ? h('div', { className: 'ds-err' }, error) : null,
         rows === null
           ? h('div', { className: 'ds-hint', style: { padding: '10px 2px' } }, '载入用例…')
