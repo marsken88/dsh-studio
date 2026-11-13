@@ -333,6 +333,9 @@ export async function runTaskCases(store, taskId, options = {}) {
   for (const item of targets) {
     const outcome = await runOneCase(item, env, config)
     results.push({ id: item.id, title: item.title, ...outcome })
+    if (outcome.ok !== true && item.flaky !== true) {
+      emitEvent('case/failed', { taskId: task.id, code: task.code ?? '', caseId: item.id, title: item.title, error: String(outcome.error ?? '').slice(0, 200) })
+    }
     await store.mutate(draft => {
       const card = draft.tasks.find(entry => entry.id === task.id)
       if (card === undefined) return
@@ -1265,6 +1268,7 @@ export async function updateTask(store, id, patch) {
       const simulated = { ...current, ...normalized, blocked: current.blocked }
       const gate = taskExitGate(store.snapshot(), simulated)
       if (!gate.ready) {
+        emitEvent('gate/blocked', { taskId: id, gate: 'exit', blockers: gate.blockers.slice(0, 3) })
         throw new Error(`准出没过：${gate.blockers.join('；')}。确实要收口就在推进时填 override 写明原因。`)
       }
     }
@@ -1274,7 +1278,10 @@ export async function updateTask(store, id, patch) {
     const current = store.snapshot().tasks.find(entry => entry.id === id)
     if (current !== undefined) {
       const gate = designGate(store.snapshot().config, current, normalized.status)
-      if (gate.needed === true && gate.ready !== true) throw new Error(`进开发被拦：${gate.blockers.join('；')}`)
+      if (gate.needed === true && gate.ready !== true) {
+        emitEvent('gate/blocked', { taskId: id, gate: 'design', blockers: gate.blockers.slice(0, 3) })
+        throw new Error(`进开发被拦：${gate.blockers.join('；')}`)
+      }
     }
   }
   let result
