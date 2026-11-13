@@ -93,6 +93,13 @@ try {
   const suite = await page.$$eval('[data-dsh-studio] .ds-suite', nodes => nodes.length)
   check('回归套件渲染', suite > 0, `${suite} 个`)
 
+  const crash = await page.evaluate(() => {
+    const text = document.body.innerText
+    const at = text.indexOf('渲染失败')
+    return at < 0 ? null : text.slice(Math.max(0, at - 10), at + 90).replace(/\s+/g, ' ')
+  })
+  check('面板没有渲染失败', crash === null, crash ?? '')
+
   check('pageerror 为空', errors.length === 0, errors.slice(0, 2).join(' | '))
 } catch (error) {
   check('冒烟没跑完', false, String(error?.message ?? error).slice(0, 200))

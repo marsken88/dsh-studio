@@ -69,6 +69,7 @@ STUDIO_TOKEN=$(echo 1234 | sudo -S journalctl -u dsh-web -n 50 | grep -o 'token=
    - 先点侧栏文字进入面板，再等 `[data-dsh-studio]`
    - 切页签用 `elementHandle.click()`（Radix Tabs 不认 DOM `.click()`）
    - 断言 DOM + `pageerror` 为空，并截图留档
+   - **探针说「找不到元素」时，先截图再说**：面板崩掉时 React 的错误边界会把异常吞在自己的渲染树里，`pageerror` 是空的，页面上只有一行「工作空间渲染失败：xxx is not defined」。2026-11-13 连着两次把「页面崩了」误判成「选择器不对」，白跑两轮。截图 + `document.body.innerText.includes('渲染失败')` 才是判据。
 5. 涉及权限/门禁/发布的重改动，跑一遍既有 e2e 脚本并贴出数字
 6. `npm test`（条数以 `npm run check` 打印的为准，别再写死数字；覆盖范围是：`tests/repo.test.mjs` 管 manifest / 产物一致 / 宿主接口 / 领域层拆分与导入 / **导入只读绑定不许赋值** / **跨模块符号必须导入** / 迁移 / 文档 / locale / **用了 `React.` 的组件必须从 `client()` 或工厂参数拿到 `React`**；`tests/client-units.test.mjs` 用真实模块跑标签表/负责人/日期/命令面板检索这些纯函数；`tests/notify.test.mjs` 起一个本地 HTTP 桩验证飞书通知（正文归一、`botWants` 的事件矩阵、`feishuBroadcast` 只发给订阅该事件的机器人）；`tests/store-boot.test.mjs` 真的起一个 `StudioStore`，把「搬完代码启动就炸」这类问题挡在部署前。想连真数据验证：把生产库三个文件（`.db`/`-wal`/`-shm`）拷到临时目录，用 `new StudioStore()` + `await store.ready` 跑一遍，`tmp/boot-real.mjs` 就是这么写的）；`npm run check` = 语法 + 契约一把过
 7. 构建期守卫：`web/scripts/guard.mjs`（`pnpm build` 自动跑两次）——禁 CSS 里出现 `hsl(var(--x))`、禁 Radix Portal 不挂 `container={portalRoot()}`、产物里必须留下 `data-dsh-studio-portal`。单独跑：`cd web && npm run guard`
@@ -135,6 +136,7 @@ GIT_SSH_COMMAND="ssh -p 443" git push
 | 现象 | 先查这里 |
 | --- | --- |
 | 页面白屏 | 浏览器 console 的 `ReferenceError`（`node --check` 抓不到）；派生变量必须 null 兜底 |
+| 面板里一行「渲染失败：xxx is not defined」 | 组件里引用了当前作用域没有的变量（典型：把 `state.tasks` 写成 `tasks`）。`pageerror` 不会有记录，只能靠截图或 `innerText` 里找「渲染失败」 |
 | 改了没生效 | 是否改了 `client.src.js` 却没跑 `make-legacy`；`cmp` 确认产物；浏览器强刷 |
 | 主按钮只剩文字 | 是否又用了 `hsl(var(--primary))`；改实色 |
 | 弹窗/抽屉看不见 | Portal 容器是否缺 `data-dsh-studio` 属性 |
