@@ -2318,6 +2318,7 @@ function installKeyboardActivation() {
                 { id: 'dashboard', label: '工作台', hint: '今天该看什么：在办、逾期、阻塞、缺陷超时、准出被拦' },
                 { id: 'board', label: '看板', hint: '按列推进卡片；点开卡片能看计划、交付物、测试、讨论' },
                 { id: 'requirements', label: '需求', hint: '需求、功能点、可追溯矩阵与需求级准出' },
+                { id: 'cases', label: '用例', hint: '跨卡用例总览：谁在跑、最近结果、挂在哪条需求' },
                 { id: 'releases', label: '版本', hint: '版本清单、发布门禁、灰度与部署记录' },
                 { id: 'projects', label: '项目', hint: '业务项目、迭代与每个服务对应的代码目录' },
                 { id: 'analytics', label: '效能', hint: '周期分布、每列停留、团队负载、返工与 AI 成本' },
@@ -2357,6 +2358,8 @@ function installKeyboardActivation() {
                     ? `${(state.releases ?? []).length} 个版本 · ${state.tasks.filter(task => (task.releaseId ?? '') !== '').length} 张卡已挂版本`
                   : tab === 'projects'
                     ? `${(state.config.projects ?? []).length} 个项目`
+                    : tab === 'cases'
+                      ? `${(state.tasks ?? []).reduce((sum, task) => sum + (task.caseSummary?.total ?? 0), 0)} 条用例 · 点一行跳回卡片`
                     : tab === 'analytics'
                       ? '过程指标：通过率 · 返工 · 周期'
                     : tab === 'settings'
@@ -2373,6 +2376,8 @@ function installKeyboardActivation() {
             ? h(DashboardPage, { state, onOpenTask: setOpenId, onOpenBoard: () => setTab('board') })
           : tab === 'requirements'
             ? h(RequirementsPage, { state, onOpenTask: setOpenId, onChanged: reload, createSignal: newReq, focusReq })
+            : tab === 'cases'
+              ? h(CasesPage, { state, onOpenTask: setOpenId })
             : tab === 'releases'
               ? h(ReleasesPage, { state, onOpenTask: setOpenId })
             : tab === 'projects'

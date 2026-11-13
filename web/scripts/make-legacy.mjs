@@ -96,6 +96,7 @@ const imports = [
   "import { AccessPanel, ColumnsPanel, StoragePanel, HealthPanel } from './studio/panels/governance.js'",
   "import { ReposPanel, BotsPanel, SkillsPanel } from './studio/panels/integrations.js'",
   "import { DashboardPage } from './studio/pages/insights.js'",
+  "import { CasesPage } from './studio/pages/cases.js'",
   "import { BurnChart, ProgressField } from './studio/charts.js'",
   "import { IntakePage, RequirementsPage } from './studio/pages/requirements.js'",
   "import { ReleasesPage } from './studio/pages/releases.js'",

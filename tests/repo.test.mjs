@@ -410,6 +410,30 @@ test('host: artifacts leave the poll without their bodies', async () => {
   assert.equal(artifact.content, body, 'the stored artifact must not be stripped in place')
 })
 
+test('host: the case library flattens cards with their context', async () => {
+  const { collectCases } = await import('../src/host/domain.js')
+  const state = {
+    requirements: [{ id: 'r1', title: '报表导出', code: 'REQ-001' }],
+    tasks: [
+      { id: 't1', title: '异步导出', code: 'REQ-001-01', status: 'test', requirementId: 'r1', cases: [
+        { id: 'c1', title: '导出成功', result: 'pass', http: { method: 'GET', path: '/x' }, lastRun: { at: 1700000000000 } },
+        { id: 'c2', title: '超时', result: 'fail', http: null },
+      ] },
+      { id: 't2', title: '裸卡', status: 'clarify', cases: [] },
+    ],
+  }
+  const rows = collectCases(state)
+  assert.equal(rows.length, 2)
+  assert.equal(rows[0].taskId, 't1')
+  assert.equal(rows[0].requirementTitle, '报表导出')
+  assert.equal(rows[0].requirementCode, 'REQ-001')
+  assert.equal(rows[0].http, true)
+  assert.equal(rows[0].lastRunAt, 1700000000000)
+  assert.equal(rows[1].http, false)
+  assert.equal(rows[1].result, 'fail')
+  assert.deepEqual(collectCases({ tasks: [] }), [])
+})
+
 test('host: cases and checklist leave the poll as counts', async () => {
   const { publicCases, publicChecklist } = await import('../src/host/domain.js')
   const task = {

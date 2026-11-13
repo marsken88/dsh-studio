@@ -148,6 +148,7 @@ export const ACTION_ITEMS = [
   { id: 'new-task', shortcut: shortcutById.get('new-task'), label: '新建任务', hint: '直接在看板上建一张卡', keys: '新建 任务 卡片 new task 建卡' },
   { id: 'tab:board', label: '打开看板', hint: '八列泳道 · 拖拽换列', keys: '看板 board 泳道' },
   { id: 'tab:requirements', label: '打开需求', hint: '需求 · 功能点 · 文档 · 准出', keys: '需求 requirements prd' },
+  { id: 'tab:cases', label: '打开用例', hint: '跨卡用例总览 · 最近结果', keys: '用例 case 用例库 测试用例 总览' },
   { id: 'tab:releases', label: '打开版本', hint: '发布 · 灰度 · 部署记录', keys: '版本 release 发布 部署' },
   { id: 'tab:analytics', label: '打开效能', hint: '周期 · 返工 · AI 采纳', keys: '效能 analytics 度量 报表' },
   { id: 'tab:dashboard', label: '打开工作台', hint: '风险与今日待办', keys: '工作台 dashboard 风险 待办' },

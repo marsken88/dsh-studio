@@ -8,6 +8,7 @@ import {
   STATUS_SET,
   CASE_RESULTS,
   cleanId,
+  collectCases,
   defaultColumns,
   sanitizeArtifact,
   sanitizeCaseHttp,
@@ -191,6 +192,11 @@ export async function handleTaskRoute({ method, route, req, res, store, url }) {
     // 卡没了，替它跑着的会话也要收摊，否则槽位一直被占着。
     host.getDispatcher()?.abortTask?.(id)
     host.sendJson(res, 200, { ok: true, state: host.publicState(store) })
+    return true
+  }
+  if (method === 'POST' && route === '/cases') {
+    // 跨卡用例总览：从台账现算，不落第二份数据。纯读。
+    host.sendJson(res, 200, { ok: true, cases: collectCases(store.snapshot()) })
     return true
   }
   if (method === 'POST' && route === '/task/parts') {

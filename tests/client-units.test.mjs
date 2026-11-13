@@ -136,16 +136,16 @@ test('palette: filterItems matches words, ranks prefixes first and stops when em
 test('palette: actions are searchable next to records', async () => {
   const { actionItems, paletteItems } = await import('../web/src/studio/palette.js')
   const actions = actionItems()
-  assert.equal(actions.length, 35)
+  assert.equal(actions.length, 36)
   assert.equal(actions.some((item) => item.id === 'clear-recents'), true, 'a way out of the recent list must exist')
-  assert.equal(new Set(actions.map((item) => item.id)).size, 35, 'action ids must be unique')
+  assert.equal(new Set(actions.map((item) => item.id)).size, 36, 'action ids must be unique')
   for (const item of actions) {
     assert.equal(item.kind, 'action')
     assert.ok(item.label.length > 0 && item.search.length > 0)
   }
   const state = { tasks: [{ id: 't1', code: 'DEV-001', title: '退款对账', status: 'dev' }], requirements: [], releases: [], statuses: [{ id: 'dev', label: '开发中' }] }
   const all = paletteItems(state)
-  assert.equal(all.length, 36, '35 actions + one task')
+  assert.equal(all.length, 37, '36 actions + one task')
   assert.equal(filterItems(all, '新建需求')[0].id, 'new-requirement')
   assert.equal(filterItems(all, '导出')[0].kind, 'action')
   assert.equal(filterItems(all, '主题').length, 3)
