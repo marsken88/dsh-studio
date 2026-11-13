@@ -10,7 +10,7 @@
 | DeepSeek Harness | `0.2.2-rc.1`（`dsh --version`） |
 | Node | `v24.22.2`（Linux 目标机）；本机 Windows `v24.19.0` |
 | 目标系统 | Ubuntu 24.04，`dsh web` 监听 `18080`，nginx `:80` 反代并注入 `dsh-auth-*` cookie |
-| 插件安装方式 | `dsh plugin --profile web add link:/home/lyf/dsh-studio`（profile `web`） |
+| 插件安装方式 | npm：`dsh plugin --profile web add @marsken/dsh-studio`；本地开发：`add link:~/dsh-studio`（profile `web`） |
 | 兼容声明 | `engines.dsh: ">=0.2.2-rc.1"`、`dsh.compatibility.dshReleases: { "0.2.2-rc.1+": "compatible" }` |
 
 > 结论：只在 **0.2.2-rc.1** 上做过端到端验证。0.2.2 正式版、以及 `<0.2.2` 均未验证。
@@ -22,7 +22,7 @@
 | `export const inject = ['tools','systemPrompt']` | 插件声明必须的服务 | 插件不加载；面板消失 |
 | `ctx.systemPrompt.section({ name, order, text })` | 注入 `studio-protocol`（order 70），告诉 agent 如何用 `studio_*` 工具 | agent 不写讨论、不推进卡片 |
 | `ctx.tools.register(tool)` ×39 | 全部 `studio_*` 工具（建卡、派单、门禁、发布…） | 工具消失；LLM 报 unknown tool |
-| `ctx.inject(['webServer'], ctx => ctx.webServer.register({ kind:'prefix', path:'/studio-api', handler }))` | 所有 HTTP 路由（约 112 条） | 前端全 404，面板空壳 |
+| `ctx.inject(['webServer'], ctx => ctx.webServer.register({ kind:'prefix', path:'/studio-api', handler }))` | 所有 HTTP 路由（125 条，含 `/suite/*`、`/coding/gitlab`、`/requirement/impact`、`/task/design`） | 前端全 404，面板空壳 |
 | `ctx.inject(['agents','sessionController','workspaceRegistry','permissionPresets','agentDefaultModel'], …)` | 派单引擎 `Dispatcher`：起会话、发指令、收 `agent/status` 事件 | 派单报「这一列还没人负责」或会话永远 idle |
 | `ctx.agents.create / resume / get / list / abort` | 一卡一会话（`studio-<taskId>-<expertId>`） | 会话起不来；`has no provider/model`；槽位泄漏 |
 | `ctx.agents.create({ agentOptions:{ provider, model }, setup })` + `agentPresets.resolve(id)` + `presets.mount(scope, id)` | 三件缺一不可，否则没有 shell/文件工具 | agent 只会说话、改不了代码 |
@@ -60,7 +60,7 @@
 | 网络可达 GitLab | MR 回写、流水线状态 | 「集成健康」四通道 |
 | `systemd` 单元 `dsh-web` | 常驻与重启 | `systemctl is-active dsh-web` |
 
-文件布局：插件目录 `/home/lyf/dsh-studio`（git clone），数据 `~/.dsh/dsh-studio.db`、密钥 `~/.dsh/dsh-studio.secrets.json`、技能 `~/.dsh/skills/<name>/SKILL.md`、会话日志 `~/.dsh/sessions/<workspace>/studio-*/session.v4.jsonl.zstd`。
+文件布局：插件目录由安装方式决定（npm 装在 profile 的 `node_modules`，本地开发是 `~/dsh-studio`），数据 `~/.dsh/dsh-studio.db`、密钥 `~/.dsh/dsh-studio.secrets.json`、技能 `~/.dsh/skills/<name>/SKILL.md`、会话日志 `~/.dsh/sessions/<workspace>/studio-*/session.v4.jsonl.zstd`。
 
 ## 5. 升级 dsh 的验证 runbook
 
@@ -72,6 +72,8 @@
 4. 工具数：`/studio-api/state` 之外，问 agent「你有哪些 studio 工具」应能看到 `studio_task_create` 等；或查 `/studio-api/tools` 若存在。
 5. 派单一次：在看板对一张卡点「马上处理」，30 秒内该卡「讨论」应出现 agent 消息。没有 → 读会话日志找 `turn/end reason.kind=error`。
 6. 门禁：把一张未勾清单的卡推向「已完成」，应返回 400「准出没过：…」。
+6.1 设计闸门（若已开启）：设置 → 列的负责人 打开「设计闸门」，把一张没有评审记录的卡推进 `dev`，应返回 400「进开发被拦：…」。
+6.2 回归：用例页点「▶ 跑」默认套件，回归历史应新增一条，且 `/studio-api/state` 的 `revision` 递增。
 7. 拖拽：卡片拖到相邻列，`/studio-api/state` 里该卡 `status` 变化。
 8. 若任何一步失败，`journalctl -u dsh-web -n 100 --no-pager` + 浏览器 console + 会话日志三处取证，再决定是降级 dsh 还是适配本插件。
 
