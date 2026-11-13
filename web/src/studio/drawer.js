@@ -858,8 +858,8 @@ function Drawer({ task, state, onClose, onChanged }) {
                     className: 'ds-btn ds-btn-ghost', disabled: busy || verify.busy,
                     onClick: () => void verifyCoding(),
                   }, verify.busy ? '核对中…' : (verify.line === '' ? '核对代码事实' : '再核对一次')),
-                h('button', { className: 'ds-btn ds-btn-ghost', disabled: busy, title: '拉 MR 的改动与流水线，和自报的文件数/提交数比一遍', onClick: () => void verifyGitlab() }, '从 GitLab 核对'),
                 ),
+                h('button', { className: 'ds-btn ds-btn-ghost', disabled: busy, title: '拉 MR 的改动与流水线，和自报的文件数/提交数比一遍', onClick: () => void verifyGitlab() }, '从 GitLab 核对'),
               ),
               verify.line === ''
                 ? (coding.verified === null || coding.verified === undefined
