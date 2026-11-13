@@ -121,6 +121,7 @@ export const ACTION_ITEMS = [
   { id: 'card-advance', label: '把卡片推进到下一列', hint: '选一张卡 → 推进到下一状态', keys: '推进 advance 下一列 换列 移动 move card' },
   { id: 'card-dispatch', label: '把卡片派给专家', hint: '选一张卡 → 选一位专家跑起来', keys: '派单 dispatch assign 执行 run 专家 expert card' },
   { id: 'card-comment', label: '给卡片留言', hint: '选一张卡 → 写一句讨论', keys: '留言 comment 讨论 评论 card' },
+  { id: 'clear-recents', label: '忘掉最近用过的动作', hint: '清空这台电脑上记的最近动作顺序', keys: '清除 清空 忘掉 重置 最近 recent clear reset' },
   { id: 'column-advance', label: '整列推进一列', hint: '选一列 → 把这一列的卡批量推进到下一列', keys: '整列 批量 批量推进 column batch advance' },
   { id: 'refresh', label: '刷新数据', hint: '重新拉一次看板与需求', keys: '刷新 refresh 重载 同步' },
   ...SETTINGS_PANES.map((pane) => ({ id: 'settings:' + pane.id, label: '打开设置：' + pane.label, hint: '设置 → ' + pane.label, keys: '设置 settings 配置 ' + pane.label + ' ' + pane.id })),
@@ -157,6 +158,15 @@ export const RECENT_ACTIONS_KEY = 'dsh-studio:recent-actions'
 export const RECENT_LIMIT = 6
 
 /** 把刚用过的动作记到最前面（保持去重与上限）。 */
+/** 清空本机记录的最近动作；localStorage 不可用时静默跳过。 */
+export function forgetRecents() {
+  try {
+    globalThis.localStorage?.removeItem(RECENT_ACTIONS_KEY)
+  } catch {
+    // 隐身模式或存储被禁用时忽略
+  }
+}
+
 export function rememberAction(recents, id, limit = RECENT_LIMIT) {
   const next = [id, ...(Array.isArray(recents) ? recents : []).filter((entry) => entry !== id)]
   return next.slice(0, limit)
@@ -345,6 +355,8 @@ export function createPalette({ h, React }) {
     const pick = (item) => {
       if (item === undefined) return
       if (flow === null) {
+        // 「忘掉最近用过」自己不进最近记录，否则刚清完又冒出来
+        if (item.id === 'clear-recents') { forgetRecents(); onClose(); return }
         remember(item)
         if (item.kind === 'action' && CARD_FLOWS[item.id] !== undefined) { start(item.id); return }
         onPick(item)
