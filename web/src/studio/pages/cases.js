@@ -66,12 +66,12 @@ export function CasesPage({ state, onOpenTask }) {
   })
   const selectAllRunnable = () => setSelected(new Set(runnable.map(row => row.key)))
   const clearSelection = () => setSelected(new Set())
-  const runSelected = async () => {
-    if (picked.length === 0) { setNote('先勾几条带接口定义的用例再跑（手工用例没有 http，跑不了）'); return }
+  const runRows = async (rowsToRun) => {
+    if (rowsToRun.length === 0) { setNote('先勾几条带接口定义的用例再跑（手工用例没有 http，跑不了）'); return }
     setRunning(true)
     setNote('')
     try {
-      const out = await api('/cases/run', { keys: picked.map(row => row.key), by: '回归' })
+      const out = await api('/cases/run', { keys: rowsToRun.map(row => row.key), by: '回归' })
       const results = out?.results ?? []
       const sum = key => results.reduce((n, item) => n + (Number(item[key]) || 0), 0)
       const broke = results.filter(item => item.ok === false)
@@ -87,6 +87,10 @@ export function CasesPage({ state, onOpenTask }) {
       setRunning(false)
     }
   }
+  const failedRunnable = list.filter(row => row.http && row.result === 'fail')
+  const runSelected = () => runRows(picked)
+  // 回归最常用的动作：只补跑上次失败的那几条。
+  const runFailed = () => runRows(failedRunnable)
 
   return h('div', { className: 'ds-body' },
     h('div', { className: 'ds-panel' },
@@ -122,6 +126,7 @@ export function CasesPage({ state, onOpenTask }) {
           h('button', { className: 'ds-btn ds-btn-ghost', disabled: running || runnable.length === 0, onClick: selectAllRunnable }, `全选可跑的 ${runnable.length} 条`),
           h('button', { className: 'ds-btn ds-btn-ghost', disabled: running || selected.size === 0, onClick: clearSelection }, '清空选择'),
           h('button', { className: 'ds-btn ds-btn-primary', disabled: running || picked.length === 0, onClick: () => void runSelected() }, running ? '跑着…' : `▶ 跑选中的 ${picked.length} 条`),
+          h('button', { className: 'ds-btn', disabled: running || failedRunnable.length === 0, title: '只补跑上次不通过、且有接口定义的用例', onClick: () => void runFailed() }, `↻ 只跑上次失败的 ${failedRunnable.length} 条`),
           h('span', { className: 'ds-hint' }, '按卡串行跑，每张卡一轮；失败的照旧自动开缺陷（最多一次 60 条）'),
         ),
         note === '' ? null : h('div', { className: 'ds-hint', style: { marginTop: 6 } }, note),
