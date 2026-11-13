@@ -104,14 +104,14 @@ const SETTINGS_PANES = [
   { id: 'storage', label: '数据与备份' },
 ]
 
-/** 面板之外也能用的全局快捷键。为什么不是 Ctrl/⌘+Shift：那一档被浏览器占了
- *  （Ctrl+Shift+N 无痕窗口、Ctrl+Shift+T 重开标签页、Ctrl+Shift+D 收藏所有标签页），
- *  页面 preventDefault() 拦不住，按下去等于按了浏览器的；Ctrl/⌘+Alt 在 Chrome / Edge /
- *  Firefox 上都不冲突。 */
+/** 面板之外也能用的全局快捷键。两道坑都踩过：
+ *  - Ctrl/⌘+Shift+字母被浏览器占了（无痕窗口 / 重开标签页 / 收藏所有标签页），页面拦不住；
+ *  - Ctrl/⌘+Alt+字母被 dsh 宿主自己占了（Ctrl+Alt+N = 新会话），按下去会同时开一个会话。
+ *  所以落在这档：Ctrl/⌘+Alt+Shift+一个字母，浏览器和宿主都不认。 */
 export const SHORTCUTS = [
-  { id: 'new-requirement', key: 'n', label: 'Ctrl/⌘+Alt+N' },
-  { id: 'new-task', key: 't', label: 'Ctrl/⌘+Alt+T' },
-  { id: 'card-dispatch', key: 'd', label: 'Ctrl/⌘+Alt+D' },
+  { id: 'new-requirement', key: 'n', label: 'Ctrl/⌘+Alt+Shift+N' },
+  { id: 'new-task', key: 't', label: 'Ctrl/⌘+Alt+Shift+T' },
+  { id: 'card-dispatch', key: 'd', label: 'Ctrl/⌘+Alt+Shift+D' },
 ]
 
 const shortcutById = new Map(SHORTCUTS.map((entry) => [entry.id, entry.label]))
@@ -134,7 +134,7 @@ function inPaletteInput(target) {
 /** 从键盘事件解析出要执行的面板动作；不是快捷键、或在别的输入框里打字时返回 null。 */
 export function paletteShortcut(event) {
   if (event === null || event === undefined) return null
-  if (!(event.ctrlKey === true || event.metaKey === true) || event.altKey !== true || event.shiftKey === true) return null
+  if (!(event.ctrlKey === true || event.metaKey === true) || event.altKey !== true || event.shiftKey !== true) return null
   if (!inPaletteInput(event.target) && isTypingTarget(event.target)) return null
   // 优先用物理键位（event.code）：macOS 上 Option+字母会变成变音字符，event.key 不可靠
   const physical = /^Key([A-Z])$/.exec(String(event.code ?? ''))

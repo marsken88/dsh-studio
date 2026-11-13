@@ -319,7 +319,7 @@ test('palette: experts, teams and projects are searchable too', async () => {
 })
 test('palette: Ctrl/⌘+Alt shortcuts map to the right action and ignore foreign keys', async () => {
   const { paletteShortcut, isTypingTarget, SHORTCUTS } = await import('../web/src/studio/palette.js')
-  const key = (over) => ({ ctrlKey: true, metaKey: false, altKey: true, shiftKey: false, key: 'n', code: 'KeyN', target: null, ...over })
+  const key = (over) => ({ ctrlKey: true, metaKey: false, altKey: true, shiftKey: true, key: 'N', code: 'KeyN', target: null, ...over })
 
   assert.equal(paletteShortcut(key()), 'new-requirement')
   assert.equal(paletteShortcut(key({ code: 'KeyT', key: 't' })), 'new-task')
@@ -328,7 +328,7 @@ test('palette: Ctrl/⌘+Alt shortcuts map to the right action and ignore foreign
 
   // 组合不对、键位不在表里、事件为空，都不认
   assert.equal(paletteShortcut(key({ altKey: false })), null)
-  assert.equal(paletteShortcut(key({ shiftKey: true })), null)
+  assert.equal(paletteShortcut(key({ shiftKey: false })), null)  // Ctrl+Alt 是宿主的「新会话」，不能抢
   assert.equal(paletteShortcut(key({ ctrlKey: false, metaKey: false })), null)
   assert.equal(paletteShortcut(key({ code: 'KeyZ', key: 'z' })), null)
   assert.equal(paletteShortcut(null), null)
@@ -345,7 +345,7 @@ test('palette: Ctrl/⌘+Alt shortcuts map to the right action and ignore foreign
 
   // 标签必须和真正认的组合一致，别写着 Ctrl+Shift 却只认 Ctrl+Alt
   assert.equal(SHORTCUTS.length, 3)
-  for (const entry of SHORTCUTS) assert.match(entry.label, /^Ctrl\/⌘\+Alt\+[A-Z]$/)
+  for (const entry of SHORTCUTS) assert.match(entry.label, /^Ctrl\/⌘\+Alt\+Shift\+[A-Z]$/)
   assert.equal(isTypingTarget(null), false)
   assert.equal(isTypingTarget({ tagName: 'input' }), true)
 })
@@ -354,9 +354,9 @@ test('palette: actions carry their shortcut so a row can print it', async () => 
   const { actionItems, filterItems } = await import('../web/src/studio/palette.js')
   const items = actionItems()
   const byId = new Map(items.map((item) => [item.id, item]))
-  assert.equal(byId.get('new-requirement').shortcut, 'Ctrl/⌘+Alt+N')
-  assert.equal(byId.get('new-task').shortcut, 'Ctrl/⌘+Alt+T')
-  assert.equal(byId.get('card-dispatch').shortcut, 'Ctrl/⌘+Alt+D')
+  assert.equal(byId.get('new-requirement').shortcut, 'Ctrl/⌘+Alt+Shift+N')
+  assert.equal(byId.get('new-task').shortcut, 'Ctrl/⌘+Alt+Shift+T')
+  assert.equal(byId.get('card-dispatch').shortcut, 'Ctrl/⌘+Alt+Shift+D')
   assert.equal(byId.get('tab:board').shortcut, undefined)
   // 快捷键也要能被搜到，输 "alt" 能命中带快捷键的动作
   assert.ok(filterItems(items, 'alt').some((item) => item.id === 'new-task'))
