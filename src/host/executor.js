@@ -1279,6 +1279,8 @@ export async function updateTask(store, id, patch) {
       task.history.push({ at: task.updatedAt, by, status: task.status, note: 'unblocked' })
       blocking = 'unblocked'
     }
+    // 换列时负责人会被这一列的默认负责人覆盖，团队记忆要用「换列前」的那个人去认团。
+    const expertBefore = task.expert
     if (normalized.status !== undefined) {
       task.history.push({ at: task.updatedAt, by, status: normalized.status, ...(override !== '' ? { note: `override：${override}` } : {}) })
       // 缺陷从「已完成」被打回去 = 重开，重开次数是质量信号（谁的老毛病又犯了）。
@@ -1301,7 +1303,7 @@ export async function updateTask(store, id, patch) {
           if (owner !== undefined && typeof owner.id === 'string') task.expert = owner.id
         }
       }
-      if (previous !== task.status) moved = { from: previous, to: task.status, task: structuredClone(task), by }
+      if (previous !== task.status) moved = { from: previous, to: task.status, task: structuredClone(task), by, expertBefore }
     }
     result = task
   })
@@ -1313,9 +1315,10 @@ export async function updateTask(store, id, patch) {
         const owner = snapshot.config?.columns?.[moved.to] ?? {}
         const teams = snapshot.config?.teams ?? []
         const ownerId = owner.kind === 'team' ? String(owner.id ?? '') : ''
+        const expertId = String(moved.expertBefore ?? result.expert ?? '')
         const hit = ownerId !== ''
           ? teams.find(team => team.id === ownerId)
-          : teams.find(team => (team.members ?? []).includes(result.expert) || team.lead === result.expert)
+          : teams.find(team => (team.members ?? []).includes(expertId) || team.lead === expertId)
         if (hit !== undefined) {
           await appendTeamMemory(store, hit.id, {
             taskId: result.id,
