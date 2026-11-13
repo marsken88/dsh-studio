@@ -1734,8 +1734,27 @@ export function normalizePatch(input) {
     if (!PRIORITIES.includes(priority)) throw new Error(`unknown priority ${priority}`)
     patch.priority = priority
   }
-  for (const key of ['gitlabIssue', 'gitlabMR', 'owner', 'blockedReason', 'feishuThread']) {
+  for (const key of ['gitlabIssue', 'owner', 'blockedReason', 'feishuThread']) {
     if (input[key] !== undefined) patch[key] = text(input[key], 500) ?? ''
+  }
+  // MR 不是字符串：卡片上的 gitlabMR 是对象，之前用 text() 一律压成空串（实测存进去是 ""）。
+  // 允许传对象，也允许传 "!12" / MR 链接（从里面取 iid）。
+  if (input.gitlabMR !== undefined) {
+    const raw = input.gitlabMR
+    if (raw === null) patch.gitlabMR = null
+    else if (typeof raw === 'object') {
+      const iid = Number(raw.iid) || 0
+      patch.gitlabMR = {
+        iid: iid > 0 ? iid : 0,
+        title: text(raw.title, 200) ?? '',
+        state: text(raw.state, 20) ?? '',
+        url: text(raw.url, 500) ?? '',
+      }
+    } else {
+      const value = text(raw, 500) ?? ''
+      const match = value.match(/(\d+)/)
+      patch.gitlabMR = { iid: match === null ? 0 : Number(match[1]), title: '', state: '', url: value }
+    }
   }
   if (input.expert !== undefined) patch.expert = text(input.expert, 40) ?? ''
   if (input.domain !== undefined) patch.domain = text(input.domain, 40) ?? ''

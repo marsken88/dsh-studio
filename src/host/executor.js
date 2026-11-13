@@ -1313,7 +1313,12 @@ export async function updateTask(store, id, patch) {
         if (normalized.role === undefined) task.role = column.role
         if (normalized.expert === undefined) {
           const owner = state.config.columns?.[column.id]
-          if (owner !== undefined && typeof owner.id === 'string') task.expert = owner.id
+          // 列负责人是「候选池且没指定 id」时（现有八列全是这种），不要用空串覆盖卡上的人——
+          // 否则每次换列都会把负责人清空，质量度量的「卡数」也跟着失真。
+          if (owner !== undefined) {
+            if (typeof owner.id === 'string' && owner.id !== '') task.expert = owner.id
+            else if (owner.kind === 'none') task.expert = ''
+          }
         }
       }
       if (previous !== task.status) moved = { from: previous, to: task.status, task: structuredClone(task), by, expertBefore }

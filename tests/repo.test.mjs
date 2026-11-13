@@ -410,6 +410,17 @@ test('host: artifacts leave the poll without their bodies', async () => {
   assert.equal(artifact.content, body, 'the stored artifact must not be stripped in place')
 })
 
+test('host: a merge request survives the patch normalizer', async () => {
+  const { normalizePatch } = await import('../src/host/domain.js')
+  const fromObject = normalizePatch({ gitlabMR: { iid: 42, title: 'feat: x', state: 'opened', url: 'https://git/x/-/merge_requests/42' } })
+  assert.equal(fromObject.gitlabMR.iid, 42)
+  assert.equal(fromObject.gitlabMR.state, 'opened')
+  const fromString = normalizePatch({ gitlabMR: '!7 https://git/x/-/merge_requests/7' })
+  assert.equal(fromString.gitlabMR.iid, 7)
+  const cleared = normalizePatch({ gitlabMR: null })
+  assert.equal(cleared.gitlabMR, null)
+})
+
 test('config: every default key survives a merge round trip', async () => {
   const { defaultConfig, mergeConfig } = await import('../src/host/domain.js')
   const base = defaultConfig()
