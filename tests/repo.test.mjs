@@ -410,6 +410,22 @@ test('host: artifacts leave the poll without their bodies', async () => {
   assert.equal(artifact.content, body, 'the stored artifact must not be stripped in place')
 })
 
+test('host: coding facts compare the self-reported numbers with the MR', async () => {
+  const { compareCodingFacts } = await import('../src/host/gitlab-facts.js')
+  const coding = { files: [{ path: 'a.js' }, { path: 'b.js' }], commits: [{ sha: '1' }] }
+  const mr = { state: 'opened', title: 'feat: x' }
+  const detail = { pipeline: { status: 'success' }, changes: { files: [{ path: 'a.js' }], commits: 3 } }
+  const facts = compareCodingFacts(coding, mr, detail, 1700000000000)
+  assert.equal(facts.state, 'opened')
+  assert.equal(facts.pipeline, 'success')
+  assert.deepEqual(facts.files, { declared: 2, actual: 1 })
+  assert.deepEqual(facts.commits, { declared: 1, actual: 3 })
+  assert.equal(facts.mismatches.length, 2)
+  const clean = compareCodingFacts({ files: [{ path: 'a.js' }], commits: [] }, mr, { pipeline: null, changes: { files: [{ path: 'a.js' }], commits: 0 } }, 1)
+  assert.deepEqual(clean.mismatches, [])
+  assert.equal(clean.pipeline, null)
+})
+
 test('host: quality counts rework from backwards moves, failures and reopens', async () => {
   const { taskRework, buildQuality } = await import('../src/host/quality.js')
   assert.equal(taskRework({ history: [{ status: 'clarify' }, { status: 'dev' }] }).rework, false)

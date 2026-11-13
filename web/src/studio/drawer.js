@@ -462,6 +462,18 @@ function Drawer({ task, state, onClose, onChanged }) {
       setVerify({ busy: false, line: cause instanceof Error ? cause.message : String(cause), ok: false })
     }
   }
+  // 从 GitLab 核对：拉 MR 的 changes 与流水线，和卡上自报的值比一遍（没配 GitLab 会直接提示）。
+  const verifyGitlab = async () => {
+    setBusy(true); setError(null); setNotice(null)
+    try {
+      const out = await api('/coding/gitlab', { id: task.id })
+      const facts = out?.facts ?? null
+      setNotice(facts === null
+        ? '核对完成，但没有拿到结果'
+        : `GitLab 核对：文件 ${facts.files.declared}→${facts.files.actual} · 提交 ${facts.commits.declared}→${facts.commits.actual}${facts.pipeline ? ` · 流水线 ${facts.pipeline}` : ''}${(facts.mismatches ?? []).length > 0 ? ` · ⚠ ${facts.mismatches.join('；')}` : ' · ✅ 一致'}`)
+      await onChanged()
+    } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)) } finally { setBusy(false) }
+  }
 
   const columnLabel = (state.statuses.find(item => item.id === task.status) ?? {}).label ?? task.status
   const assignee = task.dispatch?.expert ? ownerLabel(state.config ?? {}, { kind: 'expert', id: task.dispatch.expert }) : ''
@@ -846,6 +858,7 @@ function Drawer({ task, state, onClose, onChanged }) {
                     className: 'ds-btn ds-btn-ghost', disabled: busy || verify.busy,
                     onClick: () => void verifyCoding(),
                   }, verify.busy ? '核对中…' : (verify.line === '' ? '核对代码事实' : '再核对一次')),
+                h('button', { className: 'ds-btn ds-btn-ghost', disabled: busy, title: '拉 MR 的改动与流水线，和自报的文件数/提交数比一遍', onClick: () => void verifyGitlab() }, '从 GitLab 核对'),
                 ),
               ),
               verify.line === ''

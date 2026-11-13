@@ -1,6 +1,7 @@
 import { CODING_REVIEW_STATUS, cleanId, mergeCoding, sanitizeCoding } from '../domain.js'
 import { clearAgentFailure, noteAgentFailure } from '../dispatcher.js'
 import { codingVerifyLine, runCommand, taskExitGate, verifyCodingRecord } from '../executor.js'
+import { compareCodingFacts } from '../gitlab-facts.js'
 const INJECTED = ["applyConfig","ensureWorktree","publicState","readJsonBody","removeWorktree","sendJson","serviceOf","upsertById","workProjectOf"]
 let host = {
   applyConfig: () => {},
@@ -19,6 +20,31 @@ export function configureCodingRoutes(services) {
 }
 
 export async function handleCodingRoute({ method, route, req, res, store, url }) {
+if (method === 'POST' && route === '/coding/gitlab') {
+  // 从 GitLab 核对：拉 MR + changes，和卡上自报的文件数/提交数比一遍，结果记进 coding.gitlab。
+  const body = await host.readJsonBody(req)
+  const id = String(body.id ?? '')
+  const snapshot = store.snapshot()
+  const task = snapshot.tasks.find(t => t.id === id)
+  if (task === undefined) throw new Error(`no task ${id}`)
+  const iid = Number(task.gitlabMR?.iid ?? 0)
+  if (iid <= 0) throw new Error('这张卡还没关联 MR：先提 MR，把 !iid 填进卡片的 GitLab 区块')
+  const config = snapshot.config
+  const projects = config.gitlab?.projects ?? []
+  const project = projects.find(item => item.id === task.gitlabProject) ?? projects[0]
+  if (project === undefined) throw new Error('还没配 GitLab 项目（设置 → 代码仓库）')
+  const mr = await host.gitlabRequest(config, project, `/merge_requests/${iid}`)
+  const detail = await host.gitlabMergeRequestDetail(config, project, iid)
+  const facts = compareCodingFacts(task.coding, mr, detail)
+  await store.mutate(state => {
+    const target = state.tasks.find(t => t.id === id)
+    if (target === undefined) return
+    target.coding = { ...(target.coding ?? {}), gitlab: facts }
+    target.updatedAt = Date.now()
+  })
+  host.sendJson(res, 200, { ok: true, facts, state: host.publicState(store) })
+  return true
+}
 if (method === 'POST' && route === '/task/coding') {
   const body = await host.readJsonBody(req)
   const id = String(body.id ?? '')

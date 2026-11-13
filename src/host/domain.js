@@ -1567,6 +1567,24 @@ export function sanitizeCoding(raw) {
     },
     mergedBy: String(raw.mergedBy ?? '').slice(0, 40),
     mergedAt: Number(raw.mergedAt) || 0,
+    // 最近一次「从 GitLab 核对」的结果（MR 状态 / 流水线 / 文件数与提交数）；没核对过就是 null。
+    gitlab: raw.gitlab === null || raw.gitlab === undefined || typeof raw.gitlab !== 'object'
+      ? null
+      : {
+        at: Number(raw.gitlab.at) || 0,
+        state: String(raw.gitlab.state ?? '').slice(0, 20),
+        title: String(raw.gitlab.title ?? '').slice(0, 200),
+        pipeline: raw.gitlab.pipeline === null || raw.gitlab.pipeline === undefined ? null : String(raw.gitlab.pipeline).slice(0, 20),
+        files: {
+          declared: Math.max(0, Number(raw.gitlab.files?.declared) || 0),
+          actual: Math.max(0, Number(raw.gitlab.files?.actual) || 0),
+        },
+        commits: {
+          declared: Math.max(0, Number(raw.gitlab.commits?.declared) || 0),
+          actual: Math.max(0, Number(raw.gitlab.commits?.actual) || 0),
+        },
+        mismatches: (Array.isArray(raw.gitlab.mismatches) ? raw.gitlab.mismatches : []).map(item => String(item).slice(0, 120)).slice(0, 6),
+      },
     // 最近一次「执行记录 vs 代码事实」的核对结果；没核对过就是 null。
     verified: raw.verified === null || raw.verified === undefined || typeof raw.verified !== 'object'
       ? null
