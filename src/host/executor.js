@@ -9,6 +9,8 @@ import { designGate } from './design.js'
 import { RUN_LOG, parseMentions } from './dispatcher.js'
 import { appendTeamMemory } from './team-memory.js'
 import { pickRunner, registerRunner } from './runners.js'
+import { runDbCase } from './db-runner.js'
+import { emitEvent } from './events.js'
 import { runShellCase } from './shell-runner.js'
 import { homedir } from 'node:os'
 import { join, resolve } from 'node:path'
@@ -199,6 +201,7 @@ export async function runOneCase(item, env, config, seedVars) {
 registerRunner('http', { match: item => item.http != null, run: (item, env, config, seedVars) => runHttpCase(item, env, config, seedVars) })
 // shell 后注册 = 匹配优先级更高：两条都填的时候按 shell 跑（它是显式选择）。
 registerRunner('shell', { match: item => item.shell != null, run: (item, env, config) => runShellCase(item, config) })
+registerRunner('db', { match: item => item.db != null, run: (item, env, config) => runDbCase(item, config) })
 
 async function runHttpCase(item, env, config, seedVars) {
   const started = Date.now()
@@ -1340,7 +1343,10 @@ export async function updateTask(store, id, patch) {
           }
         }
       }
-      if (previous !== task.status) moved = { from: previous, to: task.status, task: structuredClone(task), by, expertBefore }
+      if (previous !== task.status) {
+        moved = { from: previous, to: task.status, task: structuredClone(task), by, expertBefore }
+        emitEvent('task/moved', { taskId: task.id, code: task.code ?? '', title: task.title, from: previous, to: task.status, by, expert: task.expert ?? '' })
+      }
     }
     result = task
   })

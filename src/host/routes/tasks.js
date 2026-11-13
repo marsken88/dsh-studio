@@ -270,7 +270,8 @@ export async function handleTaskRoute({ method, route, req, res, store, url }) {
     const body = await host.readJsonBody(req)
     const allKeys = (Array.isArray(body.keys) ? body.keys : []).map(String).filter(key => key.length > 0)
     if (allKeys.length === 0) throw new Error('先勾几条用例再跑')
-    if (allKeys.length > 60) throw new Error(`一次最多跑 60 条（这次勾了 ${allKeys.length} 条）：分两次跑，或者把它存成套件`)
+    const maxRun = store.snapshot().config.limits?.runKeys ?? 60
+    if (allKeys.length > maxRun) throw new Error(`一次最多跑 ${maxRun} 条（这次勾了 ${allKeys.length} 条）：分两次跑，或者把它存成套件`)
     const keys = allKeys
     const out = await runCaseKeys(store, keys, { env: body.env, by: String(body.by ?? '回归') })
     host.sendJson(res, 200, { ok: true, ...out, state: host.publicState(store) })
@@ -383,7 +384,8 @@ export async function handleTaskRoute({ method, route, req, res, store, url }) {
         if (created === undefined) throw new Error('交付物至少要有标题')
         created.by = String(body.by ?? created.by ?? '')
         created.at = Date.now()
-        if (task.artifacts.length >= 40) throw new Error('一张卡最多 40 个交付物：先删掉过期的再加')
+        const maxArtifacts = store.snapshot().config.limits?.artifactsPerTask ?? 40
+        if (task.artifacts.length >= maxArtifacts) throw new Error(`一张卡最多 ${maxArtifacts} 个交付物：先删掉过期的再加`)
         task.artifacts = [...task.artifacts, created]
       } else if (action === 'remove') {
         task.artifacts = task.artifacts.filter(item => item.id !== String(body.artifactId ?? ''))
@@ -513,7 +515,8 @@ export async function handleTaskRoute({ method, route, req, res, store, url }) {
         task.updatedAt = Date.now()
         return task
       }
-      if (list.length > 60) throw new Error(`一张卡最多 60 条用例（这次是 ${list.length} 条）：先删掉不用的再加，别让它被静默截断`)
+      const maxCases = store.snapshot().config.limits?.casesPerTask ?? 60
+      if (list.length > maxCases) throw new Error(`一张卡最多 ${maxCases} 条用例（这次是 ${list.length} 条）：先删掉不用的再加，别让它被静默截断`)
       task.cases = list
       task.updatedAt = Date.now()
       return task

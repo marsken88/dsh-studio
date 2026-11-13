@@ -1,14 +1,9 @@
-/**
- * dsh-studio — domain layer.
- *
- * Board columns, card / requirement / release shapes, their sanitizers, the
- * default settings, and the code-number generators. Pure data and validation:
- * no filesystem, no host services, no HTTP. Everything here is unit-testable.
- *
- * @module dsh-studio/src/host/domain
- */
+/** dsh-studio 的领域层：板列、卡片/需求/发布的数据形状与清洗、默认配置、编号生成。纯函数，可单测。 */
 import { createHash, randomBytes } from 'node:crypto'
+import { sanitizeDbCase } from './db-runner.js'
+import { sanitizeWebhooks } from './webhooks.js'
 import { sanitizeCaseShell } from './shell-case.js'
+import { LIMIT_DEFAULTS, sanitizeLimits } from './limits.js'
 import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
 
@@ -212,6 +207,10 @@ export function defaultConfig() {
     templates: defaultTemplates(),
     gitlab: { url: '', token: '', group: '', project: '', syncEnabled: false, syncLabel: '', lastSyncAt: 0, lastSyncError: '', projects: [] },
     feishu: { appId: '', appSecret: '', chatId: '', baseToken: '', tableId: '', webhook: '', notifyOnChange: true, bots: [], driveFolder: 'IuJPfTCtWlDrzwdCFmLc71aynbg', autoSyncArtifacts: true, escalateWebhook: '', escalateAfter: 3 },
+    /** 出站 webhook：卡片流转/用例失败/派单失败推给外部系统。 */
+    webhooks: [],
+    /** 数量上限：以前是硬编码在路由里的 60/60/40，超了静默丢。 */
+    limits: { ...LIMIT_DEFAULTS },
     /** 设计评审闸门：打开后，卡进 columns 里的列之前设计必须 approved。 */
     design: { enabled: false, columns: ['dev'] },
     /** 成本闸门：只统计「跑了多少次、花了多少机上时间」，宿主没把 token 用量回传给插件。 */
@@ -438,6 +437,8 @@ export function mergeConfig(saved) {
     access: sanitizeAccess(saved.access),
     sla: sanitizeSla(saved.sla),
     costs: sanitizeCosts(saved.costs),
+    limits: sanitizeLimits(saved.limits),
+    webhooks: sanitizeWebhooks(saved.webhooks),
     // 设计闸门：加了这个键就必须在这里也列一遍，否则重启一次配置就被 mergeConfig 抹掉。
     design: (() => {
       const merged = { ...base.design, ...(saved.design !== null && typeof saved.design === 'object' ? saved.design : {}) }
@@ -1278,6 +1279,7 @@ export function sanitizeCase(raw, index) {
       at: 0,
       http: null,
       shell: null,
+      db: null,
       lastRun: null,
     }
   }
@@ -1291,6 +1293,7 @@ export function sanitizeCase(raw, index) {
     id: String(raw.id ?? '').trim() || `c${index + 1}-${randomBytes(2).toString('hex')}`,
     title,
     shell: sanitizeCaseShell(raw.shell),
+    db: sanitizeDbCase(raw.db),
     expected: String(raw.expected ?? '').trim().slice(0, 300),
     pointId: String(raw.pointId ?? '').trim().slice(0, 24),
     result,
@@ -1448,10 +1451,11 @@ export function sanitizeAllowHosts(input) {
 }
 
 /** 测试执行配置：环境、默认环境、超时、允许的域名。 */
+
 export function sanitizeTesting(raw) {
   // allowShell 默认关：开了等于把「在宿主机执行任意命令」的能力交给看板。
 
-  const base = { envs: [], defaultEnv: '', timeoutMs: 15000, allowHosts: ['127.0.0.1', 'localhost'], concurrency: 4, allowShell: false, shellCwd: '' }
+  const base = { envs: [], defaultEnv: '', timeoutMs: 15000, allowHosts: ['127.0.0.1', 'localhost'], concurrency: 4, allowShell: false, shellCwd: '', allowDb: false }
   if (raw === null || typeof raw !== 'object') return base
   const envs = sanitizeEnvs(raw.envs)
   const defaultEnv = String(raw.defaultEnv ?? '').trim()
@@ -1461,6 +1465,7 @@ export function sanitizeTesting(raw) {
     timeoutMs: Math.max(1000, Math.min(120000, Number(raw.timeoutMs) || base.timeoutMs)),
     allowHosts: sanitizeAllowHosts(raw.allowHosts ?? base.allowHosts),
     allowShell: raw.allowShell === true,
+    allowDb: raw.allowDb === true,
     shellCwd: String(raw.shellCwd ?? '').slice(0, 300),
     concurrency: Math.max(1, Math.min(8, Number(raw.concurrency) || base.concurrency)),
   }

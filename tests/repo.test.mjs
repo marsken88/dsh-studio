@@ -410,11 +410,67 @@ test('host: artifacts leave the poll without their bodies', async () => {
   assert.equal(artifact.content, body, 'the stored artifact must not be stripped in place')
 })
 
+test('host: events fan out and webhook config is sanitized', async () => {
+  const { subscribe, emitEvent, subscriberCount } = await import('../src/host/events.js')
+  const { sanitizeWebhooks } = await import('../src/host/webhooks.js')
+  const seen = []
+  const off = subscribe(event => seen.push(event.type))
+  const before = subscriberCount()
+  emitEvent('task/moved', { taskId: 't1' })
+  emitEvent('case/failed', { caseId: 'c1' })
+  assert.deepEqual(seen, ['task/moved', 'case/failed'])
+  off()
+  assert.equal(subscriberCount(), before - 1)
+  emitEvent('task/moved', {})
+  assert.equal(seen.length, 2, 'unsubscribed handler stops receiving')
+  // 一个坏订阅者不能影响其它订阅者
+  const good = []
+  const bad = subscribe(() => { throw new Error('boom') })
+  const ok = subscribe(event => good.push(event.type))
+  emitEvent('agent/failed', {})
+  assert.deepEqual(good, ['agent/failed'])
+  bad(); ok()
+  assert.deepEqual(sanitizeWebhooks([{ url: '  ', events: [] }]), [], 'empty url dropped')
+  const hooks = sanitizeWebhooks([{ url: 'http://x/hook', events: ['task/moved', 'nope'] }])
+  assert.deepEqual(hooks[0].events, ['task/moved'])
+  assert.equal(hooks[0].id, 'hook-1')
+})
+
+test('host: db cases are refused until enabled, then really run', async () => {
+  const { mkdtemp, rm } = await import('node:fs/promises')
+  const { tmpdir } = await import('node:os')
+  const { join } = await import('node:path')
+  const { DatabaseSync } = await import('node:sqlite')
+  const { runDbCase, sanitizeDbCase } = await import('../src/host/db-runner.js')
+  assert.equal(sanitizeDbCase({ sql: 'select 1' }), null, 'file is required')
+  assert.equal(sanitizeDbCase({ file: '/tmp/x.db', sql: '  ' }), null)
+  const dir = await mkdtemp(join(tmpdir(), 'dsh-studio-db-'))
+  const file = join(dir, 'probe.db')
+  const seed = new DatabaseSync(file)
+  seed.exec('create table t (id integer primary key, name text)')
+  seed.exec("insert into t (name) values ('alpha')")
+  seed.close()
+  try {
+    const item = { db: sanitizeDbCase({ file, sql: 'select name from t', expectRows: 1, expectColumn: 'name', expectValue: 'alpha' }) }
+    const off = await runDbCase(item, { testing: {} })
+    assert.equal(off.ok, false)
+    assert.match(off.error, /没开数据库用例/)
+    const on = await runDbCase(item, { testing: { allowDb: true } })
+    assert.equal(on.ok, true, on.error)
+    assert.match(on.preview, /alpha/)
+    const bad = await runDbCase({ db: sanitizeDbCase({ file, sql: 'select name from t', expectRows: 2 }) }, { testing: { allowDb: true } })
+    assert.equal(bad.ok, false)
+    assert.match(bad.error, /行数 1/)
+  } finally {
+    await rm(dir, { recursive: true, force: true, maxRetries: 3, retryDelay: 50 }).catch(() => {})
+  }
+})
+
 test('host: runners register and are picked by their match', async () => {
   const { registerRunner, pickRunner, runnerKinds } = await import('../src/host/runners.js')
   registerRunner('http', { match: item => item.http != null, run: () => ({ ok: true, status: 200 }) })
   registerRunner('shell', { match: item => item.shell != null, run: () => ({ ok: true, status: 0 }) })
-  assert.deepEqual([...runnerKinds()].sort(), ['http', 'shell'], 'both built-ins stay registered')
+  assert.deepEqual([...runnerKinds()].sort(), ['db', 'http', 'shell'], 'all built-ins stay registered')
   assert.equal(pickRunner({ shell: {} }).kind, 'shell')
   assert.equal(pickRunner({ http: {} }).kind, 'http')
   assert.equal(pickRunner({ http: {}, shell: {} }).kind, 'shell', 'shell wins when a case carries both')
