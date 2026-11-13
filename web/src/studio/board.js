@@ -4,6 +4,9 @@
 import { ROLE_LABEL, TYPE_LABEL } from './labels.js'
 import { artifactsWithoutBody, buildRoster, filterRoster, ownerLabel } from './roster.js'
 
+/** 每列先渲染这么多张；上千张卡时 DOM 会先炸，而不是服务端。 */
+const COLUMN_PAGE = 40
+
 export function createBoard({ h, React, Card, TextField, SelectField, CheckField, toast }) {
 function Board({ state, onOpen, onMove, onWip }) {
   const config = state.config ?? {}
@@ -18,6 +21,8 @@ function Board({ state, onOpen, onMove, onWip }) {
   const [hideEmpty, setHideEmpty] = React.useState(false)
   const [onlyBlocked, setOnlyBlocked] = React.useState(false)
   const [onlyNoBody, setOnlyNoBody] = React.useState(false)
+  // 每列当前渲染到第几张；点「显示更多」一页一页加。
+  const [shown, setShown] = React.useState({})
   const projects = config.projects ?? []
   const activeProject = projects.find(item => item.id === projectFilter)
   const byStatus = React.useMemo(() => {
@@ -173,7 +178,7 @@ function Board({ state, onOpen, onMove, onWip }) {
           h('div', { className: 'ds-col-body' },
             tasks.length === 0
               ? h('div', { className: 'ds-empty' }, query !== '' || expertFilter !== '' ? '没有匹配的卡' : '暂无任务')
-              : tasks.map(task => h(Card, {
+              : tasks.slice(0, shown[column.id] ?? COLUMN_PAGE).map(task => h(Card, {
                   key: task.id,
                   task,
                   onOpen,
@@ -182,6 +187,13 @@ function Board({ state, onOpen, onMove, onWip }) {
                   onPickRequirement: id => setRequirementFilter(current => (current === id ? '' : id)),
                   onPickProject: id => { setProjectFilter(current => (current === id ? '' : id)); setIterationFilter('') },
                 })),
+            tasks.length > (shown[column.id] ?? COLUMN_PAGE)
+              ? h('button', {
+                className: 'ds-btn ds-btn-ghost',
+                style: { width: '100%', marginTop: 6, fontSize: 12 },
+                onClick: () => setShown(previous => ({ ...previous, [column.id]: (previous[column.id] ?? COLUMN_PAGE) + COLUMN_PAGE })),
+              }, `显示更多（还有 ${tasks.length - (shown[column.id] ?? COLUMN_PAGE)} 张）`)
+              : null,
           ),
         )
       }),

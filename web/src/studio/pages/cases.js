@@ -17,6 +17,7 @@ export function CasesPage({ state, onOpenTask }) {
   const [running, setRunning] = React.useState(false)
   const [note, setNote] = React.useState('')
   const [regressions, setRegressions] = React.useState([])
+  const [openDetail, setOpenDetail] = React.useState(null)
 
   const refresh = React.useCallback(async () => {
     try {
@@ -145,22 +146,37 @@ export function CasesPage({ state, onOpenTask }) {
           : list.length === 0
             ? h('div', { className: 'ds-empty' }, '没有符合条件的用例。用例登记在卡片详情的「测试」里。')
             : h('div', { className: 'ds-case-lib' },
-              list.map(row => h('div', {
-                key: row.key,
-                className: 'ds-case-lib-row',
-                'data-result': row.result,
-                title: '打开所属卡片',
-                onClick: () => onOpenTask(row.taskId),
-              },
-                h('span', { className: 'ds-case-lib-pick', onClick: event => event.stopPropagation() },
-                  h(CheckField, { checked: selected.has(row.key), disabled: running || !row.http, onChange: () => toggle(row.key) }),
+              list.map(row => h('div', { key: row.key, className: 'ds-case-lib-wrap' },
+                h('div', {
+                  className: 'ds-case-lib-row',
+                  'data-result': row.result,
+                  title: '打开所属卡片',
+                  onClick: () => onOpenTask(row.taskId),
+                },
+                  h('span', { className: 'ds-case-lib-pick', onClick: event => event.stopPropagation() },
+                    h(CheckField, { checked: selected.has(row.key), disabled: running || !row.http, onChange: () => toggle(row.key) }),
+                  ),
+                  h('span', { className: 'ds-case-lib-result' }, CASE_RESULT_LABEL[row.result] ?? row.result),
+                  h('span', { className: 'ds-case-lib-title' }, row.title),
+                  h('span', { className: 'ds-case-lib-meta' }, `${row.taskCode || row.taskId} · ${row.requirementTitle || '未挂需求'}${row.pointId ? ' · ' + row.pointId : ''}`),
+                  h('span', { className: 'ds-case-lib-meta' }, row.http ? '接口' : '手工'),
+                  h('span', { className: 'ds-case-lib-pri' }, row.priority),
+                  h('span', { className: 'ds-case-lib-at' }, row.lastRunAt > 0 ? fmtTime(row.lastRunAt) : '没跑过'),
+                  h('button', {
+                    className: 'ds-btn ds-btn-ghost ds-case-lib-more',
+                    title: '看最近一次执行的明细',
+                    onClick: event => { event.stopPropagation(); setOpenDetail(openDetail === row.key ? null : row.key) },
+                  }, openDetail === row.key ? '收起' : '明细'),
                 ),
-                h('span', { className: 'ds-case-lib-result' }, CASE_RESULT_LABEL[row.result] ?? row.result),
-                h('span', { className: 'ds-case-lib-title' }, row.title),
-                h('span', { className: 'ds-case-lib-meta' }, `${row.taskCode || row.taskId} · ${row.requirementTitle || '未挂需求'}${row.pointId ? ' · ' + row.pointId : ''}`),
-                h('span', { className: 'ds-case-lib-meta' }, row.http ? '接口' : '手工'),
-                h('span', { className: 'ds-case-lib-pri' }, row.priority),
-                h('span', { className: 'ds-case-lib-at' }, row.lastRunAt > 0 ? fmtTime(row.lastRunAt) : '没跑过'),
+                openDetail === row.key
+                  ? h('div', { className: 'ds-case-lib-detail' },
+                    h('div', null, `期望：${row.expected || '—'}`),
+                    h('div', null, `最近一次：${row.note || (row.lastRunAt > 0 ? '只有结果，没有记录' : '还没跑过')}`),
+                    row.lastError === '' ? null : h('div', { className: 'ds-err' }, `错误：${row.lastError}`),
+                    row.lastPreview === '' ? null : h('pre', { className: 'ds-case-lib-preview' }, row.lastPreview),
+                    h('div', { className: 'ds-hint' }, `用例编号 ${row.id} · 所属卡片 ${row.taskCode || row.taskId}`),
+                  )
+                  : null,
               )),
             ),
       ),

@@ -5,6 +5,7 @@ import { CODE_PREFIX, ROLE_IDS, STATUS_IDS, STATUSES, nextRequirementCode, nextT
   canonicalAuthor,
 } from './domain.js'
 import { RUN_LOG, parseMentions } from './dispatcher.js'
+import { appendTeamMemory } from './team-memory.js'
 import { homedir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises'
@@ -1305,6 +1306,28 @@ export async function updateTask(store, id, patch) {
     result = task
   })
   if (moved !== null) {
+    // 卡进「完成」：把这条经验记进它所属专家团的团队记忆（下次派活会带进提示词）。
+    if (moved.to === 'done') {
+      try {
+        const snapshot = store.snapshot()
+        const owner = snapshot.config?.columns?.[moved.to] ?? {}
+        const teams = snapshot.config?.teams ?? []
+        const ownerId = owner.kind === 'team' ? String(owner.id ?? '') : ''
+        const hit = ownerId !== ''
+          ? teams.find(team => team.id === ownerId)
+          : teams.find(team => (team.members ?? []).includes(result.expert) || team.lead === result.expert)
+        if (hit !== undefined) {
+          await appendTeamMemory(store, hit.id, {
+            taskId: result.id,
+            title: result.title,
+            outcome: result.type === 'bug' ? '修完的缺陷' : '做完的卡',
+            note: String(result.signoff?.note ?? '').slice(0, 200),
+          })
+        }
+      } catch {
+        /* 记不下团队记忆不能影响卡推进 */
+      }
+    }
     try { host.broadcastChange(store, moved.task, moved.from, moved.to, moved.by) } catch (error) {
       host.INTEGRATION.lastPushError = String(error?.message ?? error).slice(0, 300)
     }

@@ -43,6 +43,31 @@ test('store: boots, persists and reloads a state file', async () => {
   }
 })
 
+test('store: team memory appends, caps and clears through the side key', async () => {
+  const { mkdtemp, rm } = await import('node:fs/promises')
+  const { tmpdir } = await import('node:os')
+  const { join } = await import('node:path')
+  const { appendTeamMemory, clearTeamMemory, loadTeamMemory } = await import('../src/host/team-memory.js')
+  const { StudioStore, SecretStore } = await import('../src/host/store.js')
+  const dir = await mkdtemp(join(tmpdir(), 'dsh-studio-team-'))
+  const store = new StudioStore(join(dir, 'dsh-studio.json'), { dbFile: join(dir, 'dsh-studio.db'), secrets: new SecretStore(join(dir, '.secrets.json')) })
+  try {
+    await store.ready
+    const rev = store.snapshot().revision
+    await appendTeamMemory(store, 'team-1', { taskId: 't1', title: '第一张卡', outcome: '做完的卡' })
+    await appendTeamMemory(store, 'team-1', { taskId: 't2', title: '第二张卡', outcome: '修完的缺陷' })
+    const all = await loadTeamMemory(store)
+    assert.equal(all['team-1'].length, 2)
+    assert.equal(all['team-1'][0].title, '第二张卡', 'newest first')
+    assert.equal(store.snapshot().revision, rev, 'team memory must not bump the revision')
+    await clearTeamMemory(store, 'team-1')
+    assert.deepEqual(await loadTeamMemory(store), {})
+  } finally {
+    try { store.db?.close?.() } catch { /* already closed */ }
+    await rm(dir, { recursive: true, force: true, maxRetries: 3, retryDelay: 50 }).catch(() => {})
+  }
+})
+
 test('store: side values survive a restart without bumping the revision', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'dsh-studio-side-'))
   let store, again

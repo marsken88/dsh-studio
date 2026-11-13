@@ -266,6 +266,21 @@ export function TeamsPanel({ config, onChanged }) {
   const [draft, setDraft] = React.useState(null)
   const [error, setError] = React.useState(null)
   const [busy, setBusy] = React.useState(false)
+  // 团级记忆：卡做完/缺陷修完会自动记一条，派活时会带进专家提示词。
+  const [memory, setMemory] = React.useState({})
+  React.useEffect(() => {
+    let alive = true
+    void api('/team/memory', {}).then(out => { if (alive) setMemory(out?.memory ?? {}) }).catch(() => {})
+    return () => { alive = false }
+  }, [config.teams])
+  const clearMemory = async team => {
+    if (!(await confirmDialog('清空「' + team.name + '」的团队记忆？', { title: '清空团队记忆', danger: true, okText: '清空' }))) return
+    try {
+      const out = await api('/team/memory/clear', { teamId: team.id })
+      setMemory(out?.memory ?? {})
+      toast('已清空这个团的记忆')
+    } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)) }
+  }
   const nameOf = id => {
     const found = experts.find(expert => expert.id === id)
     return found === undefined ? id : `${found.emoji} ${found.name}`
@@ -288,8 +303,12 @@ export function TeamsPanel({ config, onChanged }) {
     h('div', { className: 'ds-listrow-main' },
       h('div', {}, `👥 ${team.name}`),
       h('div', { className: 'ds-hint' }, `团长 ${nameOf(team.lead)} · 成员 ${team.members.map(nameOf).join('、')}`),
+      h('div', { className: 'ds-hint' }, (memory[team.id] ?? []).length === 0
+        ? '🧠 团队记忆：还没有（卡做完会自动记一条，派活时带进提示词）'
+        : `🧠 团队记忆 ${memory[team.id].length} 条 · 最近：${memory[team.id][0]?.outcome ?? ''} ${memory[team.id][0]?.title ?? ''}`),
     ),
     h('div', { className: 'ds-listrow-actions' },
+      tipOf('清空这个团的记忆', h('button', { className: 'ds-btn ds-btn-ghost', disabled: busy || (memory[team.id] ?? []).length === 0, onClick: () => void clearMemory(team) }, '清空记忆')),
       tipOf('编辑这个专家团', h('button', { className: 'ds-btn', disabled: busy, onClick: () => setDraft({ ...team }) }, '编辑')),
       tipOf('删除这个专家团', h('button', { className: 'ds-btn', disabled: busy, onClick: () => void remove(team), 'data-danger': '1' }, '删除')),
     ),

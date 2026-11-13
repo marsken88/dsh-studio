@@ -50,6 +50,11 @@ export function collectCases(state) {
         pointId: item.pointId ?? '',
         http: item.http !== null && item.http !== undefined,
         lastRunAt: item.lastRun?.at ?? 0,
+        // 失败时最想看的三样：错在哪、返回了什么、上一次的结论文案。
+        lastError: String(item.lastRun?.error ?? '').slice(0, 300),
+        lastStatus: Number(item.lastRun?.status) || 0,
+        lastPreview: String(item.lastRun?.preview ?? '').slice(0, 400),
+        note: String(item.note ?? '').slice(0, 300),
         taskId: task.id,
         taskTitle: task.title ?? '',
         taskCode: task.code ?? '',

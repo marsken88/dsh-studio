@@ -1,5 +1,6 @@
 import { randomBytes } from 'node:crypto'
 import { collectCases, groupCaseKeys, summarizeRun } from '../cases.js'
+import { clearTeamMemory, loadTeamMemory } from '../team-memory.js'
 import {
   CASE_HTTP_METHODS,
   CASE_PRIORITIES,
@@ -240,6 +241,17 @@ export async function handleTaskRoute({ method, route, req, res, store, url }) {
       /* 记不下来不影响这次跑的结果 */
     }
     host.sendJson(res, 200, { ok: true, results, regression: record, state: host.publicState(store) })
+    return true
+  }
+  if (method === 'POST' && route === '/team/memory') {
+    // 团级记忆是 side 键，单独取；纯读。
+    host.sendJson(res, 200, { ok: true, memory: await loadTeamMemory(store) })
+    return true
+  }
+  if (method === 'POST' && route === '/team/memory/clear') {
+    const body = await host.readJsonBody(req)
+    await clearTeamMemory(store, String(body.teamId ?? ''))
+    host.sendJson(res, 200, { ok: true, memory: await loadTeamMemory(store) })
     return true
   }
   if (method === 'POST' && route === '/cases') {

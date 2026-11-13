@@ -1,5 +1,6 @@
 // ------------------------------------------------------------------ dispatcher
 import { DEFAULT_ROLES, FALLBACK_AGENT_MODEL, ROLE_IDS, SANDBOX_MODES, STATUSES, codingSummary, normalizeStrategy, worktreeRoot } from './domain.js'
+import { loadTeamMemory, teamMemoryBlock } from './team-memory.js'
 import { mkdir } from 'node:fs/promises'
 import { randomBytes } from 'node:crypto'
 import { homedir } from 'node:os'
@@ -614,7 +615,13 @@ export class Dispatcher {
         at: Date.now(),
       })
       const requirement = this.store.snapshot().requirements.find(entry => entry.id === task.requirementId)
-      const prompt = buildExpertPrompt(task, expert, column, config, resolved.team, extra.instruction, requirement, this.store.snapshot())
+      // 团级记忆：这个团最近经手过什么，接活前先看一眼。
+      let teamMemory = []
+      if (resolved.team !== undefined) {
+        const memory = await loadTeamMemory(this.store).catch(() => ({}))
+        teamMemory = Array.isArray(memory[resolved.team.id]) ? memory[resolved.team.id] : []
+      }
+      const prompt = buildExpertPrompt(task, expert, column, config, resolved.team, extra.instruction, requirement, this.store.snapshot(), teamMemory)
       const via = await this.deliver(agent, sessionId, prompt)
       this.deliveryVia = via
       this.lastError = ''
@@ -783,7 +790,7 @@ export class Dispatcher {
 }
 
 /** The work order one expert (or a whole team) receives. */
-export function buildExpertPrompt(task, expert, column, config, team, instruction, requirement, state) {
+export function buildExpertPrompt(task, expert, column, config, team, instruction, requirement, state, teamMemory = []) {
   const recent = (task.comments ?? []).slice(-6).map(entry => `- [${entry.author}] ${entry.body}`).join('\n')
   const members = team === undefined
     ? ''
@@ -801,6 +808,7 @@ export function buildExpertPrompt(task, expert, column, config, team, instructio
       return known === undefined ? name : `${name}（${known.description}）`
     }).join('、')}。需要时调用 skill 工具加载对应技能，再按其说明操作。` : '',
     team !== undefined ? `\n你在「${team.name}」专家团里协作，本团成员：\n${members}` : '',
+    teamMemoryBlock(teamMemory),
     '',
     `任务号：${task.id}${task.code ? `（${task.code}）` : ''}`,
     `标题：${task.title}`,

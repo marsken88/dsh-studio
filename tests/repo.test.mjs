@@ -410,6 +410,19 @@ test('host: artifacts leave the poll without their bodies', async () => {
   assert.equal(artifact.content, body, 'the stored artifact must not be stripped in place')
 })
 
+test('host: the team memory block only lists what the team actually did', async () => {
+  const { teamMemoryBlock } = await import('../src/host/team-memory.js')
+  assert.equal(teamMemoryBlock([]), '')
+  assert.equal(teamMemoryBlock(null), '')
+  const block = teamMemoryBlock([
+    { outcome: '做完的卡', title: '导出进度展示', note: '踩过 33.3% 取整的坑' },
+    { outcome: '修完的缺陷', title: '库存超卖', note: '' },
+  ])
+  assert.match(block, /导出进度展示（踩过 33\.3% 取整的坑）/)
+  assert.match(block, /库存超卖/)
+  assert.equal(teamMemoryBlock([{ outcome: 'x', title: 'y' }], 0), '')
+})
+
 test('host: a regression summary adds up the per-card results', async () => {
   const { summarizeRun } = await import('../src/host/cases.js')
   const record = summarizeRun([

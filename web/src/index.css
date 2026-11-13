@@ -1401,9 +1401,13 @@ html body [data-dsh-studio][data-dsh-studio-portal] {
 [data-dsh-studio] .ds-reg-item { font-size: 11px; padding: 1px 8px; border-radius: 999px; border: 1px solid var(--ds-line, #e4e4e7); background: var(--ds-surface-2, #f4f4f5); color: var(--ds-muted, #71717a); white-space: nowrap }
 [data-dsh-studio] .ds-reg-item[data-bad="1"] { border-color: #f3c0c2; background: #fdf2f2; color: #b42318 }
 [data-dsh-studio] .ds-case-lib { display: flex; flex-direction: column }
-[data-dsh-studio] .ds-case-lib-row { display: grid; grid-template-columns: 26px 88px minmax(0, 1fr) 220px 56px 40px 92px; gap: 10px; align-items: center; padding: 7px 10px; border-bottom: 1px solid var(--ds-line, #e4e4e7); cursor: pointer; font-size: 13px }
+[data-dsh-studio] .ds-case-lib-row { display: grid; grid-template-columns: 26px 88px minmax(0, 1fr) 220px 56px 40px 92px 56px; gap: 10px; align-items: center; padding: 7px 10px; border-bottom: 1px solid var(--ds-line, #e4e4e7); cursor: pointer; font-size: 13px }
 [data-dsh-studio] .ds-case-lib-row:hover { background: color-mix(in srgb, var(--ds-accent, #18181b) 6%, transparent) }
 [data-dsh-studio] .ds-case-lib-row[data-result="fail"] { background: color-mix(in srgb, #e5484d 8%, transparent) }
+[data-dsh-studio] .ds-case-lib-wrap { border-bottom: 1px solid var(--ds-line, #e4e4e7) }
+[data-dsh-studio] .ds-case-lib-wrap .ds-case-lib-row { border-bottom: 0 }
+[data-dsh-studio] .ds-case-lib-detail { padding: 8px 12px 10px 36px; background: var(--ds-surface-2, #f4f4f5); font-size: 12px; line-height: 1.6; color: var(--ds-muted, #71717a) }
+[data-dsh-studio] .ds-case-lib-preview { margin: 6px 0 0; padding: 8px 10px; max-height: 180px; overflow: auto; background: var(--ds-surface, #fff); border: 1px solid var(--ds-line, #e4e4e7); border-radius: 8px; font-size: 11px; white-space: pre-wrap; word-break: break-word }
 [data-dsh-studio] .ds-case-lib-pick { display: flex; align-items: center; justify-content: center }
 [data-dsh-studio] .ds-case-lib-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap }
 [data-dsh-studio] .ds-case-lib-meta, [data-dsh-studio] .ds-case-lib-at { color: var(--ds-muted, #71717a); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap }
