@@ -1096,6 +1096,21 @@ export function sanitizeChecklist(input) {
   }
   return out
 }
+/** 把 "taskId:caseId" 的键按卡分组（跨卡回归就是这么拆成一轮一轮跑的）；坏键直接丢掉。 */
+export function groupCaseKeys(keys) {
+  const byTask = new Map()
+  for (const key of Array.isArray(keys) ? keys : []) {
+    const raw = String(key ?? '')
+    const at = raw.indexOf(':')
+    if (at <= 0 || at === raw.length - 1) continue
+    const taskId = raw.slice(0, at)
+    const caseId = raw.slice(at + 1)
+    if (!byTask.has(taskId)) byTask.set(taskId, [])
+    byTask.get(taskId).push(caseId)
+  }
+  return byTask
+}
+
 /** 跨卡用例总览：把每张卡上的用例摊成一张表，带上卡片与需求的上下文。纯函数，方便单测。 */
 export function collectCases(state) {
   const requirementById = new Map((state?.requirements ?? []).map(item => [item.id, item]))

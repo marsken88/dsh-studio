@@ -10,6 +10,7 @@ import {
   cleanId,
   collectCases,
   defaultColumns,
+  groupCaseKeys,
   sanitizeArtifact,
   sanitizeCaseHttp,
   sanitizeCases,
@@ -192,6 +193,36 @@ export async function handleTaskRoute({ method, route, req, res, store, url }) {
     // 卡没了，替它跑着的会话也要收摊，否则槽位一直被占着。
     host.getDispatcher()?.abortTask?.(id)
     host.sendJson(res, 200, { ok: true, state: host.publicState(store) })
+    return true
+  }
+  if (method === 'POST' && route === '/cases/run') {
+    // 跨卡回归：勾中的用例按卡分组，一张卡一轮（执行器本来就是按卡跑的），再汇总。
+    const body = await host.readJsonBody(req)
+    const keys = (Array.isArray(body.keys) ? body.keys : []).map(String).filter(key => key.length > 0).slice(0, 60)
+    if (keys.length === 0) throw new Error('先勾几条用例再跑')
+    const grouped = groupCaseKeys(keys)
+    if (grouped.size === 0) throw new Error('没有可跑的用例')
+    const by = String(body.by ?? '回归').slice(0, 40)
+    const results = []
+    for (const [taskId, caseIds] of grouped) {
+      try {
+        const out = await host.runTaskCases(store, taskId, { caseIds, env: body.env, by })
+        const card = store.snapshot().tasks.find(entry => entry.id === taskId)
+        results.push({
+          taskId,
+          taskCode: card?.code ?? '',
+          taskTitle: card?.title ?? '',
+          ok: true,
+          total: out.run.total,
+          passed: out.run.passed,
+          failed: out.run.failed,
+          bugs: (out.bugs ?? []).filter(item => item.created === true).length,
+        })
+      } catch (error) {
+        results.push({ taskId, ok: false, error: String(error?.message ?? error).slice(0, 200) })
+      }
+    }
+    host.sendJson(res, 200, { ok: true, results, state: host.publicState(store) })
     return true
   }
   if (method === 'POST' && route === '/cases') {

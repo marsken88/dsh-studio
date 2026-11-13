@@ -410,6 +410,16 @@ test('host: artifacts leave the poll without their bodies', async () => {
   assert.equal(artifact.content, body, 'the stored artifact must not be stripped in place')
 })
 
+test('host: case keys group by card and bad keys drop out', async () => {
+  const { groupCaseKeys } = await import('../src/host/domain.js')
+  const grouped = groupCaseKeys(['t1:c1', 't1:c2', 't2:c9', 'broken', ':c1', 't3:'])
+  assert.deepEqual([...grouped.keys()], ['t1', 't2'])
+  assert.deepEqual(grouped.get('t1'), ['c1', 'c2'])
+  assert.deepEqual(grouped.get('t2'), ['c9'])
+  assert.equal(groupCaseKeys([]).size, 0)
+  assert.equal(groupCaseKeys(null).size, 0)
+})
+
 test('host: the case library flattens cards with their context', async () => {
   const { collectCases } = await import('../src/host/domain.js')
   const state = {

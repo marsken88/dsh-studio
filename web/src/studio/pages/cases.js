@@ -7,12 +7,15 @@ import { CASE_RESULTS, CASE_RESULT_LABEL } from '../labels.js'
 import { fmtTime } from '../format.js'
 
 export function CasesPage({ state, onOpenTask }) {
-  const { h, React, api, TextField, SelectField, ChipField } = client()
+  const { h, React, api, TextField, SelectField, ChipField, CheckField } = client()
   const [rows, setRows] = React.useState(null)
   const [error, setError] = React.useState(null)
   const [query, setQuery] = React.useState('')
   const [requirement, setRequirement] = React.useState('__all__')
   const [result, setResult] = React.useState('__all__')
+  const [selected, setSelected] = React.useState(() => new Set())
+  const [running, setRunning] = React.useState(false)
+  const [note, setNote] = React.useState('')
 
   const refresh = React.useCallback(async () => {
     try {
@@ -49,6 +52,38 @@ export function CasesPage({ state, onOpenTask }) {
   }, [list])
 
   const requirements = state.requirements ?? []
+  const runnable = list.filter(row => row.http)
+  const picked = runnable.filter(row => selected.has(row.key))
+
+  const toggle = key => setSelected(previous => {
+    const next = new Set(previous)
+    if (next.has(key)) next.delete(key)
+    else next.add(key)
+    return next
+  })
+  const selectAllRunnable = () => setSelected(new Set(runnable.map(row => row.key)))
+  const clearSelection = () => setSelected(new Set())
+  const runSelected = async () => {
+    if (picked.length === 0) { setNote('先勾几条带接口定义的用例再跑（手工用例没有 http，跑不了）'); return }
+    setRunning(true)
+    setNote('')
+    try {
+      const out = await api('/cases/run', { keys: picked.map(row => row.key), by: '回归' })
+      const results = out?.results ?? []
+      const sum = key => results.reduce((n, item) => n + (Number(item[key]) || 0), 0)
+      const broke = results.filter(item => item.ok === false)
+      const parts = [`跑了 ${results.length} 张卡 / ${sum('total')} 条：通过 ${sum('passed')}，不通过 ${sum('failed')}`]
+      if (sum('bugs') > 0) parts.push(`自动开缺陷 ${sum('bugs')} 张`)
+      if (broke.length > 0) parts.push(`${broke.length} 张卡报错：${broke[0].error ?? ''}`)
+      setNote(parts.join('，'))
+      setSelected(new Set())
+      await refresh()
+    } catch (cause) {
+      setNote(cause instanceof Error ? cause.message : String(cause))
+    } finally {
+      setRunning(false)
+    }
+  }
 
   return h('div', { className: 'ds-body' },
     h('div', { className: 'ds-panel' },
@@ -80,6 +115,13 @@ export function CasesPage({ state, onOpenTask }) {
             CASE_RESULTS.map(value => h('option', { key: value, value }, CASE_RESULT_LABEL[value])),
           ),
         ),
+        h('div', { className: 'ds-row', style: { marginTop: 8 } },
+          h('button', { className: 'ds-btn ds-btn-ghost', disabled: running || runnable.length === 0, onClick: selectAllRunnable }, `全选可跑的 ${runnable.length} 条`),
+          h('button', { className: 'ds-btn ds-btn-ghost', disabled: running || selected.size === 0, onClick: clearSelection }, '清空选择'),
+          h('button', { className: 'ds-btn ds-btn-primary', disabled: running || picked.length === 0, onClick: () => void runSelected() }, running ? '跑着…' : `▶ 跑选中的 ${picked.length} 条`),
+          h('span', { className: 'ds-hint' }, '按卡串行跑，每张卡一轮；失败的照旧自动开缺陷（最多一次 60 条）'),
+        ),
+        note === '' ? null : h('div', { className: 'ds-hint', style: { marginTop: 6 } }, note),
         error !== null ? h('div', { className: 'ds-err' }, error) : null,
         rows === null
           ? h('div', { className: 'ds-hint', style: { padding: '10px 2px' } }, '载入用例…')
@@ -93,6 +135,9 @@ export function CasesPage({ state, onOpenTask }) {
                 title: '打开所属卡片',
                 onClick: () => onOpenTask(row.taskId),
               },
+                h('span', { className: 'ds-case-lib-pick', onClick: event => event.stopPropagation() },
+                  h(CheckField, { checked: selected.has(row.key), disabled: running || !row.http, onChange: () => toggle(row.key) }),
+                ),
                 h('span', { className: 'ds-case-lib-result' }, CASE_RESULT_LABEL[row.result] ?? row.result),
                 h('span', { className: 'ds-case-lib-title' }, row.title),
                 h('span', { className: 'ds-case-lib-meta' }, `${row.taskCode || row.taskId} · ${row.requirementTitle || '未挂需求'}${row.pointId ? ' · ' + row.pointId : ''}`),
