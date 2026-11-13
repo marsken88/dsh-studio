@@ -218,9 +218,36 @@ export async function markDispatch(store, id, dispatch) {
  */
 export const RUN_LOG = []
 
+// 运行日志落盘：quality 的「派单次数 / 平均耗时」靠它，只放内存的话重启就归零。
+// 同样走 side 键，不占 state、不涨 revision；写是去抖的，一次派单不会写一次盘。
+const RUNS_KEY = 'agent-runs'
+let runStore = null
+let runTimer = null
+
+/** 开机时把上次的派单日志读回来；store 没就绪也能调，readSide 自己会等。 */
+export function attachRunLog(store) {
+  if (store === null || store === undefined) return
+  runStore = store
+  void store.readSide(RUNS_KEY).then(saved => {
+    if (!Array.isArray(saved) || saved.length === 0) return
+    if (RUN_LOG.length > 0) return
+    RUN_LOG.push(...saved.slice(0, 300))
+  }).catch(() => { /* 读不回来就按空的重来 */ })
+}
+
+function flushRunLog() {
+  if (runStore === null || runTimer !== null) return
+  runTimer = setTimeout(() => {
+    runTimer = null
+    void runStore.writeSide(RUNS_KEY, RUN_LOG.slice(0, 300)).catch(() => {})
+  }, 1500)
+  runTimer.unref?.()
+}
+
 export function recordRun(entry) {
   RUN_LOG.unshift({ ...entry, at: Number(entry.at) || Date.now(), doneAt: 0, ms: 0 })
   if (RUN_LOG.length > 300) RUN_LOG.length = 300
+  flushRunLog()
   return RUN_LOG[0]
 }
 
@@ -229,6 +256,7 @@ export function settleRun(sessionId) {
   if (entry === undefined) return
   entry.doneAt = Date.now()
   entry.ms = Math.max(0, entry.doneAt - entry.at)
+  flushRunLog()
 }
 
 export function runSummary() {

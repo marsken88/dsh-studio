@@ -43,6 +43,29 @@ test('store: boots, persists and reloads a state file', async () => {
   }
 })
 
+test('store: the dispatch run log restores from its side key', async () => {
+  const { mkdtemp, rm } = await import('node:fs/promises')
+  const { tmpdir } = await import('node:os')
+  const { join } = await import('node:path')
+  const { StudioStore, SecretStore } = await import('../src/host/store.js')
+  const { attachRunLog, RUN_LOG } = await import('../src/host/dispatcher.js')
+  const dir = await mkdtemp(join(tmpdir(), 'dsh-studio-runs-'))
+  const store = new StudioStore(join(dir, 'dsh-studio.json'), { dbFile: join(dir, 'dsh-studio.db'), secrets: new SecretStore(join(dir, '.secrets.json')) })
+  try {
+    await store.ready
+    await store.writeSide('agent-runs', [{ taskId: 't-run-1', expert: 'dev', at: 1, doneAt: 2, ms: 1 }])
+    RUN_LOG.length = 0
+    attachRunLog(store)
+    await new Promise(resolve => setTimeout(resolve, 150))
+    assert.equal(RUN_LOG.length, 1, 'runs come back after a restart')
+    assert.equal(RUN_LOG[0].taskId, 't-run-1')
+  } finally {
+    RUN_LOG.length = 0
+    try { store.db?.close?.() } catch { /* already closed */ }
+    await rm(dir, { recursive: true, force: true, maxRetries: 3, retryDelay: 50 }).catch(() => {})
+  }
+})
+
 test('store: suites round-trip and keep exactly one default', async () => {
   const { mkdtemp, rm } = await import('node:fs/promises')
   const { tmpdir } = await import('node:os')
