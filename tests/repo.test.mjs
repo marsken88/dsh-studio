@@ -213,7 +213,8 @@ test('client: studio modules only use names they declare, import or receive', ()
       ...[...rawCode.matchAll(/import \{([^}]*)\}/g)].flatMap((m) => m[1].split(',').map((part) => part.trim().split(/\s+as\s+/).pop())),
       ...[...rawCode.matchAll(/export function create\w+\(\{([^}]*)\}\)/g)].flatMap((m) => m[1].split(',').map((part) => part.trim())),
       ...[...rawCode.matchAll(/export function create\w+\(([^){]*)\)/g)].flatMap((m) => m[1].split(',').map((part) => part.trim()).filter((part) => part !== '')),
-      ...[...rawCode.matchAll(/const \{([^}]*)\} = client\(\)/g)].flatMap((m) => m[1].split(',').map((part) => part.trim()).filter((part) => part !== '')),
+      // 从 client() 或自己收到的 ctx 解构出来的名字都算「已有」
+      ...[...rawCode.matchAll(/const \{([^}]*)\} = [A-Za-z_$][\w$]*(?:\([^)]*\))?/g)].flatMap((m) => m[1].split(',').map((part) => part.trim().split(':').pop().trim()).filter((part) => part !== '')),
     ])
     const check = (used) => {
       if (!known.has(used) || own.has(used)) return

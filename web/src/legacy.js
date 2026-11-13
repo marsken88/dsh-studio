@@ -15,7 +15,7 @@ import { createCard } from './studio/card.js'
 import { createBoard } from './studio/board.js'
 import { createMentionPicker } from './studio/mentions.js'
 import { createDrawer } from './studio/drawer.js'
-import { createPalette, nextStatusOf } from './studio/palette.js'
+import { advanceColumn, createPalette, nextStatusOf, runPaletteAction } from './studio/palette.js'
 import { parseSteps } from './studio/cases.js'
 import { provideClient } from './studio/context.js'
 import { createEditor } from './studio/editor.js'
@@ -2142,51 +2142,11 @@ function installKeyboardActivation() {
       const [settingsSection, setSettingsSection] = React.useState('experts')
       const [openId, setOpenId] = React.useState(null)
       const [creating, setCreating] = React.useState(false)
-      /** 命令面板里「先选动作、再选卡」的动作真正落地。 */
-      async function runPaletteAction(item) {
-        const statuses = state?.statuses ?? []
-        const statusLabel = id => (statuses.find(entry => entry.id === id)?.label ?? id)
-        const card = (state?.tasks ?? []).find(entry => entry.id === item.cardId)
-        const cardName = card === undefined ? item.cardId : ((card.code ?? '') + ' ' + card.title).trim()
-        try {
-          if (item.action === 'card-advance') {
-            const next = nextStatusOf(state, item.cardId)
-            if (next === null) { toast('这张卡已经在最后一列了', 'error'); return }
-            await api('/task/update', { id: item.cardId, status: next })
-            toast('已把「' + cardName + '」推进到「' + statusLabel(next) + '」')
-            await reload(true)
-            setOpenId(item.cardId)
-            return
-          }
-          if (item.action === 'card-advance-note') {
-            const next = nextStatusOf(state, item.cardId)
-            if (next === null) { toast('这张卡已经在最后一列了', 'error'); return }
-            const note = await promptDialog('推进「' + cardName + '」到「' + statusLabel(next) + '」并留一句话', { title: '推进并留言', placeholder: '例如：评审通过，转测试' })
-            if (note === null || String(note).trim() === '') return
-            await api('/task/comment', { id: item.cardId, body: String(note).trim() })
-            await api('/task/update', { id: item.cardId, status: next })
-            toast('已推进到「' + statusLabel(next) + '」并留言')
-            await reload(true)
-            setOpenId(item.cardId)
-            return
-          }
-          if (item.action === 'card-dispatch') {
-            const expert = (state?.config?.experts ?? []).find(entry => entry.id === item.expertId)
-            await api('/agents/run', { id: item.cardId, expert: item.expertId })
-            toast('已派给 ' + (expert === undefined ? item.expertId : expert.emoji + expert.name))
-            await reload(true)
-            return
-          }
-          if (item.action === 'card-comment') {
-            const body = await promptDialog('给「' + cardName + '」留一句话', { title: '卡片留言', placeholder: '例如：压测已通过，可以进评审' })
-            if (body === null || String(body).trim() === '') return
-            await api('/task/comment', { id: item.cardId, body: String(body).trim() })
-            toast('留言已发到「' + cardName + '」')
-            await reload(true)
-          }
-        } catch (cause) {
-          toast(cause instanceof Error ? cause.message : String(cause), 'error')
-        }
+      /** 命令面板里「先选动作、再选卡」的动作真正落地（逻辑在 palette.js，这里只执行副作用）。 */
+      async function applyPaletteAction(item) {
+        const effect = await runPaletteAction(item, { api, state, confirm: confirmDialog, prompt: promptDialog, notify: toast })
+        if (effect.refresh === true) await reload(true)
+        if (effect.open !== undefined) setOpenId(effect.open)
       }
       // 统一的「新建」入口：一个按钮弹出「需求 / 任务」两项，两个页面不再各放一个。
       const [newMenu, setNewMenu] = React.useState(false)
@@ -2442,7 +2402,7 @@ function installKeyboardActivation() {
               state,
               onClose: () => setPaletteOpen(false),
               onPick: item => {
-                if (item.kind === 'run') { void runPaletteAction(item); return }
+                if (item.kind === 'run') { void applyPaletteAction(item); return }
                 if (item.kind === 'task') { setOpenId(item.id); return }
                 if (item.kind === 'requirement') { setTab('requirements'); setFocusReq({ id: item.id, at: Date.now() }); return }
                 if (item.kind === 'release') { setTab('releases'); return }

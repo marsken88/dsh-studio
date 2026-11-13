@@ -136,15 +136,15 @@ test('palette: filterItems matches words, ranks prefixes first and stops when em
 test('palette: actions are searchable next to records', async () => {
   const { actionItems, paletteItems } = await import('../web/src/studio/palette.js')
   const actions = actionItems()
-  assert.equal(actions.length, 33)
-  assert.equal(new Set(actions.map((item) => item.id)).size, 33, 'action ids must be unique')
+  assert.equal(actions.length, 34)
+  assert.equal(new Set(actions.map((item) => item.id)).size, 34, 'action ids must be unique')
   for (const item of actions) {
     assert.equal(item.kind, 'action')
     assert.ok(item.label.length > 0 && item.search.length > 0)
   }
   const state = { tasks: [{ id: 't1', code: 'DEV-001', title: '退款对账', status: 'dev' }], requirements: [], releases: [], statuses: [{ id: 'dev', label: '开发中' }] }
   const all = paletteItems(state)
-  assert.equal(all.length, 34, '33 actions + one task')
+  assert.equal(all.length, 35, '34 actions + one task')
   assert.equal(filterItems(all, '新建需求')[0].id, 'new-requirement')
   assert.equal(filterItems(all, '导出')[0].kind, 'action')
   assert.equal(filterItems(all, '主题').length, 3)
@@ -181,6 +181,77 @@ test('palette: card flows resolve the next column and stop at the last one', asy
   assert.equal(nextStatusOf(state, 't-2'), null)
   assert.equal(nextStatusOf(state, 't-3'), null)
   assert.equal(nextStatusOf(state, 'missing'), null)
+})
+
+test('palette: a column plan lists its cards and the next column', async () => {
+  const { columnPlan } = await import('../web/src/studio/palette.js')
+  const state = {
+    statuses: [
+      { id: 'clarify', label: '待澄清' },
+      { id: 'design', label: '待方案' },
+      { id: 'done', label: '已完成' },
+    ],
+    tasks: [
+      { id: 't-1', status: 'design' },
+      { id: 't-2', status: 'design' },
+      { id: 't-3', status: 'clarify' },
+    ],
+  }
+  const middle = columnPlan(state, 'design')
+  assert.equal(middle.column.label, '待方案')
+  assert.equal(middle.next.label, '已完成')
+  assert.deepEqual(middle.ids, ['t-1', 't-2'])
+  assert.equal(middle.total, 2)
+
+  const last = columnPlan(state, 'done')
+  assert.equal(last.next, null)
+  assert.deepEqual(last.ids, [])
+  assert.equal(last.total, 0)
+
+  assert.equal(columnPlan(state, 'no-such-column'), null)
+})
+
+test('palette: advancing a column moves every card and reports failures', async () => {
+  const { advanceColumn } = await import('../web/src/studio/palette.js')
+  const state = {
+    statuses: [
+      { id: 'design', label: '待方案' },
+      { id: 'dev_ready', label: '待开发' },
+    ],
+    tasks: [
+      { id: 't-1', code: 'DEV-001', title: '退款对账', status: 'design' },
+      { id: 't-2', code: 'DEV-002', title: '积分抵扣', status: 'design' },
+    ],
+  }
+  const calls = []
+  const api = async (path, body) => {
+    calls.push({ path, body })
+    if (body.id === 't-2') throw new Error('准出没过：清单还有 2 项没勾')
+    return { ok: true }
+  }
+  const result = await advanceColumn({ api, state, columnId: 'design', confirm: async () => true })
+  assert.equal(result.moved, 1)
+  assert.equal(result.nextLabel, '待开发')
+  assert.equal(result.failed.length, 1)
+  assert.equal(result.failed[0].startsWith('DEV-002 积分抵扣'), true)
+  assert.deepEqual(calls.map((entry) => entry.body), [
+    { id: 't-1', status: 'dev_ready' },
+    { id: 't-2', status: 'dev_ready' },
+  ])
+
+  const canceled = await advanceColumn({ api, state, columnId: 'design', confirm: async () => false })
+  assert.equal(canceled.canceled, true)
+
+  const empty = await advanceColumn({ api, state, columnId: 'dev_ready', confirm: async () => true })
+  assert.equal(empty.error, '「待开发」已经是最后一列了')
+
+  const last = await advanceColumn({
+    api,
+    state: { statuses: [{ id: 'design', label: '待方案' }], tasks: [{ id: 't-1', status: 'design' }] },
+    columnId: 'design',
+    confirm: async () => true,
+  })
+  assert.equal(last.error, '「待方案」已经是最后一列了')
 })
 
 test('palette: skills from the library are searchable and open the right pane', async () => {

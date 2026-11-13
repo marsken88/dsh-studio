@@ -121,6 +121,7 @@ export const ACTION_ITEMS = [
   { id: 'card-advance', label: '把卡片推进到下一列', hint: '选一张卡 → 推进到下一状态', keys: '推进 advance 下一列 换列 移动 move card' },
   { id: 'card-dispatch', label: '把卡片派给专家', hint: '选一张卡 → 选一位专家跑起来', keys: '派单 dispatch assign 执行 run 专家 expert card' },
   { id: 'card-comment', label: '给卡片留言', hint: '选一张卡 → 写一句讨论', keys: '留言 comment 讨论 评论 card' },
+  { id: 'column-advance', label: '整列推进一列', hint: '选一列 → 把这一列的卡批量推进到下一列', keys: '整列 批量 批量推进 column batch advance' },
   { id: 'refresh', label: '刷新数据', hint: '重新拉一次看板与需求', keys: '刷新 refresh 重载 同步' },
   ...SETTINGS_PANES.map((pane) => ({ id: 'settings:' + pane.id, label: '打开设置：' + pane.label, hint: '设置 → ' + pane.label, keys: '设置 settings 配置 ' + pane.label + ' ' + pane.id })),
 ]
@@ -191,9 +192,98 @@ const CARD_FLOWS = {
   'card-advance-note': { step: 'card', title: '推进并留言' },
   'card-dispatch': { step: 'card', title: '派给专家' },
   'card-comment': { step: 'card', title: '给卡片留言' },
+  'column-advance': { step: 'column', title: '整列推进' },
 }
 
 /** 卡片在状态序列里的下一列；已经是最后一列时返回 null。 */
+/** 某一列的计划：这一列有哪些卡、下一列是什么；已经是最后一列时 next 为 null。 */
+export function columnPlan(state, columnId) {
+  const statuses = state.statuses ?? []
+  const index = statuses.findIndex((entry) => entry.id === columnId)
+  if (index < 0) return null
+  const ids = (state.tasks ?? []).filter((task) => task.status === columnId).map((task) => task.id)
+  return {
+    column: statuses[index],
+    next: index + 1 >= statuses.length ? null : statuses[index + 1],
+    total: ids.length,
+    ids,
+  }
+}
+
+/** 命令面板里「先选动作、再选卡」的动作真正落地；返回的 effect 由调用方执行（刷新 / 打开抽屉）。 */
+export async function runPaletteAction(item, ctx) {
+  const { api, state, confirm, prompt, notify } = ctx
+  const statuses = state?.statuses ?? []
+  const statusLabel = (id) => statuses.find((entry) => entry.id === id)?.label ?? id
+  const card = (state?.tasks ?? []).find((entry) => entry.id === item.cardId)
+  const cardName = card === undefined ? item.cardId : ((card.code ?? '') + ' ' + card.title).trim()
+  try {
+    if (item.action === 'card-advance') {
+      const next = nextStatusOf(state, item.cardId)
+      if (next === null) { notify('这张卡已经在最后一列了', 'error'); return {} }
+      await api('/task/update', { id: item.cardId, status: next })
+      notify('已把「' + cardName + '」推进到「' + statusLabel(next) + '」')
+      return { refresh: true, open: item.cardId }
+    }
+    if (item.action === 'card-advance-note') {
+      const next = nextStatusOf(state, item.cardId)
+      if (next === null) { notify('这张卡已经在最后一列了', 'error'); return {} }
+      const note = await prompt('推进「' + cardName + '」到「' + statusLabel(next) + '」并留一句话', { title: '推进并留言', placeholder: '例如：评审通过，转测试' })
+      if (note === null || String(note).trim() === '') return {}
+      await api('/task/comment', { id: item.cardId, body: String(note).trim() })
+      await api('/task/update', { id: item.cardId, status: next })
+      notify('已推进到「' + statusLabel(next) + '」并留言')
+      return { refresh: true, open: item.cardId }
+    }
+    if (item.action === 'card-dispatch') {
+      const expert = (state?.config?.experts ?? []).find((entry) => entry.id === item.expertId)
+      await api('/agents/run', { id: item.cardId, expert: item.expertId })
+      notify('已派给 ' + (expert === undefined ? item.expertId : expert.emoji + expert.name))
+      return { refresh: true }
+    }
+    if (item.action === 'card-comment') {
+      const body = await prompt('给「' + cardName + '」留一句话', { title: '卡片留言', placeholder: '例如：压测已通过，可以进评审' })
+      if (body === null || String(body).trim() === '') return {}
+      await api('/task/comment', { id: item.cardId, body: String(body).trim() })
+      notify('留言已发到「' + cardName + '」')
+      return { refresh: true }
+    }
+    if (item.action === 'column-advance') {
+      const result = await advanceColumn({ api, state, columnId: item.columnId, confirm })
+      if (result.error !== undefined) { notify(result.error, 'error'); return {} }
+      if (result.canceled === true) return {}
+      if (result.failed.length === 0) notify('已把 ' + result.moved + ' 张卡推进到「' + result.nextLabel + '」')
+      else notify('推进 ' + result.moved + ' 张，' + result.failed.length + ' 张没动：' + result.failed[0], 'error')
+      return { refresh: true }
+    }
+  } catch (cause) {
+    notify(cause instanceof Error ? cause.message : String(cause), 'error')
+  }
+  return {}
+}
+
+/** 把某一列的卡批量推进到下一列；确认、请求与失败收集都在这里，调用方只管提示。 */
+export async function advanceColumn({ api, state, columnId, confirm }) {
+  const plan = columnPlan(state, columnId)
+  if (plan === null) return { error: '没找到这一列' }
+  if (plan.next === null) return { error: '「' + plan.column.label + '」已经是最后一列了' }
+  if (plan.total === 0) return { error: '「' + plan.column.label + '」这一列没有卡' }
+  const ok = await confirm('把「' + plan.column.label + '」里的 ' + plan.total + ' 张卡一起推进到「' + plan.next.label + '」？', { title: '整列推进', okText: '推进 ' + plan.total + ' 张' })
+  if (ok !== true) return { canceled: true }
+  let moved = 0
+  const failed = []
+  for (const id of plan.ids) {
+    try {
+      await api('/task/update', { id, status: plan.next.id })
+      moved += 1
+    } catch (cause) {
+      const task = (state.tasks ?? []).find((entry) => entry.id === id)
+      failed.push(((task?.code ?? '') + ' ' + (task?.title ?? id)).trim() + '：' + (cause instanceof Error ? cause.message : String(cause)))
+    }
+  }
+  return { moved, failed, nextLabel: plan.next.label }
+}
+
 export function nextStatusOf(state, taskId) {
   const statuses = state.statuses ?? []
   const task = (state.tasks ?? []).find((entry) => entry.id === taskId)
@@ -227,11 +317,21 @@ export function createPalette({ h, React }) {
     const all = React.useMemo(() => paletteItems(state), [state])
     const cards = React.useMemo(() => searchItems(state).filter((item) => item.kind === 'task'), [state])
     const experts = React.useMemo(() => searchItems(state).filter((item) => item.kind === 'expert'), [state])
+    const columns = React.useMemo(() => (state.statuses ?? []).map((column) => ({
+      key: 'column:' + column.id,
+      kind: 'column',
+      id: column.id,
+      label: column.label,
+      hint: (state.tasks ?? []).filter((task) => task.status === column.id).length + ' 张卡',
+      search: String(column.label ?? '').toLowerCase(),
+    })), [state.statuses, state.tasks])
+
     const list = React.useMemo(() => {
       if (flow === null) return sortByRecent(filterItems(all, query), query === '' ? recents : [])
       if (flow.step === 'expert') return filterItems(experts, query)
+      if (flow.step === 'column') return filterItems(columns, query)
       return filterItems(cards, query)
-    }, [flow, all, cards, experts, query, recents])
+    }, [flow, all, cards, columns, experts, query, recents])
 
     React.useEffect(() => { inputRef.current?.focus() }, [])
     React.useEffect(() => { setActive(0) }, [query])
@@ -248,6 +348,11 @@ export function createPalette({ h, React }) {
         remember(item)
         if (item.kind === 'action' && CARD_FLOWS[item.id] !== undefined) { start(item.id); return }
         onPick(item)
+        onClose()
+        return
+      }
+      if (flow.step === 'column') {
+        onPick({ kind: 'run', action: flow.action, columnId: item.id })
         onClose()
         return
       }
@@ -284,12 +389,14 @@ export function createPalette({ h, React }) {
       ? '搜索卡片 / 需求 / 版本 / 专家 / 技能，或输入「新建」「导出」「推进」（↑↓ 选择，回车执行，Esc 关闭）'
       : flow.step === 'expert'
         ? '选一位专家（输入过滤，Esc 返回）'
-        : '选一张卡片（输入过滤，Esc 返回）'
+        : flow.step === 'column'
+          ? '选一列（输入过滤，Esc 返回）'
+          : '选一张卡片（输入过滤，Esc 返回）'
 
     const banner = flow === null
       ? null
       : h('div', { className: 'ds-palette-flow', 'data-flow': flow.step },
-        CARD_FLOWS[flow.action].title + (flow.step === 'expert' ? ' → 选一位专家' : ' → 选一张卡片'))
+        CARD_FLOWS[flow.action].title + (flow.step === 'expert' ? ' → 选一位专家' : flow.step === 'column' ? ' → 选一列' : ' → 选一张卡片'))
 
     return h('div', { className: 'ds-palette-veil', onClick: onClose },
       h('div', {
