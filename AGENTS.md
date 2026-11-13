@@ -119,6 +119,7 @@ git remote -v          # origin = ssh://git@ssh.github.com:443/marsken88/dsh-stu
 GIT_SSH_COMMAND="ssh -p 443" git push
 ```
 - 一个提交只做一件事，标题一句话说清（英文或中文均可，与既有历史保持同风格）。
+- **改完即推，不在本地攒**：每完成一件事（一个提交）就 `git push`。攒着会让三处对不上——远端、目标机 `.218` 上跑的、以及仓库里的，别人 `git clone` 拿到的还是旧版。历史上曾经一口气攒了 18 个提交才推，属于反面案例。
 - 提交前确保根 `client.js` 与 `dist/client.js` 一致（clone 下来即可安装靠的就是这一点）。
 - 版本号在 `package.json`；发布标签 `vX.Y.Z`。
 
