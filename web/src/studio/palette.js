@@ -104,9 +104,48 @@ const SETTINGS_PANES = [
   { id: 'storage', label: '数据与备份' },
 ]
 
+/** 面板之外也能用的全局快捷键。为什么不是 Ctrl/⌘+Shift：那一档被浏览器占了
+ *  （Ctrl+Shift+N 无痕窗口、Ctrl+Shift+T 重开标签页、Ctrl+Shift+D 收藏所有标签页），
+ *  页面 preventDefault() 拦不住，按下去等于按了浏览器的；Ctrl/⌘+Alt 在 Chrome / Edge /
+ *  Firefox 上都不冲突。 */
+export const SHORTCUTS = [
+  { id: 'new-requirement', key: 'n', label: 'Ctrl/⌘+Alt+N' },
+  { id: 'new-task', key: 't', label: 'Ctrl/⌘+Alt+T' },
+  { id: 'card-dispatch', key: 'd', label: 'Ctrl/⌘+Alt+D' },
+]
+
+const shortcutById = new Map(SHORTCUTS.map((entry) => [entry.id, entry.label]))
+
+/** 事件是否发生在输入框里（在输入框里打字不该触发离场动作）。 */
+export function isTypingTarget(target) {
+  if (target === null || target === undefined) return false
+  const tag = String(target.tagName ?? '').toUpperCase()
+  if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return true
+  return target.isContentEditable === true
+}
+
+/** 面板自己的输入框：在它里面按快捷键要能切动作，所以不算「正在打字」。 */
+function inPaletteInput(target) {
+  if (target === null || target === undefined) return false
+  if (typeof target.getAttribute !== 'function') return false
+  return target.getAttribute('data-palette-input') === '1'
+}
+
+/** 从键盘事件解析出要执行的面板动作；不是快捷键、或在别的输入框里打字时返回 null。 */
+export function paletteShortcut(event) {
+  if (event === null || event === undefined) return null
+  if (!(event.ctrlKey === true || event.metaKey === true) || event.altKey !== true || event.shiftKey === true) return null
+  if (!inPaletteInput(event.target) && isTypingTarget(event.target)) return null
+  // 优先用物理键位（event.code）：macOS 上 Option+字母会变成变音字符，event.key 不可靠
+  const physical = /^Key([A-Z])$/.exec(String(event.code ?? ''))
+  const key = physical === null ? String(event.key ?? '').toLowerCase() : physical[1].toLowerCase()
+  const hit = SHORTCUTS.find((entry) => entry.key === key)
+  return hit === undefined ? null : hit.id
+}
+
 export const ACTION_ITEMS = [
-  { id: 'new-requirement', label: '新建需求', hint: '需求 → 功能点 → 拆成卡', keys: '新建 需求 new requirement 提需求' },
-  { id: 'new-task', label: '新建任务', hint: '直接在看板上建一张卡', keys: '新建 任务 卡片 new task 建卡' },
+  { id: 'new-requirement', shortcut: shortcutById.get('new-requirement'), label: '新建需求', hint: '需求 → 功能点 → 拆成卡', keys: '新建 需求 new requirement 提需求' },
+  { id: 'new-task', shortcut: shortcutById.get('new-task'), label: '新建任务', hint: '直接在看板上建一张卡', keys: '新建 任务 卡片 new task 建卡' },
   { id: 'tab:board', label: '打开看板', hint: '八列泳道 · 拖拽换列', keys: '看板 board 泳道' },
   { id: 'tab:requirements', label: '打开需求', hint: '需求 · 功能点 · 文档 · 准出', keys: '需求 requirements prd' },
   { id: 'tab:releases', label: '打开版本', hint: '发布 · 灰度 · 部署记录', keys: '版本 release 发布 部署' },
@@ -119,7 +158,7 @@ export const ACTION_ITEMS = [
   { id: 'theme:system', label: '切换主题：跟随系统', hint: '跟随宿主或操作系统的深浅色', keys: '主题 系统 system theme 自动' },
   { id: 'card-advance-note', label: '推进并留言', hint: '选一张卡 → 写一句 → 推进到下一列', keys: '推进 留言 advance note 交接 换列 card' },
   { id: 'card-advance', label: '把卡片推进到下一列', hint: '选一张卡 → 推进到下一状态', keys: '推进 advance 下一列 换列 移动 move card' },
-  { id: 'card-dispatch', label: '把卡片派给专家', hint: '选一张卡 → 选一位专家跑起来', keys: '派单 dispatch assign 执行 run 专家 expert card' },
+  { id: 'card-dispatch', shortcut: shortcutById.get('card-dispatch'), label: '把卡片派给专家', hint: '选一张卡 → 选一位专家跑起来', keys: '派单 dispatch assign 执行 run 专家 expert card' },
   { id: 'card-comment', label: '给卡片留言', hint: '选一张卡 → 写一句讨论', keys: '留言 comment 讨论 评论 card' },
   { id: 'clear-recents', label: '忘掉最近用过的动作', hint: '清空这台电脑上记的最近动作顺序', keys: '清除 清空 忘掉 重置 最近 recent clear reset' },
   { id: 'column-advance', label: '整列推进一列', hint: '选一列 → 把这一列的卡批量推进到下一列', keys: '整列 批量 批量推进 column batch advance' },
@@ -134,7 +173,8 @@ export function actionItems() {
     id: action.id,
     label: action.label,
     hint: action.hint,
-    search: (action.label + ' ' + action.hint + ' ' + action.keys).toLowerCase(),
+    shortcut: action.shortcut,
+    search: (action.label + ' ' + action.hint + ' ' + action.keys + ' ' + (action.shortcut ?? '')).toLowerCase(),
   }))
 }
 
@@ -304,7 +344,7 @@ export function nextStatusOf(state, taskId) {
 }
 
 export function createPalette({ h, React }) {
-  return function Palette({ state, onPick, onClose }) {
+  return function Palette({ state, onPick, onClose, initialAction, initialSeq }) {
     const [query, setQuery] = React.useState('')
     const [active, setActive] = React.useState(0)
     const [flow, setFlow] = React.useState(null)
@@ -344,6 +384,17 @@ export function createPalette({ h, React }) {
     }, [flow, all, cards, columns, experts, query, recents])
 
     React.useEffect(() => { inputRef.current?.focus() }, [])
+
+    // 用快捷键打开时直接进到对应动作（跳到选卡那一步，或立刻执行）。
+    // 依赖 initialSeq：面板已经开着时再按另一个快捷键也要切过去，不能只认第一次。
+    React.useEffect(() => {
+      if (initialAction === undefined || initialAction === null) return
+      const item = all.find((entry) => entry.id === initialAction)
+      if (item === undefined) return
+      if (item.kind === 'action' && CARD_FLOWS[item.id] !== undefined) { start(item.id); return }
+      onPick(item)
+      onClose()
+    }, [initialSeq])
     React.useEffect(() => { setActive(0) }, [query])
 
     const start = (action) => {
@@ -442,6 +493,9 @@ export function createPalette({ h, React }) {
               h('span', { className: 'ds-palette-kind', 'data-kind': item.kind }, KIND_LABEL[item.kind] ?? item.kind),
               h('span', { className: 'ds-palette-label' }, clip(item.label, 80)),
               item.hint === '' ? null : h('span', { className: 'ds-palette-hint' }, clip((item.kind === 'action' && query === '' && recents.includes(item.id) ? '最近用过 · ' : '') + item.hint, 40)),
+              item.shortcut === undefined || item.shortcut === null
+                ? null
+                : h('span', { className: 'ds-palette-key', title: '全局快捷键' }, item.shortcut),
             )),
         ),
       ),

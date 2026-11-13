@@ -87,7 +87,7 @@ const imports = [
   "import { createBoard } from './studio/board.js'",
   "import { createMentionPicker } from './studio/mentions.js'",
   "import { createDrawer } from './studio/drawer.js'",
-  "import { advanceColumn, createPalette, nextStatusOf, runPaletteAction } from './studio/palette.js'",
+  "import { advanceColumn, createPalette, nextStatusOf, paletteShortcut, runPaletteAction } from './studio/palette.js'",
   "import { parseSteps } from './studio/cases.js'",
   "import { provideClient } from './studio/context.js'",
   "import { createEditor } from './studio/editor.js'",

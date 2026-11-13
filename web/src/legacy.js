@@ -15,7 +15,7 @@ import { createCard } from './studio/card.js'
 import { createBoard } from './studio/board.js'
 import { createMentionPicker } from './studio/mentions.js'
 import { createDrawer } from './studio/drawer.js'
-import { advanceColumn, createPalette, nextStatusOf, runPaletteAction } from './studio/palette.js'
+import { advanceColumn, createPalette, nextStatusOf, paletteShortcut, runPaletteAction } from './studio/palette.js'
 import { parseSteps } from './studio/cases.js'
 import { provideClient } from './studio/context.js'
 import { createEditor } from './studio/editor.js'
@@ -2162,12 +2162,24 @@ function installKeyboardActivation() {
       const [showLogin, setShowLogin] = React.useState(false)
       // 全局搜索：⌘K / Ctrl+K 打开，选到哪条就跳到哪条。
       const [paletteOpen, setPaletteOpen] = React.useState(false)
+      const [paletteAction, setPaletteAction] = React.useState(null)
+      const [paletteSeq, setPaletteSeq] = React.useState(0)
       const [focusReq, setFocusReq] = React.useState(null)
       React.useEffect(() => {
         const onKey = event => {
-          if (!(event.metaKey || event.ctrlKey) || String(event.key).toLowerCase() !== 'k') return
+          const word = String(event.key).toLowerCase()
+          if ((event.metaKey || event.ctrlKey) && !event.shiftKey && !event.altKey && word === 'k') {
+            event.preventDefault()
+            setPaletteAction(null)
+            setPaletteOpen(value => !value)
+            return
+          }
+          const action = paletteShortcut(event)
+          if (action === null) return
           event.preventDefault()
-          setPaletteOpen(value => !value)
+          setPaletteAction(action)
+          setPaletteSeq(value => value + 1)
+          setPaletteOpen(true)
         }
         document.addEventListener('keydown', onKey)
         return () => document.removeEventListener('keydown', onKey)
@@ -2400,7 +2412,9 @@ function installKeyboardActivation() {
         paletteOpen
           ? h(Palette, {
               state,
-              onClose: () => setPaletteOpen(false),
+              initialAction: paletteAction,
+              initialSeq: paletteSeq,
+              onClose: () => { setPaletteOpen(false); setPaletteAction(null) },
               onPick: item => {
                 if (item.kind === 'run') { void applyPaletteAction(item); return }
                 if (item.kind === 'task') { setOpenId(item.id); return }

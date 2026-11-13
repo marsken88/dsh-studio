@@ -317,3 +317,48 @@ test('palette: experts, teams and projects are searchable too', async () => {
   assert.equal(filterItems(all, '打开设置')[0].id, 'settings:projects')
   assert.equal(filterItems(all, '技能库').some((item) => item.id === 'settings:skills'), true)
 })
+test('palette: Ctrl/⌘+Alt shortcuts map to the right action and ignore foreign keys', async () => {
+  const { paletteShortcut, isTypingTarget, SHORTCUTS } = await import('../web/src/studio/palette.js')
+  const key = (over) => ({ ctrlKey: true, metaKey: false, altKey: true, shiftKey: false, key: 'n', code: 'KeyN', target: null, ...over })
+
+  assert.equal(paletteShortcut(key()), 'new-requirement')
+  assert.equal(paletteShortcut(key({ code: 'KeyT', key: 't' })), 'new-task')
+  assert.equal(paletteShortcut(key({ code: 'KeyD', key: 'd' })), 'card-dispatch')
+  assert.equal(paletteShortcut(key({ ctrlKey: false, metaKey: true, code: 'KeyT', key: 't' })), 'new-task')
+
+  // 组合不对、键位不在表里、事件为空，都不认
+  assert.equal(paletteShortcut(key({ altKey: false })), null)
+  assert.equal(paletteShortcut(key({ shiftKey: true })), null)
+  assert.equal(paletteShortcut(key({ ctrlKey: false, metaKey: false })), null)
+  assert.equal(paletteShortcut(key({ code: 'KeyZ', key: 'z' })), null)
+  assert.equal(paletteShortcut(null), null)
+  assert.equal(paletteShortcut(undefined), null)
+
+  // 在输入框里打字不触发；面板自己的输入框例外（面板开着时也要能切动作）
+  assert.equal(paletteShortcut(key({ target: { tagName: 'TEXTAREA' } })), null)
+  assert.equal(paletteShortcut(key({ target: { tagName: 'DIV', isContentEditable: true } })), null)
+  const paletteInput = { tagName: 'INPUT', getAttribute: (name) => (name === 'data-palette-input' ? '1' : null) }
+  assert.equal(paletteShortcut(key({ target: paletteInput })), 'new-requirement')
+
+  // 物理键位优先：macOS 上 Option+字母会变成变音字符，event.key 不可靠
+  assert.equal(paletteShortcut(key({ key: 'Dead', code: 'KeyN' })), 'new-requirement')
+
+  // 标签必须和真正认的组合一致，别写着 Ctrl+Shift 却只认 Ctrl+Alt
+  assert.equal(SHORTCUTS.length, 3)
+  for (const entry of SHORTCUTS) assert.match(entry.label, /^Ctrl\/⌘\+Alt\+[A-Z]$/)
+  assert.equal(isTypingTarget(null), false)
+  assert.equal(isTypingTarget({ tagName: 'input' }), true)
+})
+
+test('palette: actions carry their shortcut so a row can print it', async () => {
+  const { actionItems, filterItems } = await import('../web/src/studio/palette.js')
+  const items = actionItems()
+  const byId = new Map(items.map((item) => [item.id, item]))
+  assert.equal(byId.get('new-requirement').shortcut, 'Ctrl/⌘+Alt+N')
+  assert.equal(byId.get('new-task').shortcut, 'Ctrl/⌘+Alt+T')
+  assert.equal(byId.get('card-dispatch').shortcut, 'Ctrl/⌘+Alt+D')
+  assert.equal(byId.get('tab:board').shortcut, undefined)
+  // 快捷键也要能被搜到，输 "alt" 能命中带快捷键的动作
+  assert.ok(filterItems(items, 'alt').some((item) => item.id === 'new-task'))
+})
+

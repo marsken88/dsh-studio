@@ -35,7 +35,7 @@ sudo systemctl restart dsh-web
 | --- | --- |
 | `cd web && npm run guard` | CSS 里写回 `hsl(var(--x))`（颜色解析失败）、Radix Portal 忘记 `container={portalRoot()}`（弹层「存在但不可见」）、产物丢失门户作用域属性 |
 | `npm run smoke:store -- ~/.dsh/dsh-studio.db` | 用生产库的 `.db/-wal/-shm` 副本在本地跑真实启动路径，抓「空库能起、真库就炸」的 `ReferenceError` |
-| `npm test` | 27 条契约：manifest、产物哈希、宿主接口、跨模块导入、只读绑定赋值、迁移与文档一致性 |
+| `npm test` | 57 条契约：manifest、产物哈希、宿主接口、跨模块导入、只读绑定赋值、迁移与文档一致性、快捷键解析 |
 
 `pnpm build` 已串上守卫（`make-legacy → guard --pre → vite build → sync-client → guard --post`），CI 也会跑：忘记构建或写出上面两类样式，流水线直接红。
 
@@ -49,6 +49,8 @@ sudo systemctl restart dsh-web
 建卡与建需求的入口在页面右上角统一成一个「＋ 新建」：菜单里选「新建需求」进需求表单，选「新建任务」直接在看板上开一张卡（详见文末「新建入口合并」）。
 
 想找东西不用一页页翻：按 **⌘K / Ctrl+K** 打开全局搜索，输编号、标题或负责人，↑↓ 选、回车直达（卡片直接开抽屉，需求跳到需求页并选中，版本跳到版本页）。
+
+最常用的三件事还给了全局快捷键，不用先打开面板：**Ctrl/⌘+Alt+N** 新建需求、**Ctrl/⌘+Alt+T** 新建任务、**Ctrl/⌘+Alt+D** 把某张卡派给专家——按下去面板直接进到对应那一步（选卡 / 选专家），面板已开着时按另一个键会就地切换动作。不用 Ctrl+Shift 是因为那一档被浏览器占了（Ctrl+Shift+N 无痕窗口、Ctrl+Shift+T 重开标签页、Ctrl+Shift+D 收藏所有标签页），页面拦不住；这三个键在 Chrome / Edge / Firefox 上都不冲突。
 
 搜得到的对象：卡片、需求、版本、**专家、专家团、项目、技能库里的技能**（连技能描述与标签一起搜，回车直达设置里的技能库）。
 
