@@ -399,6 +399,17 @@ test('docs: compatibility.md covers the host entry points we depend on', () => {
   assert.ok(index.includes('webServer'), 'index.js actually registers web routes')
 })
 
+test('host: artifacts leave the poll without their bodies', async () => {
+  const { publicArtifact } = await import('../src/host/domain.js')
+  const body = '# 技术方案\n' + 'x'.repeat(80)
+  const artifact = { id: 'a1', title: '技术方案', content: body, status: 'delivered' }
+  const slim = publicArtifact(artifact)
+  assert.equal(slim.content, '', 'the body must not travel with the poll')
+  assert.equal(slim.contentLength, body.length)
+  assert.equal(slim.title, '技术方案')
+  assert.equal(artifact.content, body, 'the stored artifact must not be stripped in place')
+})
+
 test('client: every studio module pulls in what it borrows from its siblings', () => {
   const walk = (dir) =>
     readdirSync(path(dir), { withFileTypes: true }).flatMap((entry) =>

@@ -31,6 +31,9 @@ function Drawer({ task, state, onClose, onChanged }) {
   const [artifact, setArtifact] = React.useState({ kind: 'doc', title: '', ref: '', content: '' })
   const [artEdit, setArtEdit] = React.useState(null)
   const [artRead, setArtRead] = React.useState(null)
+  // 正文不随轮询下发（一条能到几十 KB），点「阅读 / 正文」时才单独取，取过的缓存在这里。
+  const [artBodies, setArtBodies] = React.useState({})
+  React.useEffect(() => { setArtBodies({}); setArtRead(null); setArtEdit(null) }, [task.id])
   const [newCase, setNewCase] = React.useState({ title: '', expected: '', steps: '', stepsText: '', type: 'functional', priority: 'p2', preconditions: '' })
   const [caseRun, setCaseRun] = React.useState({ busy: false, note: '' })
   const [caseGen, setCaseGen] = React.useState({ busy: false, note: '' })
@@ -52,6 +55,27 @@ function Drawer({ task, state, onClose, onChanged }) {
   const checklist = task.checklist ?? []
   const doneCount = checklist.filter(item => item.done).length
   const artifacts = task.artifacts ?? []
+  // 轮询给的只有 contentLength；正文要么已经取过（artBodies），要么还在路上。
+  const artifactBody = (item) => (artBodies[item.id] !== undefined ? artBodies[item.id] : String(item.content ?? ''))
+  const artifactHasBody = (item) => (typeof item.contentLength === 'number' ? item.contentLength > 0 : String(item.content ?? '').trim() !== '')
+  const loadArtifactBody = async (item) => {
+    const cached = artBodies[item.id]
+    if (cached !== undefined) return cached
+    const json = await api('/task/artifact', { id: task.id, action: 'get', artifactId: item.id })
+    const content = String(json?.artifact?.content ?? '')
+    setArtBodies(previous => ({ ...previous, [item.id]: content }))
+    return content
+  }
+  const readArtifact = async (item) => {
+    if (artRead === item.id) { setArtRead(null); return }
+    setArtRead(item.id)
+    if (artBodies[item.id] !== undefined) return
+    try { await loadArtifactBody(item) } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); setArtRead(null) }
+  }
+  const editArtifact = async (item) => {
+    if (artEdit !== null && artEdit.id === item.id) { setArtEdit(null); return }
+    try { setArtEdit({ id: item.id, content: await loadArtifactBody(item) }) } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)) }
+  }
   const comments = task.comments ?? []
   const [pane, setPane] = React.useState('overview')
   React.useEffect(() => { setPane('overview') }, [task.id])
@@ -306,8 +330,10 @@ function Drawer({ task, state, onClose, onChanged }) {
     if (artEdit === null) return
     setBusy(true); setError(null); setNotice(null)
     try {
-      await api('/task/artifact', { id: task.id, action: 'update', artifactId: item.id, artifact: { content: artEdit.content } })
+      const savedContent = artEdit.content
+      await api('/task/artifact', { id: task.id, action: 'update', artifactId: item.id, artifact: { content: savedContent } })
       setArtEdit(null)
+      setArtBodies(previous => ({ ...previous, [item.id]: savedContent }))
       await onChanged()
       try {
         const synced = await api('/task/artifact/sync', { id: task.id, artifactId: item.id })
@@ -916,16 +942,16 @@ function Drawer({ task, state, onClose, onChanged }) {
         h('div', { className: 'ds-sec-body', 'data-scroll': '1' },
           (task.artifacts ?? []).length === 0
             ? h('div', { className: 'ds-empty' }, '还没有交付物。')
-            : (task.artifacts ?? []).map(item => h('div', { key: item.id, className: 'ds-art-wrap' }, h('div', { className: 'ds-art-row', 'data-missing': String(item.content ?? '').trim() === '' ? '1' : '0' },
+            : (task.artifacts ?? []).map(item => h('div', { key: item.id, className: 'ds-art-wrap' }, h('div', { className: 'ds-art-row', 'data-missing': artifactHasBody(item) ? '0' : '1' },
               h(ChipField, { className: 'ds-chip', 'data-kind': item.kind }, ARTIFACT_KIND_LABEL[item.kind] ?? item.kind),
               h('div', { className: 'ds-grow' },
                 h('div', { className: 'ds-art-title' },
-                  String(item.content ?? '').trim() === ''
-                    ? h('span', { className: 'ds-card-warn', style: { marginRight: 6 }, title: '这条交付物还没写正文，云盘文档里只有标题' }, '●')
-                    : null,
+                  artifactHasBody(item)
+                    ? null
+                    : h('span', { className: 'ds-card-warn', style: { marginRight: 6 }, title: '这条交付物还没写正文，云盘文档里只有标题' }, '●'),
                   item.title,
                 ),
-                h('div', { className: 'ds-art-ref' }, `正文 ${(item.content ?? '').length} 字${String(item.content ?? '').trim() === '' ? ' · 缺正文' : ''}${item.doc?.url ? '' : ' · 还没归档'}`),
+                h('div', { className: 'ds-art-ref' }, `正文 ${typeof item.contentLength === 'number' ? item.contentLength : String(item.content ?? '').length} 字${artifactHasBody(item) ? '' : ' · 缺正文'}${item.doc?.url ? '' : ' · 还没归档'}`),
                 item.ref === '' ? null : h('div', { className: 'ds-art-ref' }, item.ref),
                 item.doc?.url
                   ? h('a', { className: 'ds-art-ref', href: item.doc.url, target: '_blank', rel: 'noreferrer' }, `📄 ${item.doc.name || '云盘文档'}`)
@@ -933,11 +959,11 @@ function Drawer({ task, state, onClose, onChanged }) {
               ),
               h('button', {
                 className: 'ds-btn ds-btn-ghost', disabled: busy, title: '直接读正文（Markdown 渲染）',
-                onClick: () => setArtRead(artRead === item.id ? null : item.id),
+                onClick: () => void readArtifact(item),
               }, artRead === item.id ? '收起' : '阅读'),
               h('button', {
                 className: 'ds-btn ds-btn-ghost', disabled: busy, title: '编辑正文',
-                onClick: () => setArtEdit(artEdit !== null && artEdit.id === item.id ? null : { id: item.id, content: item.content ?? '' }),
+                onClick: () => void editArtifact(item),
               }, '正文'),
               item.doc?.url
                 ? h('button', { className: 'ds-btn ds-btn-ghost', disabled: busy, title: '用最新正文覆盖云盘文档', onClick: () => void syncArtifactTo(item) }, '更新')
@@ -949,9 +975,11 @@ function Drawer({ task, state, onClose, onChanged }) {
               h('button', { className: 'ds-btn ds-btn-ghost', disabled: busy, onClick: () => void removeArtifact(item) }, '×'),
             ),
             artRead === item.id
-              ? h('div', { className: 'ds-md-preview ds-reader' }, String(item.content ?? '').trim() === ''
-                ? h('span', { className: 'ds-hint' }, '这条交付物还没有正文。')
-                : renderMarkdown(item.content))
+              ? h('div', { className: 'ds-md-preview ds-reader' }, artBodies[item.id] === undefined && artifactHasBody(item)
+                ? h('span', { className: 'ds-hint' }, '读取中…')
+                : artifactBody(item).trim() === ''
+                  ? h('span', { className: 'ds-hint' }, '这条交付物还没有正文。')
+                  : renderMarkdown(artifactBody(item)))
               : null,
           )),
           artEdit === null ? null : h('div', { style: { marginTop: 8 } },

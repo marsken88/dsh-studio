@@ -197,6 +197,15 @@ export async function handleTaskRoute({ method, route, req, res, store, url }) {
     const body = await host.readJsonBody(req)
     const id = String(body.id ?? '')
     const action = String(body.action ?? 'add')
+    // 只读取正文，不动台账：轮询已经把 content 清空，抽屉展开某条交付物时才来这里取。
+    if (action === 'get') {
+      const task = store.snapshot().tasks.find(t => t.id === id)
+      if (task === undefined) throw new Error(`no task ${id}`)
+      const artifact = (task.artifacts ?? []).find(item => item.id === String(body.artifactId ?? ''))
+      if (artifact === undefined) throw new Error('找不到这条交付物')
+      host.sendJson(res, 200, { ok: true, artifact })
+      return true
+    }
     const snapshot = await store.mutate(state => {
       const task = state.tasks.find(t => t.id === id)
       if (task === undefined) throw new Error(`no task ${id}`)

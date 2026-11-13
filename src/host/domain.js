@@ -1096,6 +1096,12 @@ export function sanitizeChecklist(input) {
   }
   return out
 }
+/** 轮询里只给长度：交付物正文能到几十 KB（实测占整包 57%），抽屉点「阅读 / 正文」时再单独取。 */
+export function publicArtifact(artifact) {
+  const content = String(artifact?.content ?? '')
+  return { ...artifact, content: '', contentLength: content.length }
+}
+
 
 /** 交付物：老数据可能是纯字符串，统一升级成一条记录。 */
 export function sanitizeArtifact(raw, index) {

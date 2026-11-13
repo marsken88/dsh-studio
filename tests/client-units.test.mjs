@@ -362,3 +362,14 @@ test('palette: actions carry their shortcut so a row can print it', async () => 
   assert.ok(filterItems(items, 'alt').some((item) => item.id === 'new-task'))
 })
 
+test('roster: artifactsWithoutBody reads contentLength when the body is not shipped', async () => {
+  const { artifactsWithoutBody } = await import('../web/src/studio/roster.js')
+  const task = { artifacts: [
+    { id: 'a1', content: '', contentLength: 1200 },
+    { id: 'a2', content: '', contentLength: 0 },
+    { id: 'a3', content: '   ' },
+    { id: 'a4', content: '# 有正文' },
+  ] }
+  assert.deepEqual(artifactsWithoutBody(task).map(item => item.id), ['a2', 'a3'])
+})
+

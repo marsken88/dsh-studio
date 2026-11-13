@@ -110,6 +110,11 @@ export function cardOwner(task, config) {
   return { label: '未指派', note: '等人认领', expert: undefined }
 }
 
+/** 正文可能没随轮询下发（只给 contentLength），两种形状都要能判断「有没有正文」。 */
 export function artifactsWithoutBody(task) {
-  return (task.artifacts ?? []).filter(item => String(item.content ?? '').trim() === '')
+  return (task.artifacts ?? []).filter(item => {
+    const content = String(item.content ?? '')
+    if (content !== '') return content.trim() === ''
+    return (typeof item.contentLength === 'number' ? item.contentLength : 0) === 0
+  })
 }
