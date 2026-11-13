@@ -8,6 +8,7 @@ import { casesOfTasks, impactSummary } from './impact.js'
 import { designGate } from './design.js'
 import { RUN_LOG, parseMentions } from './dispatcher.js'
 import { appendTeamMemory } from './team-memory.js'
+import { runShellCase } from './shell-runner.js'
 import { homedir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises'
@@ -183,6 +184,7 @@ export async function probeEnv(env, config, timeoutMs = 5000) {
 
 export async function runOneCase(item, env, config, seedVars) {
   const started = Date.now()
+  if (item.shell !== null && item.shell !== undefined) return runShellCase(item, config)
   if (item.http == null) {
     return { ok: false, status: 0, ms: 0, error: '这条用例还没有可执行的请求定义（method/url）', preview: '' }
   }
@@ -297,7 +299,7 @@ export async function runTaskCases(store, taskId, options = {}) {
     ? new Set(options.caseIds.map(id => String(id)))
     : null
   const targets = (Array.isArray(task.cases) ? task.cases : [])
-    .filter(item => (wanted === null ? item.http != null : wanted.has(item.id)))
+    .filter(item => (wanted === null ? item.http != null || item.shell != null : wanted.has(item.id)))
   if (targets.length === 0) throw new Error('没有可执行的用例：用例上要填 method + url（相对地址会拼环境 baseUrl）')
 
   const probe = await probeEnv(env, config)
@@ -940,7 +942,7 @@ export async function pullFeishuDoc(url) {
     }
     text = String(parsed.data?.document?.content ?? '')
     if (text.trim() === '') return { ok: false, tool: true, text: '', error: '拉到了空正文：这个文档可能是空的，或者应用没有阅读权限' }
-    const title = /<title>([\s\S]*?)<\/title>/.exec(text)?.[1]?.trim() ?? ''
+    const title = text.match(/<title>([\s\S]*?)<\/title>/)?.[1]?.trim() ?? ''
     const body = text.replace(/<title>[\s\S]*?<\/title>\s*/, '')
     return { ok: true, tool: true, title, text: body.slice(0, 60000), error: '' }
   } catch {

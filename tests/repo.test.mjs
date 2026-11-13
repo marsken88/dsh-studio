@@ -410,6 +410,21 @@ test('host: artifacts leave the poll without their bodies', async () => {
   assert.equal(artifact.content, body, 'the stored artifact must not be stripped in place')
 })
 
+test('host: shell cases are refused until enabled, then really run', async () => {
+  const { runShellCase } = await import('../src/host/shell-runner.js')
+  const item = { shell: { command: 'node -e "console.log(1)"', expectExit: 0, timeoutMs: 5000, expectContains: '', expectNotContains: '', cwd: '' } }
+  const off = await runShellCase(item, { testing: {} })
+  assert.equal(off.ok, false)
+  assert.match(off.error, /没开 shell/)
+  const hello = { shell: { command: 'node -e "console.log(\'hi\')"', expectExit: 0, timeoutMs: 10000, expectContains: 'hi', expectNotContains: '', cwd: '' } }
+  const on = await runShellCase(hello, { testing: { allowShell: true } })
+  assert.equal(on.ok, true, on.error)
+  assert.match(on.preview, /hi/)
+  const wrong = await runShellCase({ shell: { command: 'node -e "process.exit(3)"', expectExit: 0, timeoutMs: 5000, expectContains: '', expectNotContains: '', cwd: '' } }, { testing: { allowShell: true } })
+  assert.equal(wrong.ok, false)
+  assert.match(wrong.error, /退出码 3/)
+})
+
 test('host: the audit summary keeps the offending element', async () => {
   const { sanitizeDesign } = await import('../src/host/design.js')
   const design = sanitizeDesign({ spec: { checked: 218, violations: 17, top: [{ kind: 'fontSize', value: '13.3333px', count: 23, sample: 'span.brand' }] } })

@@ -8,6 +8,7 @@
  * @module dsh-studio/src/host/domain
  */
 import { createHash, randomBytes } from 'node:crypto'
+import { sanitizeCaseShell } from './shell-case.js'
 import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
 
@@ -1257,6 +1258,7 @@ export function sanitizeCaseHttp(raw) {
 }
 
 /** 一条测试用例：做什么、期望什么、实际结果，以及最近一次执行的样子。 */
+
 export function sanitizeCase(raw, index) {
   if (typeof raw === 'string') {
     const title = raw.trim().slice(0, 200)
@@ -1275,6 +1277,7 @@ export function sanitizeCase(raw, index) {
       by: '',
       at: 0,
       http: null,
+      shell: null,
       lastRun: null,
     }
   }
@@ -1287,6 +1290,7 @@ export function sanitizeCase(raw, index) {
   return {
     id: String(raw.id ?? '').trim() || `c${index + 1}-${randomBytes(2).toString('hex')}`,
     title,
+    shell: sanitizeCaseShell(raw.shell),
     expected: String(raw.expected ?? '').trim().slice(0, 300),
     pointId: String(raw.pointId ?? '').trim().slice(0, 24),
     result,
@@ -1445,7 +1449,9 @@ export function sanitizeAllowHosts(input) {
 
 /** 测试执行配置：环境、默认环境、超时、允许的域名。 */
 export function sanitizeTesting(raw) {
-  const base = { envs: [], defaultEnv: '', timeoutMs: 15000, allowHosts: ['127.0.0.1', 'localhost'], concurrency: 4 }
+  // allowShell 默认关：开了等于把「在宿主机执行任意命令」的能力交给看板。
+
+  const base = { envs: [], defaultEnv: '', timeoutMs: 15000, allowHosts: ['127.0.0.1', 'localhost'], concurrency: 4, allowShell: false, shellCwd: '' }
   if (raw === null || typeof raw !== 'object') return base
   const envs = sanitizeEnvs(raw.envs)
   const defaultEnv = String(raw.defaultEnv ?? '').trim()
@@ -1454,6 +1460,8 @@ export function sanitizeTesting(raw) {
     defaultEnv: envs.some(env => env.id === defaultEnv) ? defaultEnv : (envs[0]?.id ?? ''),
     timeoutMs: Math.max(1000, Math.min(120000, Number(raw.timeoutMs) || base.timeoutMs)),
     allowHosts: sanitizeAllowHosts(raw.allowHosts ?? base.allowHosts),
+    allowShell: raw.allowShell === true,
+    shellCwd: String(raw.shellCwd ?? '').slice(0, 300),
     concurrency: Math.max(1, Math.min(8, Number(raw.concurrency) || base.concurrency)),
   }
 }
