@@ -4,6 +4,7 @@ import { fmtTime, fmtDate } from '../format.js'
 import { client } from '../context.js'
 import { REQ_STATUS_LABEL, REQ_STATUS_ORDER, DOC_KIND_LABEL, DOC_KIND_ORDER, DOC_STATUS_LABEL } from '../labels.js'
 import { caseSummaryOf, checkSummaryOf } from '../roster.js'
+import { diffLines, diffSummary } from '../diff.js'
 
 export     function IntakePage({ state, onChanged, mode }) {
   const { h, React, api, toast, currentUser, confirmDialog, promptDialog, renderMarkdown, TextField, TextAreaField, ChipField, CheckField, SelectField, MdField } = client()
@@ -108,6 +109,7 @@ export     function RequirementsPage({ state, onOpenTask, onChanged, createSigna
       const [docForm, setDocForm] = React.useState(null)
       const [docNote, setDocNote] = React.useState(null)
       const [docReader, setDocReader] = React.useState(null)
+      const [baseDiff, setBaseDiff] = React.useState(null)
       const [docAll, setDocAll] = React.useState(null)
       const [docBusy, setDocBusy] = React.useState(false)
       const [driveNote, setDriveNote] = React.useState(null)
@@ -351,6 +353,26 @@ export     function RequirementsPage({ state, onOpenTask, onChanged, createSigna
       } catch (err) {
         setError(err.message)
         setDocReader(null)
+      }
+    }
+    // 基线 vs 当前文档：只读对比，不改任何数据。
+    const compareBaseline = async () => {
+      if (baseDiff !== null) { setBaseDiff(null); return }
+      try {
+        const json = await api('/requirement/get', { id: current.id })
+        const req = json.requirement ?? {}
+        const baseline = req.baseline ?? null
+        const docs = req.docs ?? []
+        // 「当前文档」= 最新的一篇 PRD（基线那份本身不在比较之列，否则永远没差异）
+    const newest = [...docs].sort((a, b) => (Number(b.at) || 0) - (Number(a.at) || 0))
+    const doc = newest.find(item => item.kind === 'prd') ?? newest[0] ?? null
+        if (baseline === null) { setBaseDiff(null); setError('这条需求还没有基线，先挑一份文档「设为基线」'); return }
+        if (doc === null) { setBaseDiff(null); setError('这条需求还没有文档可以对比'); return }
+        const rows = diffLines(baseline.content ?? '', doc.content ?? '')
+        setBaseDiff({ rows, summary: diffSummary(rows), version: baseline.version, docTitle: doc.title })
+      } catch (cause) {
+        setBaseDiff(null)
+        setError(cause instanceof Error ? cause.message : String(cause))
       }
     }
     const expandAllDocs = async () => {
@@ -848,6 +870,7 @@ export     function RequirementsPage({ state, onOpenTask, onChanged, createSigna
                 h('b', null, `当前基线 ${current.baseline.version}`),
                 h('span', null, `${current.baseline.title} · 生效于 ${fmtTime(current.baseline.at)} · ${current.baseline.by || '人'} · 正文 ${current.baseline.contentLength ?? 0} 字`),
               ),
+              h('button', { className: 'ds-btn ds-btn-ghost', title: '把当前文档和这份基线逐行比一遍（只读）', onClick: () => void compareBaseline() }, baseDiff === null ? '对比基线' : '收起对比'),
               h('button', { className: 'ds-btn ds-btn-ghost', onClick: () => void clearBaseline() }, '取消基线'),
             )
             : h('div', { className: 'ds-base-box', 'data-empty': '1' },
@@ -856,6 +879,24 @@ export     function RequirementsPage({ state, onOpenTask, onChanged, createSigna
                 h('span', null, 'PRD 评审通过后点「设为基线」，之后建的卡都会记下用的是哪一版。'),
               ),
             ),
+          current.baseline !== null && baseDiff !== null
+            ? h('div', { className: 'ds-diff' },
+              h('div', { className: 'ds-diff-head' },
+                h('b', null, `基线 ${baseDiff.version} → 当前：${baseDiff.docTitle}`),
+                h('span', { className: 'ds-hint' }, baseDiff.summary.added + baseDiff.summary.removed === 0
+                  ? '正文没有变化'
+                  : `+${baseDiff.summary.added} 行 / −${baseDiff.summary.removed} 行`),
+              ),
+              h('div', { className: 'ds-diff-body' },
+                baseDiff.rows.slice(0, 400).map((row, index) => h('div', {
+                  key: index,
+                  className: 'ds-diff-line',
+                  'data-kind': row.kind,
+                }, `${row.kind === 'add' ? '+' : row.kind === 'del' ? '−' : ' '} ${row.text}`)),
+                baseDiff.rows.length > 400 ? h('div', { className: 'ds-hint' }, `（还有 ${baseDiff.rows.length - 400} 行未显示）`) : null,
+              ),
+            )
+            : null,
           (current.docs ?? []).length === 0
             ? h('div', { className: 'ds-hint', style: { marginTop: 8 } }, '还没有登记文档。可以先加 PRD 链接，把正文粘进来，评审通过后设为基线。')
             : h('div', null,

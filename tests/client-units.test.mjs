@@ -372,6 +372,19 @@ test('roster: case and checklist summaries work with counts or raw arrays', asyn
   assert.deepEqual(checkSummaryOf(null), { done: 0, total: 0 })
 })
 
+test('diff: line diff marks added, removed and untouched lines', async () => {
+  const { diffLines, diffSummary, splitLines } = await import('../web/src/studio/diff.js')
+  assert.deepEqual(splitLines('a\r\nb\n'), ['a', 'b'])
+  assert.deepEqual(splitLines(''), [])
+  assert.deepEqual(diffLines('a\nb', 'a\nb'), [{ kind: 'same', text: 'a' }, { kind: 'same', text: 'b' }])
+  const changed = diffLines('a\nb\nc', 'a\nB\nc\nd')
+  assert.deepEqual(changed.filter(row => row.kind !== 'same').map(row => [row.kind, row.text]), [
+    ['del', 'b'], ['add', 'B'], ['add', 'd'],
+  ])
+  assert.deepEqual(diffSummary(changed), { added: 2, removed: 1, same: 2 })
+  assert.equal(diffSummary(null).added, 0)
+})
+
 test('roster: commentCountOf works with a count, a list, or neither', async () => {
   const { commentCountOf } = await import('../web/src/studio/roster.js')
   assert.equal(commentCountOf({ commentCount: 7, comments: [] }), 7)
