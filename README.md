@@ -42,6 +42,7 @@ sudo systemctl restart dsh-web
 ## 开发与兼容性
 
 - 参与开发（构建链、部署、验证要求、禁区）：[AGENTS.md](AGENTS.md)
+上手第一天（三条命令，已在全新 clone 上验证过）：[docs/quickstart.md](docs/quickstart.md)
 - 依赖的 dsh 宿主接口、升级 runbook、兼容矩阵与已知限制：[docs/compatibility.md](docs/compatibility.md)
 
 ## 看板
