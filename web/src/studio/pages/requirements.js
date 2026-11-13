@@ -716,6 +716,7 @@ export     function RequirementsPage({ state, onOpenTask, onChanged, createSigna
             const change = current.change ?? null
             if (change === null) return null
             const affected = change.affected ?? []
+            const affectedCases = change.affectedCases ?? []
             const byId = new Map(tasks.map(task => [task.id, task]))
             const statusLabel = id => (state.statuses.find(entry => entry.id === id)?.label) ?? id
             return h('div', { className: 'ds-panel ds-change-panel', 'data-invalidated': change.invalidated ? '1' : '0', style: { marginTop: 14 } },
@@ -742,7 +743,7 @@ export     function RequirementsPage({ state, onOpenTask, onChanged, createSigna
                 h('div', { className: 'ds-hint' },
                   `改了：${(change.parts ?? []).join('、')}。${affected.length === 0
                     ? '当时没有已产出的卡受影响，不用返工。'
-                    : `${affected.length} 张卡已经产出过东西，要按新版复核：`}`),
+                    : `${affected.length} 张卡已经产出过东西${affectedCases.length === 0 ? '' : `、${affectedCases.length} 条用例要重跑`}，要按新版复核：`}`),
                 affected.length === 0 ? null : h('div', { className: 'ds-row', style: { flexWrap: 'wrap', gap: 8, marginTop: 8 } },
                   affected.map(item => h('span', {
                     key: item.id,

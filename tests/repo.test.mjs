@@ -410,6 +410,21 @@ test('host: artifacts leave the poll without their bodies', async () => {
   assert.equal(artifact.content, body, 'the stored artifact must not be stripped in place')
 })
 
+test('host: a requirement change lists the cases that must be re-run', async () => {
+  const { casesOfTasks, impactSummary } = await import('../src/host/impact.js')
+  const tasks = [
+    { id: 't1', code: 'DEV-1', cases: [{ id: 'c1', title: '主流程', result: 'pass', http: true }, { id: 'c2', title: '异常', result: 'fail', http: true }] },
+    { id: 't2', code: 'DEV-2', cases: [{ id: 'c3', title: '手工', result: 'skip', http: false }] },
+    { id: 't3', code: 'DEV-3' },
+  ]
+  const cases = casesOfTasks(tasks, 40)
+  assert.equal(cases.length, 3)
+  assert.equal(cases[0].key, 't1:c1')
+  assert.equal(cases[0].taskCode, 'DEV-1')
+  assert.deepEqual(impactSummary(tasks), { cards: 3, cases: 3, runnable: 2, failing: 1 })
+  assert.equal(casesOfTasks(tasks, 2).length, 2, 'limit holds')
+})
+
 test('host: coding facts compare the self-reported numbers with the MR', async () => {
   const { compareCodingFacts } = await import('../src/host/gitlab-facts.js')
   const coding = { files: [{ path: 'a.js' }, { path: 'b.js' }], commits: [{ sha: '1' }] }

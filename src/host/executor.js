@@ -4,6 +4,7 @@
 import { CODE_PREFIX, ROLE_IDS, STATUS_IDS, STATUSES, nextRequirementCode, nextTaskCode, normalizePatch, sanitizeBaseline, sanitizeReqDoc, sanitizeRequirement, sanitizeTestRun, text,
   canonicalAuthor,
 } from './domain.js'
+import { casesOfTasks, impactSummary } from './impact.js'
 import { RUN_LOG, parseMentions } from './dispatcher.js'
 import { appendTeamMemory } from './team-memory.js'
 import { homedir } from 'node:os'
@@ -482,6 +483,9 @@ export async function saveRequirement(store, input) {
         by: String(input.by ?? input.operator ?? '').trim().slice(0, 60) || '人',
         parts: changedParts,
         affected: touched.slice(0, 60).map(task => ({ id: task.id, code: task.code, title: task.title, status: task.status })),
+        // 用例跟卡走：需求改了，这些卡上的用例都得按新版重跑一遍。
+        affectedCases: casesOfTasks(touched, 40),
+        impact: impactSummary(touched),
         invalidated: substantive && hadSignoff,
       }
       // 卡还指着旧需求，签字就不作数了，要人重新确认一遍。
