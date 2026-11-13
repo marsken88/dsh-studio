@@ -1096,6 +1096,19 @@ export function sanitizeChecklist(input) {
   }
   return out
 }
+/** 用例与验收清单同理：轮询只给计数，抽屉打开时按卡取正文。 */
+export function publicCases(task) {
+  const cases = Array.isArray(task?.cases) ? task.cases : []
+  const pass = cases.filter(item => item.result === 'pass').length
+  const fail = cases.filter(item => item.result === 'fail').length
+  return { cases: [], caseSummary: { total: cases.length, pass, fail } }
+}
+
+export function publicChecklist(task) {
+  const checklist = Array.isArray(task?.checklist) ? task.checklist : []
+  return { checklist: [], checkSummary: { done: checklist.filter(item => item.done).length, total: checklist.length } }
+}
+
 /** 评论正文也不随轮询走：一条讨论动辄几百字，抽屉打开时按卡取一次，轮询只给条数。 */
 export function publicComments(task) {
   const comments = Array.isArray(task?.comments) ? task.comments : []

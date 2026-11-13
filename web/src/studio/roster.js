@@ -110,6 +110,19 @@ export function cardOwner(task, config) {
   return { label: '未指派', note: '等人认领', expert: undefined }
 }
 
+/** 用例/清单也按需取：轮询给计数，老数据给数组，两种形状都要能算。 */
+export function caseSummaryOf(task) {
+  if (task?.caseSummary !== undefined) return task.caseSummary
+  const cases = Array.isArray(task?.cases) ? task.cases : []
+  return { total: cases.length, pass: cases.filter(item => item.result === 'pass').length, fail: cases.filter(item => item.result === 'fail').length }
+}
+
+export function checkSummaryOf(task) {
+  if (task?.checkSummary !== undefined) return task.checkSummary
+  const checklist = Array.isArray(task?.checklist) ? task.checklist : []
+  return { done: checklist.filter(item => item.done).length, total: checklist.length }
+}
+
 /** 评论正文不随轮询下发，只给条数；两种形状（老数据带 comments、新数据带 commentCount）都要能算。 */
 export function commentCountOf(task) {
   if (typeof task?.commentCount === 'number') return task.commentCount

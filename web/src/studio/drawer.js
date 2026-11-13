@@ -1,7 +1,7 @@
 /* Card detail drawer: overview, content, plan, artifacts, tests, runs and talk. */
 
 import { ARTIFACT_KINDS, ARTIFACT_KIND_LABEL, ARTIFACT_STATUS, ARTIFACT_STATUS_LABEL, CASE_PRIORITIES, CASE_RESULT_LABEL, CASE_RESULTS, CASE_TYPES, CASE_TYPE_LABEL, CODING_REVIEW_LABEL, PRIORITY_LABEL, ROLE_LABEL, SEVERITY_LABEL, TYPE_LABEL } from './labels.js'
-import { artifactsWithoutBody, buildRoster, cardOwner, commentCountOf, filterRoster, fromDateInput, ownerLabel, toDateInput } from './roster.js'
+import { artifactsWithoutBody, buildRoster, cardOwner, caseSummaryOf, checkSummaryOf, commentCountOf, filterRoster, fromDateInput, ownerLabel, toDateInput } from './roster.js'
 import { fmtTime } from './format.js'
 import { parseSteps } from './cases.js'
 
@@ -35,6 +35,8 @@ function Drawer({ task, state, onClose, onChanged }) {
   const [artBodies, setArtBodies] = React.useState({})
   // 评论正文同样不随轮询下发（一条讨论动辄几百字），抽屉打开时按卡取一次。
   const [commentList, setCommentList] = React.useState(null)
+  // 用例与验收清单的正文同样按需取，轮询只给计数。
+  const [parts, setParts] = React.useState(null)
   React.useEffect(() => { setArtBodies({}); setArtRead(null); setArtEdit(null) }, [task.id])
   const [newCase, setNewCase] = React.useState({ title: '', expected: '', steps: '', stepsText: '', type: 'functional', priority: 'p2', preconditions: '' })
   const [caseRun, setCaseRun] = React.useState({ busy: false, note: '' })
@@ -45,17 +47,19 @@ function Drawer({ task, state, onClose, onChanged }) {
   const worktree = task.worktree ?? null
   const [worktreeMsg, setWorktreeMsg] = React.useState('')
   const [verify, setVerify] = React.useState({ busy: false, line: '', ok: null })
-  const cases = task.cases ?? []
+  const caseSum = caseSummaryOf(task)
+  const checkSum = checkSummaryOf(task)
+  const cases = parts !== null && Array.isArray(parts.cases) ? parts.cases : (Array.isArray(task.cases) ? task.cases : [])
   const [gate, setGate] = React.useState(null)
   const [gateNote, setGateNote] = React.useState('')
-  const casePass = cases.filter(item => item.result === 'pass').length
-  const caseFail = cases.filter(item => item.result === 'fail').length
-  const caseRest = cases.length - casePass - caseFail
-  const caseSummary = cases.length === 0
+  const casePass = caseSum.pass
+  const caseFail = caseSum.fail
+  const caseRest = Math.max(0, caseSum.total - casePass - caseFail)
+  const caseSummary = caseSum.total === 0
     ? ''
-    : `${cases.length} 条 · ✅ 通过 ${casePass} · ❌ 不通过 ${caseFail}${caseRest > 0 ? ` · ⬜ 没跑 ${caseRest}` : ''}`
-  const checklist = task.checklist ?? []
-  const doneCount = checklist.filter(item => item.done).length
+    : `${caseSum.total} 条 · ✅ 通过 ${casePass} · ❌ 不通过 ${caseFail}${caseRest > 0 ? ` · ⬜ 没跑 ${caseRest}` : ''}`
+  const checklist = parts !== null && Array.isArray(parts.checklist) ? parts.checklist : (Array.isArray(task.checklist) ? task.checklist : [])
+  const doneCount = checkSum.done
   const artifacts = task.artifacts ?? []
   // 轮询给的只有 contentLength；正文要么已经取过（artBodies），要么还在路上。
   const artifactBody = (item) => (artBodies[item.id] !== undefined ? artBodies[item.id] : String(item.content ?? ''))
@@ -89,6 +93,19 @@ function Drawer({ task, state, onClose, onChanged }) {
     }).catch(() => { if (alive) setCommentList([]) })
     return () => { alive = false }
   }, [task.id, commentTotal])
+  // 用例与清单正文：抽屉打开（或某张卡的计数变了）时取一次，没内容就不发请求。
+  React.useEffect(() => {
+    if (caseSum.total === 0 && checkSum.total === 0) { setParts({ cases: [], checklist: [] }); return undefined }
+    let alive = true
+    void api('/task/parts', { id: task.id }).then(json => {
+      if (!alive) return
+      setParts({
+        cases: Array.isArray(json?.cases) ? json.cases : [],
+        checklist: Array.isArray(json?.checklist) ? json.checklist : [],
+      })
+    }).catch(() => { if (alive) setParts({ cases: [], checklist: [] }) })
+    return () => { alive = false }
+  }, [task.id, caseSum.total, caseSum.pass, caseSum.fail, checkSum.total, checkSum.done])
   const [pane, setPane] = React.useState('overview')
   React.useEffect(() => { setPane('overview') }, [task.id])
   // 切页签时把内容滚回顶部，否则从长页面切到「讨论」会停在中间，看起来像只显示了半截。
@@ -102,7 +119,7 @@ function Drawer({ task, state, onClose, onChanged }) {
     { id: 'content', label: '内容', hint: '需求正文与验收标准，支持 Markdown' },
     { id: 'plan', label: '计划', hint: '项目、迭代、服务、挂哪条需求、优先级' },
     { id: 'deliver', label: '交付物', count: artifacts.length > 0 ? artifacts.length : '', hint: '文档 / MR / 用例 / 报告；空的交付物会被准出拦下' },
-    { id: 'test', label: '测试', count: cases.length > 0 ? `${casePass}/${cases.length}` : (checklist.length > 0 ? `☑${doneCount}/${checklist.length}` : ''), hint: '验收清单、用例执行记录；失败的用例会自动开缺陷' },
+    { id: 'test', label: '测试', count: caseSum.total > 0 ? `${casePass}/${caseSum.total}` : (checkSum.total > 0 ? `☑${doneCount}/${checkSum.total}` : ''), hint: '验收清单、用例执行记录；失败的用例会自动开缺陷' },
     { id: 'coding', label: '执行记录', count: coding === null ? '' : (coding.review?.status === 'approved' ? '✓ 已评审' : ''), hint: 'AI 的分支、提交、改动文件；可以「核对代码事实」' },
     { id: 'discuss', label: '讨论', count: commentTotal > 0 ? commentTotal : '', hint: '评论；在评论里 @ 专家或专家团即派单' },
   ]
@@ -908,14 +925,14 @@ function Drawer({ task, state, onClose, onChanged }) {
         h('div', { className: 'ds-dw-col' },
       h('div', { className: 'ds-sec', style: hideWhen('test') },
         h('div', { className: 'ds-sec-head' }, '验收清单',
-          h('span', { className: 'ds-hint' }, checklist.length === 0 ? '这张卡还没有清单' : `${doneCount} / ${checklist.length} 已勾`)),
+          h('span', { className: 'ds-hint' }, checkSum.total === 0 ? '这张卡还没有清单' : `${doneCount} / ${checkSum.total} 已勾`)),
         h('div', { className: 'ds-sec-body' },
-          checklist.length === 0 ? null : h('div', { className: 'ds-check-progress' },
-            h('div', { className: 'ds-check-bar', 'data-full': doneCount === checklist.length ? '1' : '0' },
-              h('span', { style: { width: `${checklist.length === 0 ? 0 : Math.round(doneCount / checklist.length * 100)}%` } }),
+          checkSum.total === 0 ? null : h('div', { className: 'ds-check-progress' },
+            h('div', { className: 'ds-check-bar', 'data-full': doneCount === checkSum.total ? '1' : '0' },
+              h('span', { style: { width: `${checkSum.total === 0 ? 0 : Math.round(doneCount / checkSum.total * 100)}%` } }),
             ),
           ),
-          checklist.map(item => h('div', { key: item.id, className: 'ds-check-row', 'data-done': item.done ? '1' : '0' },
+          parts === null && checkSum.total > 0 ? h('div', { className: 'ds-hint' }, '载入清单…') : checklist.map(item => h('div', { key: item.id, className: 'ds-check-row', 'data-done': item.done ? '1' : '0' },
             h(CheckField, { checked: item.done, disabled: busy,
               onChange: () => void toggleChecklist(item),
             }),
@@ -1034,7 +1051,7 @@ function Drawer({ task, state, onClose, onChanged }) {
       ),
       h('div', { className: 'ds-sec', style: hideWhen('test') },
         h('div', { className: 'ds-sec-head' }, '测试用例',
-          h('span', { className: 'ds-hint' }, cases.length === 0
+          h('span', { className: 'ds-hint' }, caseSum.total === 0
             ? '测试同学把用例登记在这里，逐条执行并回填结果'
             : caseSummary),
           h('button', {
@@ -1050,9 +1067,11 @@ function Drawer({ task, state, onClose, onChanged }) {
         h('div', { className: 'ds-sec-body', 'data-scroll': '1' },
           caseRun.note === '' ? null : h('div', { className: 'ds-hint' }, caseRun.note),
           caseGen.note === '' ? null : h('div', { className: 'ds-hint' }, caseGen.note),
-          cases.length === 0
+          caseSum.total === 0
             ? h('div', { className: 'ds-empty' }, '还没有用例。')
-            : cases.map(item => h('div', { key: item.id, className: 'ds-art-row', 'data-result': item.result },
+            : parts === null
+              ? h('div', { className: 'ds-hint' }, '载入用例…')
+              : cases.map(item => h('div', { key: item.id, className: 'ds-art-row', 'data-result': item.result },
               h(SelectField, {
                 className: 'ds-select', style: { width: 84, height: 22, fontSize: 11 }, value: item.result, disabled: busy,
                 onChange: event => void setCaseResult(item, event.target.value),

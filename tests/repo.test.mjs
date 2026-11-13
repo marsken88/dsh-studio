@@ -410,6 +410,21 @@ test('host: artifacts leave the poll without their bodies', async () => {
   assert.equal(artifact.content, body, 'the stored artifact must not be stripped in place')
 })
 
+test('host: cases and checklist leave the poll as counts', async () => {
+  const { publicCases, publicChecklist } = await import('../src/host/domain.js')
+  const task = {
+    cases: [{ result: 'pass' }, { result: 'fail' }, { result: 'skip' }],
+    checklist: [{ done: true }, { done: true }, { done: false }],
+  }
+  const trimmedCases = publicCases(task)
+  assert.deepEqual(trimmedCases.cases, [])
+  assert.deepEqual(trimmedCases.caseSummary, { total: 3, pass: 1, fail: 1 })
+  const trimmedCheck = publicChecklist(task)
+  assert.deepEqual(trimmedCheck.checklist, [])
+  assert.deepEqual(trimmedCheck.checkSummary, { done: 2, total: 3 })
+  assert.equal(task.cases.length, 3, 'the stored task must not be stripped in place')
+})
+
 test('host: comments leave the poll as a count', async () => {
   const { publicComments } = await import('../src/host/domain.js')
   const task = { id: 't1', comments: [{ id: 'c1', body: '一' }, { id: 'c2', body: '二' }] }

@@ -193,6 +193,15 @@ export async function handleTaskRoute({ method, route, req, res, store, url }) {
     host.sendJson(res, 200, { ok: true, state: host.publicState(store) })
     return true
   }
+  if (method === 'POST' && route === '/task/parts') {
+    // 用例与清单正文不随 /state 下发，抽屉打开时按卡取一次；纯读。
+    const body = await host.readJsonBody(req)
+    const id = String(body.id ?? '')
+    const task = store.snapshot().tasks.find(t => t.id === id)
+    if (task === undefined) throw new Error(`no task ${id}`)
+    host.sendJson(res, 200, { ok: true, cases: task.cases ?? [], checklist: task.checklist ?? [] })
+    return true
+  }
   if (method === 'POST' && route === '/task/comments') {
     // 评论正文不随 /state 下发，抽屉打开时按卡取一次；纯读，不改台账。
     const body = await host.readJsonBody(req)

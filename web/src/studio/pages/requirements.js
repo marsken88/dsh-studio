@@ -3,6 +3,7 @@
 import { fmtTime, fmtDate } from '../format.js'
 import { client } from '../context.js'
 import { REQ_STATUS_LABEL, REQ_STATUS_ORDER, DOC_KIND_LABEL, DOC_KIND_ORDER, DOC_STATUS_LABEL } from '../labels.js'
+import { caseSummaryOf, checkSummaryOf } from '../roster.js'
 
 export     function IntakePage({ state, onChanged, mode }) {
   const { h, React, api, toast, currentUser, confirmDialog, promptDialog, renderMarkdown, TextField, TextAreaField, ChipField, CheckField, SelectField, MdField } = client()
@@ -513,11 +514,18 @@ export     function RequirementsPage({ state, onOpenTask, onChanged, createSigna
         const done = tasks.filter(task => task.status === 'done').length
         const blocked = tasks.filter(task => task.blocked !== undefined && task.blocked !== null).length
         const bugs = tasks.filter(task => task.type === 'bug' && task.status !== 'done').length
-        const checklist = tasks.flatMap(task => task.checklist ?? [])
-        const cases = tasks.flatMap(task => task.cases ?? [])
+        // 用例与清单的正文不在轮询里，只给每张卡一个计数，这里按卡汇总。
+        const check = tasks.reduce((acc, task) => {
+          const one = checkSummaryOf(task)
+          return { done: acc.done + one.done, total: acc.total + one.total }
+        }, { done: 0, total: 0 })
+        const caseAgg = tasks.reduce((acc, task) => {
+          const one = caseSummaryOf(task)
+          return { pass: acc.pass + one.pass, total: acc.total + one.total }
+        }, { pass: 0, total: 0 })
         const artifacts = tasks.flatMap(task => (task.artifacts ?? []).map(item => ({ ...item, task })))
         const mrs = tasks.filter(task => (task.gitlabMR?.iid ?? 0) > 0)
-        const passed = cases.filter(item => item.result === 'pass').length
+        const passed = caseAgg.pass
         const links = current.links ?? {}
         const folder = current.folder ?? {}
         const link = (label, url) => url === '' ? null : h('a', { className: 'ds-link', href: url, target: '_blank', rel: 'noreferrer' }, label)
@@ -784,7 +792,7 @@ export     function RequirementsPage({ state, onOpenTask, onChanged, createSigna
             const covered = stats.coveredPoints ?? 0
             const pointTotal = stats.points ?? (current.points ?? []).length
             const casePass = stats.pass ?? passed
-            const caseTotal = stats.cases ?? cases.length
+            const caseTotal = stats.cases ?? caseAgg.total
             return h('div', { className: 'ds-panel', style: { marginTop: 14 } },
               h('div', { className: 'ds-panel-head' },
                 h('span', null, '需求准出与验收签字'),
@@ -1010,8 +1018,8 @@ export     function RequirementsPage({ state, onOpenTask, onChanged, createSigna
             h('div', { className: 'ds-stat-box' }, h('b', null, `${done}/${tasks.length}`), h('span', null, '卡已完成')),
             h('div', { className: 'ds-stat-box', 'data-warn': blocked > 0 ? '1' : '0' }, h('b', null, String(blocked)), h('span', null, '阻塞')),
             h('div', { className: 'ds-stat-box', 'data-warn': bugs > 0 ? '1' : '0' }, h('b', null, String(bugs)), h('span', null, '未结缺陷')),
-            h('div', { className: 'ds-stat-box' }, h('b', null, `${checklist.filter(item => item.done).length}/${checklist.length}`), h('span', null, '验收清单')),
-            h('div', { className: 'ds-stat-box' }, h('b', null, `${passed}/${cases.length}`), h('span', null, '用例通过')),
+            h('div', { className: 'ds-stat-box' }, h('b', null, `${check.done}/${check.total}`), h('span', null, '验收清单')),
+            h('div', { className: 'ds-stat-box' }, h('b', null, `${caseAgg.pass}/${caseAgg.total}`), h('span', null, '用例通过')),
             h('div', { className: 'ds-stat-box' }, h('b', null, String(artifacts.length)), h('span', null, '交付物')),
             h('div', { className: 'ds-stat-box' }, h('b', null, String(mrs.length)), h('span', null, 'MR')),
           ),

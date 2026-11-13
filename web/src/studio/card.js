@@ -3,7 +3,7 @@
 
 import { PRIORITY_LABEL, ROLE_LABEL } from './labels.js'
 import { fmtDate, fmtTime } from './format.js'
-import { artifactsWithoutBody, cardOwner, commentCountOf } from './roster.js'
+import { artifactsWithoutBody, cardOwner, caseSummaryOf, checkSummaryOf, commentCountOf } from './roster.js'
 
 export function createCard({ h, ChipField }) {
 function Card({ task, onOpen, config, requirements, onPickRequirement, onPickProject }) {
@@ -14,8 +14,8 @@ function Card({ task, onOpen, config, requirements, onPickRequirement, onPickPro
   const iteration = (project?.iterations ?? []).find(entry => entry.id === task.iteration)
   const service = (project?.services ?? []).find(entry => entry.id === task.service)
   const requirement = (requirements ?? []).find(entry => entry.id === task.requirementId)
-  const checklist = task.checklist ?? []
-  const doneCount = checklist.filter(item => item.done).length
+  const check = checkSummaryOf(task)
+  const caseRun = caseSummaryOf(task)
   const artifactCount = (task.artifacts ?? []).length
   const noBody = artifactsWithoutBody(task).length
   const overdue = task.dueAt > 0 && task.dueAt < Date.now() && task.status !== 'done'
@@ -103,17 +103,12 @@ function Card({ task, onOpen, config, requirements, onPickRequirement, onPickPro
     h('div', { className: 'ds-card-foot' },
       h('span', {}, task.id),
       task.dueAt > 0 ? h('span', { 'data-overdue': overdue ? '1' : '0', style: overdue ? { color: '#e5484d', fontWeight: 600 } : null }, `· ${fmtDate(task.dueAt)}${overdue ? ' 逾期' : ''}`) : null,
-      checklist.length > 0 ? h('span', { title: '验收清单' }, `· ☑ ${doneCount}/${checklist.length}`) : null,
+      check.total > 0 ? h('span', { title: '验收清单' }, `· ☑ ${check.done}/${check.total}`) : null,
       artifactCount > 0 ? h('span', { title: '已登记交付物' }, `· 📎 ${artifactCount}`) : null,
-      (task.cases?.length ?? 0) > 0 ? (() => {
-        const total = task.cases.length
-        const passed = task.cases.filter(item => item.result === 'pass').length
-        const failed = task.cases.filter(item => item.result === 'fail').length
-        return h('span', {
-          className: failed > 0 ? 'ds-case-fail' : '',
-          title: `测试用例：通过 ${passed}/${total}${failed > 0 ? `，不通过 ${failed}` : ''}`,
-        }, `· ${failed > 0 ? '❌' : '✅'} ${passed}/${total}`)
-      })() : null,
+      caseRun.total > 0 ? h('span', {
+        className: caseRun.fail > 0 ? 'ds-case-fail' : '',
+        title: `测试用例：通过 ${caseRun.pass}/${caseRun.total}${caseRun.fail > 0 ? `，不通过 ${caseRun.fail}` : ''}`,
+      }, `· ${caseRun.fail > 0 ? '❌' : '✅'} ${caseRun.pass}/${caseRun.total}`) : null,
       noBody > 0 ? h('span', { className: 'ds-card-warn', title: `${noBody} 件交付物还没写正文，云盘文档里只有标题` }, '● 缺正文') : null,
       (task.coding?.files?.length ?? 0) > 0 ? h('span', { title: 'AI Coding 改动文件数' }, `· ⌥ ${task.coding.files.length}`) : null,
       commentCountOf(task) > 0 ? h('span', {}, `· ${commentCountOf(task)} 评论`) : null,

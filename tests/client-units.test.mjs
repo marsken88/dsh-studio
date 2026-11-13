@@ -362,6 +362,16 @@ test('palette: actions carry their shortcut so a row can print it', async () => 
   assert.ok(filterItems(items, 'alt').some((item) => item.id === 'new-task'))
 })
 
+test('roster: case and checklist summaries work with counts or raw arrays', async () => {
+  const { caseSummaryOf, checkSummaryOf } = await import('../web/src/studio/roster.js')
+  assert.deepEqual(caseSummaryOf({ caseSummary: { total: 7, pass: 5, fail: 1 } }), { total: 7, pass: 5, fail: 1 })
+  assert.deepEqual(caseSummaryOf({ cases: [{ result: 'pass' }, { result: 'fail' }, { result: 'skip' }] }), { total: 3, pass: 1, fail: 1 })
+  assert.deepEqual(caseSummaryOf({}), { total: 0, pass: 0, fail: 0 })
+  assert.deepEqual(checkSummaryOf({ checkSummary: { done: 2, total: 3 } }), { done: 2, total: 3 })
+  assert.deepEqual(checkSummaryOf({ checklist: [{ done: true }, { done: false }] }), { done: 1, total: 2 })
+  assert.deepEqual(checkSummaryOf(null), { done: 0, total: 0 })
+})
+
 test('roster: commentCountOf works with a count, a list, or neither', async () => {
   const { commentCountOf } = await import('../web/src/studio/roster.js')
   assert.equal(commentCountOf({ commentCount: 7, comments: [] }), 7)
