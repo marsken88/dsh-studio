@@ -437,6 +437,11 @@ export function mergeConfig(saved) {
     access: sanitizeAccess(saved.access),
     sla: sanitizeSla(saved.sla),
     costs: sanitizeCosts(saved.costs),
+    // 设计闸门：加了这个键就必须在这里也列一遍，否则重启一次配置就被 mergeConfig 抹掉。
+    design: (() => {
+      const merged = { ...base.design, ...(saved.design !== null && typeof saved.design === 'object' ? saved.design : {}) }
+      return { enabled: merged.enabled === true, columns: (Array.isArray(merged.columns) ? merged.columns : ['dev']).map(String).slice(0, 8) }
+    })(),
     environments: (() => {
       const list = sanitizeDeployEnvs(saved.environments)
       return list.length > 0 ? list : defaultDeployEnvs()

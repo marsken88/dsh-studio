@@ -410,6 +410,18 @@ test('host: artifacts leave the poll without their bodies', async () => {
   assert.equal(artifact.content, body, 'the stored artifact must not be stripped in place')
 })
 
+test('config: every default key survives a merge round trip', async () => {
+  const { defaultConfig, mergeConfig } = await import('../src/host/domain.js')
+  const base = defaultConfig()
+  const merged = mergeConfig(base)
+  const missing = Object.keys(base).filter(key => merged[key] === undefined)
+  assert.deepEqual(missing, [], 'mergeConfig 会抹掉没列进去的配置键（design 就是这样丢的）')
+  // 改过的值也要能存活，不只是键存在
+  const custom = mergeConfig({ ...base, design: { enabled: true, columns: ['accept'] } })
+  assert.equal(custom.design.enabled, true)
+  assert.deepEqual(custom.design.columns, ['accept'])
+})
+
 test('host: the token audit lands in the checklist too', async () => {
   const { applySpecItem } = await import('../src/host/design.js')
   const dirty = applySpecItem([], { violations: 17, top: [{ value: '13.3333px', count: 23 }, { value: '9px', count: 14 }] })

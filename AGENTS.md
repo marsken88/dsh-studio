@@ -88,7 +88,7 @@ STUDIO_TOKEN=$(echo 1234 | sudo -S journalctl -u dsh-web -n 50 | grep -o 'token=
 
 ## 6. 后端约定（`index.js`）
 
-- **白名单三件套**：`publicConfig()`（对外可见字段）、`mergeConfig()`（可写入字段）、`sanitizeX()`（每个对象）。新增任何配置/字段，三处都要加，否则会出现「保存 200 但读回来是空」。
+- **白名单四处**（原来写的三件套少算了一处，2026-11-13 因此丢过 `config.design`）：`defaultConfig()`、**`mergeConfig(saved)`——重启加载时按显式键列表重建配置，没列进去的键会被静默抹掉**、`mergeConfig(patch)`/`publicConfig()`（可写 / 对外可见）、`sanitizeX()`（每个对象）。契约测试 `config: every default key survives a merge round trip` 会拦住漏掉的那处。
 - `StudioStore.mutate(fn)` **返回整份 state**，不是 `fn` 的返回值；要拿某张卡用 `store.snapshot().tasks.find(...)`。
 - 所有对外状态走 `publicState()`：`{ revision, config, tasks, requirements, releases, experts, … }`。
 - 路由统一挂在 `/studio-api`（`ctx.webServer.register({ kind:'prefix' })`）；新增路由记得同时更新权限分级 `accessLevelFor` 与 `/auth/*` 例外。

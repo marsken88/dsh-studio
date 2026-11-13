@@ -193,6 +193,19 @@ export function ColumnsPanel({ state, onChanged }) {
     const expert = (config.experts ?? []).find(entry => entry.id === member.id)
     return expert === undefined ? member.id : `${expert.emoji} ${expert.name}`
   }
+  // 设计闸门：开关 + 勾哪几列要拦。存的是 config.design，服务端 designGate() 用它。
+  const gateColumns = Array.isArray(config.design?.columns) ? config.design.columns : ['dev']
+  const saveDesign = async patch => {
+    setBusy(true); setError(null)
+    try {
+      await api('/config', { design: { ...(config.design ?? {}), ...patch } })
+      await onChanged()
+    } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)) } finally { setBusy(false) }
+  }
+  const toggleGateColumn = id => {
+    const next = gateColumns.includes(id) ? gateColumns.filter(item => item !== id) : [...gateColumns, id]
+    void saveDesign({ columns: next })
+  }
   const save = async (status, members, strategy) => {
     setBusy(true); setError(null)
     try {
@@ -214,6 +227,21 @@ export function ColumnsPanel({ state, onChanged }) {
     h('div', { className: 'ds-panel-head' }, '每一列由谁负责'),
     h('div', { className: 'ds-panel-body' },
       h('div', { className: 'ds-hint' }, '推荐挂「角色位」：澄清/验收挂产品经理、开发挂研发工程师、测试挂测试工程师——派单时会按卡片的业务领域自动挑对应领域专家（如支付产品经理）；也可以直接指定某位专家或专家团。一列可挂多人（候选池），一个都不挂就只把卡停在原地等人认领。'),
+      h('div', { className: 'ds-hint', style: { marginTop: 14 } },
+        '设计闸门：打开后，卡片进下面选中的列之前设计必须评审通过（验收时可 override 强推）。'),
+      h('div', { className: 'ds-row', style: { gap: 8, flexWrap: 'wrap', marginTop: 6 } },
+        h('button', {
+          className: config.design?.enabled === true ? 'ds-btn ds-btn-primary' : 'ds-btn',
+          disabled: busy, 'data-design-gate': config.design?.enabled === true ? 'on' : 'off',
+          onClick: () => void saveDesign({ enabled: config.design?.enabled !== true }),
+        }, config.design?.enabled === true ? '设计闸门：已开启' : '设计闸门：已关闭'),
+        statuses.map(column => h('button', {
+          key: 'gate-' + column.id,
+          className: gateColumns.includes(column.id) ? 'ds-btn ds-btn-primary' : 'ds-btn',
+          disabled: busy,
+          onClick: () => toggleGateColumn(column.id),
+        }, column.label ?? column.id)),
+      ),
       statuses.map(column => {
         const members = membersOf(column.id)
         const strategy = strategyOf(column.id)
