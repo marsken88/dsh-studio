@@ -65,7 +65,7 @@ export function CasesPage({ state, onOpenTask }) {
   }, [list])
 
   const requirements = state.requirements ?? []
-  const runnable = list.filter(row => row.http)
+  const runnable = list.filter(row => row.runnable === true)
   const picked = runnable.filter(row => selected.has(row.key))
 
   const toggle = key => setSelected(previous => {
@@ -157,7 +157,7 @@ export function CasesPage({ state, onOpenTask }) {
       toast(cause instanceof Error ? cause.message : String(cause), 'error')
     }
   }
-  const failedRunnable = list.filter(row => row.http && row.result === 'fail')
+  const failedRunnable = list.filter(row => row.runnable === true && row.result === 'fail')
   const runSelected = () => runRows(picked)
   // 回归最常用的动作：只补跑上次失败的那几条。
   const runFailed = () => runRows(failedRunnable)
@@ -239,12 +239,12 @@ export function CasesPage({ state, onOpenTask }) {
                   onClick: () => onOpenTask(row.taskId),
                 },
                   h('span', { className: 'ds-case-lib-pick', onClick: event => event.stopPropagation() },
-                    h(CheckField, { checked: selected.has(row.key), disabled: running || !row.http, onChange: () => toggle(row.key) }),
+                    h(CheckField, { checked: selected.has(row.key), disabled: running || row.runnable !== true, onChange: () => toggle(row.key) }),
                   ),
                   h('span', { className: 'ds-case-lib-result' }, CASE_RESULT_LABEL[row.result] ?? row.result),
                   h('span', { className: 'ds-case-lib-title' }, row.title),
                   h('span', { className: 'ds-case-lib-meta' }, `${row.taskCode || row.taskId} · ${row.requirementTitle || '未挂需求'}${row.pointId ? ' · ' + row.pointId : ''}`),
-                  h('span', { className: 'ds-case-lib-meta' }, row.http ? '接口' : '手工'),
+                  h('span', { className: 'ds-case-lib-meta' }, row.http ? '接口' : row.shell ? 'shell' : row.db ? '数据库' : '手工'),
                   h('span', { className: 'ds-case-lib-pri' }, row.priority),
                   h('span', { className: 'ds-case-lib-at' }, row.lastRunAt > 0 ? fmtTime(row.lastRunAt) : '没跑过'),
                   h('button', {

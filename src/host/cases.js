@@ -49,6 +49,10 @@ export function collectCases(state) {
         priority: item.priority ?? 'p2',
         pointId: item.pointId ?? '',
         http: item.http !== null && item.http !== undefined,
+    shell: item.shell !== null && item.shell !== undefined,
+    db: item.db !== null && item.db !== undefined,
+    // 能跑的三种：接口 / shell / 数据库。以前界面只认 http，另外两种建得出来却跑不了。
+    runnable: item.http != null || item.shell != null || item.db != null,
         lastRunAt: item.lastRun?.at ?? 0,
         // 失败时最想看的三样：错在哪、返回了什么、上一次的结论文案。
         lastError: String(item.lastRun?.error ?? '').slice(0, 300),

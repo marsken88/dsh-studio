@@ -1130,9 +1130,9 @@ function Drawer({ task, state, onClose, onChanged }) {
           }, caseGen.busy ? '生成中…' : '✨ 按需求生成'),
           h('button', {
             className: 'ds-btn ds-btn-ghost',
-            disabled: caseRun.busy || cases.filter(item => item.http != null).length === 0,
+            disabled: caseRun.busy || cases.filter(item => item.http != null || item.shell != null || item.db != null).length === 0,
             onClick: () => void runCases(undefined),
-          }, caseRun.busy ? '运行中…' : '▶ 跑接口用例')),
+          }, caseRun.busy ? '运行中…' : '▶ 跑用例')),
         h('div', { className: 'ds-sec-body', 'data-scroll': '1' },
           caseRun.note === '' ? null : h('div', { className: 'ds-hint' }, caseRun.note),
           caseGen.note === '' ? null : h('div', { className: 'ds-hint' }, caseGen.note),
