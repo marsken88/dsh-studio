@@ -511,9 +511,20 @@ function Drawer({ task, state, onClose, onChanged }) {
     if (link === null) return
     const status = await promptDialog('状态：pending 待评审 / changes_requested 要改 / approved 通过', { title: '设计评审', defaultValue: task.design?.status ?? 'pending' })
     if (status === null) return
+    // 两个数字来自 tools/visual 的 design-diff / design-audit（要在装了 Chrome 的机器上跑），
+    // 这里让人把结果录进来，卡片上才看得到还原度和规范野值。
+    const diffText = await promptDialog('还原度差异百分比（design-diff 输出，留空跳过）', { title: '设计还原度', defaultValue: task.design?.diff == null ? '' : String(task.design.diff.percent) })
+    if (diffText === null) return
+    const violationsText = await promptDialog('规范体检野值数（design-audit 输出，留空跳过）', { title: '设计规范体检', defaultValue: task.design?.spec == null ? '' : String(task.design.spec.violations) })
+    if (violationsText === null) return
     setBusy(true); setError(null); setNotice(null)
     try {
-      const out = await api('/task/design', { id: task.id, design: { link, status, note: task.design?.note ?? '' } })
+      const design = { link, status, note: task.design?.note ?? '' }
+      const diffNumber = Number(String(diffText).trim())
+      if (String(diffText).trim() !== '' && Number.isFinite(diffNumber)) design.diff = { percent: diffNumber, url: String(task.design?.diff?.url ?? '') }
+      const violations = Number(String(violationsText).trim())
+      if (String(violationsText).trim() !== '' && Number.isFinite(violations)) design.spec = { checked: task.design?.spec?.checked ?? 0, violations, top: task.design?.spec?.top ?? [] }
+      const out = await api('/task/design', { id: task.id, design })
       setNotice('设计已保存：' + String(out?.design?.status ?? status))
       await onChanged()
     } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)) } finally { setBusy(false) }
@@ -925,6 +936,13 @@ function Drawer({ task, state, onClose, onChanged }) {
                     `${coding.verified.missingCommits.length + coding.verified.missingFiles.length === 0 ? '' : ` · ${coding.verified.missingCommits.length + coding.verified.missingFiles.length} 项对不上`}`))
                 : h('div', { className: 'ds-hint', 'data-verify': verify.ok === true ? 'ok' : 'bad', style: { marginTop: 6 } },
                   `${verify.ok === true ? '✅' : '⚠'} ${verify.line}`),
+                              coding.gitlab === null || coding.gitlab === undefined
+                ? null
+                : h('div', { className: 'ds-hint', 'data-gitlab-facts': coding.gitlab.state },
+                  '上次 GitLab 核对 ' + fmtTime(coding.gitlab.at) + '：文件 ' + coding.gitlab.files.declared + '→' + coding.gitlab.files.actual +
+                  ' · 提交 ' + coding.gitlab.commits.declared + '→' + coding.gitlab.commits.actual +
+                  (coding.gitlab.pipeline === null ? '' : ' · 流水线 ' + coding.gitlab.pipeline) +
+                  ((coding.gitlab.mismatches ?? []).length === 0 ? ' · 一致' : ' · ' + coding.gitlab.mismatches.join('；'))),
               (coding.commits ?? []).length === 0 ? null : h('div', { className: 'ds-code-list' },
                 coding.commits.slice(0, 6).map(item => h('div', { key: item.id, className: 'ds-code-item' },
                   h('code', null, item.sha.slice(0, 8)),

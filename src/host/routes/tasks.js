@@ -85,7 +85,7 @@ async function runCaseKeys(store, keys, options = {}) {
   } catch {
     /* 记不下来不影响这次跑的结果 */
   }
-  emitEvent('regression/finished', { by: record.by, cards: record.cards, total: record.total, passed: record.passed, failed: record.failed, bugs: record.bugs ?? 0 })
+  emitEvent('regression/finished', { by: record.by, cards: record.cards, total: record.total, passed: record.passed, failed: record.failed, bugs: record.bugs ?? 0, truncated: options.truncated ?? null })
   return { results, regression: record }
 }
 
