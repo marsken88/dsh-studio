@@ -3,6 +3,7 @@
 
 import { CODE_PREFIX, ROLE_IDS, STATUS_IDS, STATUSES, nextRequirementCode, nextTaskCode, normalizePatch, sanitizeBaseline, sanitizeReqDoc, sanitizeRequirement, sanitizeTestRun, text,
   canonicalAuthor,
+  sanitizeCoding,
 } from './domain.js'
 import { casesOfTasks, impactSummary } from './impact.js'
 import { designGate } from './design.js'
@@ -30,6 +31,35 @@ export function configureExecutor(services) {
  * 核对执行记录和代码事实：agent 自报的提交/文件，分支上到底有没有。
  * 没有 worktree（隔离没开）或还没写执行记录时返回 skipped，不拦流程。
  */
+/** 自动核对：进「待评审」时跑一次，把结果写回 coding.verified 并在 history 留痕。 */
+export async function autoVerifyCoding(store, taskId) {
+  const state = store.snapshot()
+  const task = state.tasks.find(entry => entry.id === taskId)
+  if (task === undefined || task.coding === null || task.coding === undefined) return null
+  const report = await verifyCodingRecord(state, task)
+  await store.mutate(draft => {
+    const target = draft.tasks.find(entry => entry.id === taskId)
+    if (target === undefined || target.coding === null || target.coding === undefined) return
+    const skipped = report.skipped !== undefined
+    target.coding = sanitizeCoding({ ...target.coding, verified: skipped ? null : report })
+    const missingCommits = (report.missingCommits ?? []).length
+    const missingFiles = (report.missingFiles ?? []).length
+    target.history = [...(target.history ?? []), {
+      at: Date.now(),
+      by: '系统',
+      status: target.status,
+      note: skipped
+        ? '代码事实没法核对：' + report.skipped
+        : report.ok === true
+          ? '代码事实核对通过'
+          : '代码事实核对不通过：' + missingCommits + ' 个提交 / ' + missingFiles + ' 个文件在仓库里找不到',
+    }]
+  })
+  if (report.ok !== true && report.skipped === undefined) {
+    emitEvent('gate/blocked', { taskId, gate: 'coding', blockers: ['代码事实核对不通过'] })
+  }
+  return report
+}
 export async function verifyCodingRecord(state, task) {
   const coding = task?.coding ?? null
   if (coding === null || coding === undefined) return { ok: false, skipped: '这张卡还没有执行记录' }
@@ -1395,6 +1425,10 @@ export async function updateTask(store, id, patch) {
     try { host.broadcastChange(store, result, result.status, result.status, by, blocking) } catch (error) {
       host.INTEGRATION.lastPushError = String(error?.message ?? error).slice(0, 300)
     }
+  }
+  // 卡进「待评审」时自动核对一次代码事实：AI 说改了什么，仓库里得真有。
+  if (moved !== null && moved.to === 'review') {
+    await autoVerifyCoding(store, id).catch(() => {})
   }
   return result
 }
