@@ -350,7 +350,7 @@ sudo systemctl restart dsh-web
 
 ## 出站 webhook（把变化告诉外部系统）
 
-目前发出四种事件——`task/moved`（卡片换列）、`case/failed`（用例失败，含 flaky 以外的）、`gate/blocked`（准出/设计闸门拦住）、`agent/failed`（派单失败）。配了 webhook 就 POST 出去：
+目前发出五种事件——`task/moved`（卡片换列）、`case/failed`（用例失败，flaky 除外）、`gate/blocked`（准出/设计闸门拦住）、`agent/failed`（派单失败）、`regression/finished`（一批用例跑完，含卡数/条数/通过/失败）。配了 webhook 就 POST 出去：
 
 ```json
 { "webhooks": [{ "id": "ci", "url": "https://ci.example/hook",

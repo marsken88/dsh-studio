@@ -272,15 +272,19 @@ function Drawer({ task, state, onClose, onChanged }) {
     if (file === null || String(file).trim() === '') return
     const sql = await promptDialog('SQL 语句（返回的行用来断言）', { title: '加一条数据库用例', defaultValue: 'select 1 as n' })
     if (sql === null || String(sql).trim() === '') return
-    const expect = await promptDialog('首行 n 列的期望值（可留空）', { title: '加一条数据库用例', defaultValue: '' })
+    const column = await promptDialog('断言首行的哪一列（留空就只看能不能执行）', { title: '加一条数据库用例', defaultValue: 'n' })
+    if (column === null) return
+    const expect = await promptDialog('这一列的期望值（可留空）', { title: '加一条数据库用例', defaultValue: '' })
     if (expect === null) return
     setBusy(true); setError(null)
     try {
       const spec = { file: String(file).trim(), sql: String(sql).trim() }
       const expectText = String(expect ?? '').trim()
-      if (expectText !== '') { spec.expectColumn = 'n'; spec.expectValue = expectText }
+      const columnName = String(column ?? '').trim()
+      if (expectText !== '' && columnName !== '') { spec.expectColumn = columnName; spec.expectValue = expectText }
       const title = ('db: ' + spec.sql).slice(0, 60)
-      await api('/task/case', { id: task.id, action: 'add', cases: [{ title: title, expected: expectText === '' ? '能执行' : ('n = ' + expectText), db: spec }] })
+      const server = String(column ?? 'n').trim() || 'n'
+      await api('/task/case', { id: task.id, action: 'add', cases: [{ title: title, expected: expectText === '' ? '能执行' : (server + ' = ' + expectText), db: spec }] })
       await onChanged()
     } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)) } finally { setBusy(false) }
   }

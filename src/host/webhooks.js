@@ -1,7 +1,7 @@
 // webhook 订阅者：把事件 POST 给配置里的地址。失败只记健康，不重试、不阻塞。
 import { emitEvent, subscribe } from './events.js'
 
-export const WEBHOOK_EVENTS = ['task/moved', 'case/failed', 'gate/blocked', 'agent/failed']
+export const WEBHOOK_EVENTS = ['task/moved', 'case/failed', 'gate/blocked', 'agent/failed', 'regression/finished']
 
 export function sanitizeWebhooks(raw) {
   if (!Array.isArray(raw)) return []

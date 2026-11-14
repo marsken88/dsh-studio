@@ -521,7 +521,7 @@ export function TestingPanel({ config, onChanged }) {
               h('button', { className: 'ds-btn ds-btn-ghost', disabled: busy, onClick: () => setHooks(list => list.filter((_, i) => i !== index)) }, '×'),
             ),
             h('div', { className: 'ds-row', style: { gap: 10, flexWrap: 'wrap', marginTop: 2 } },
-              ['task/moved', 'case/failed', 'gate/blocked', 'agent/failed'].map(name => h('label', { className: 'ds-check', key: name },
+              ['task/moved', 'case/failed', 'gate/blocked', 'agent/failed', 'regression/finished'].map(name => h('label', { className: 'ds-check', key: name },
                 h(CheckField, {
                   checked: (hook.events ?? []).includes(name),
                   onChange: e => setHooks(list => list.map((item, i) => (i === index

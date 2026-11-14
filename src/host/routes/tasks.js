@@ -1,5 +1,6 @@
 import { randomBytes } from 'node:crypto'
 import { applyFidelityItem, applySpecItem, pushDiffHistory, sanitizeDesign } from '../design.js'
+import { emitEvent } from '../events.js'
 import { collectCases, groupCaseKeys, loadSuites, resolveSuiteKeys, sanitizeSuite, saveSuites, summarizeRun } from '../cases.js'
 import { clearTeamMemory, loadTeamMemory } from '../team-memory.js'
 import {
@@ -84,6 +85,7 @@ async function runCaseKeys(store, keys, options = {}) {
   } catch {
     /* 记不下来不影响这次跑的结果 */
   }
+  emitEvent('regression/finished', { by: record.by, cards: record.cards, total: record.total, passed: record.passed, failed: record.failed, bugs: record.bugs ?? 0 })
   return { results, regression: record }
 }
 
