@@ -517,6 +517,26 @@ test('host: fidelity history keeps order, caps and skips repeats', async () => {
   assert.equal(full[0].percent, 14)
 })
 
+test('host: unverified code facts warn but do not block exit', async () => {
+  const { configureExecutor, taskExitGate } = await import('../src/host/executor.js')
+  configureExecutor({ serviceDependencies: () => [], serviceConflicts: () => undefined })
+  const base = {
+    status: 'accept',
+    checklist: [],
+    cases: [],
+    artifacts: [{ id: 'a1', title: 'x' }],
+    signoff: { by: '人', at: 1 },
+    history: [],
+  }
+  const failed = taskExitGate({ config: {} }, { ...base, coding: { files: [], verified: { ok: false, missingCommits: ['a'], missingFiles: ['b', 'c'] } } })
+  assert.ok(failed.warnings.some(item => item.includes('核对不通过')), failed.warnings.join('|'))
+  assert.ok(failed.warnings.some(item => item.includes('2 个文件')), failed.warnings.join('|'))
+  const clean = taskExitGate({ config: {} }, { ...base, coding: { files: [], verified: { ok: true, missingCommits: [], missingFiles: [] } } })
+  assert.equal(clean.warnings.some(item => item.includes('核对不通过')), false)
+  const none = taskExitGate({ config: {} }, { ...base })
+  assert.equal(none.warnings.some(item => item.includes('核对不通过')), false)
+})
+
 test('host: a merge request survives the patch normalizer', async () => {
   const { normalizePatch } = await import('../src/host/domain.js')
   const fromObject = normalizePatch({ gitlabMR: { iid: 42, title: 'feat: x', state: 'opened', url: 'https://git/x/-/merge_requests/42' } })

@@ -824,6 +824,11 @@ export function taskExitGate(state, task) {
     if (pending > 0) warnings.push(`${pending} 条用例还没跑`)
   }
   const artifacts = task.artifacts ?? []
+  // 核对过但没通过：给一句提醒（不拦准出：拦不拦是产品决定）。
+  const coding = task.coding ?? null
+  if (coding?.verified !== null && coding?.verified !== undefined && coding.verified.ok !== true) {
+    warnings.push('代码事实核对不通过：' + String((coding.verified.missingCommits ?? []).length) + ' 个提交 / ' + String((coding.verified.missingFiles ?? []).length) + ' 个文件在仓库里找不到')
+  }
   if (artifacts.length === 0) warnings.push('没有登记任何交付物')
   else {
     const empty = artifacts.filter(item => String(item.content ?? '').trim() === '').length
