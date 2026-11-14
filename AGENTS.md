@@ -70,6 +70,7 @@ STUDIO_TOKEN=$(sudo journalctl -u dsh-web -n 50 | grep -o 'token=[A-Za-z0-9_-]*'
    - 先点侧栏文字进入面板，再等 `[data-dsh-studio]`
    - 切页签用 `elementHandle.click()`（Radix Tabs 不认 DOM `.click()`）
    - 断言 DOM + `pageerror` 为空，并截图留档
+   - **能创建的东西必须有能用的路径**：新加一种对象或执行方式，要同时给「怎么建」和「怎么用」两个入口，探针必须走完「创建 → 使用 → 看到结果」。反例：2026-11-14 的 shell / 数据库用例，抽屉里建得出来，但「▶ 跑」按钮只认接口用例，另外两种永远跑不了——功能加了两天没人发现。
    - **探针说「找不到元素」时，先截图再说**：面板崩掉时 React 的错误边界会把异常吞在自己的渲染树里，`pageerror` 是空的，页面上只有一行「工作空间渲染失败：xxx is not defined」。2026-11-13 连着两次把「页面崩了」误判成「选择器不对」，白跑两轮。截图 + `document.body.innerText.includes('渲染失败')` 才是判据。
 5. 涉及权限/门禁/发布的重改动，跑一遍既有 e2e 脚本并贴出数字
 6. `npm test`（条数以 `npm run check` 打印的为准，别再写死数字；覆盖范围是：`tests/repo.test.mjs` 管 manifest / 产物一致 / 宿主接口 / 领域层拆分与导入 / **导入只读绑定不许赋值** / **跨模块符号必须导入** / 迁移 / 文档 / locale / **用了 `React.` 的组件必须从 `client()` 或工厂参数拿到 `React`**；`tests/client-units.test.mjs` 用真实模块跑标签表/负责人/日期/命令面板检索这些纯函数；`tests/notify.test.mjs` 起一个本地 HTTP 桩验证飞书通知（正文归一、`botWants` 的事件矩阵、`feishuBroadcast` 只发给订阅该事件的机器人）；`tests/store-boot.test.mjs` 真的起一个 `StudioStore`，把「搬完代码启动就炸」这类问题挡在部署前。想连真数据验证：把生产库三个文件（`.db`/`-wal`/`-shm`）拷到临时目录，用 `new StudioStore()` + `await store.ready` 跑一遍，`tmp/boot-real.mjs` 就是这么写的）；`npm run check` = 语法 + 契约一把过
