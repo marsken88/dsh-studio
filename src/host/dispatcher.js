@@ -274,7 +274,7 @@ export function runSummary() {
       current.ms += run.ms
       map.set(key, current)
     }
-    bump(byExpert, run.expertName || run.expert || '未记录')
+    bump(byExpert, run.expertId || run.expert || run.expertName || '未记录')
     bump(byModel, run.model || '跟随默认')
     bump(byPrompt, run.promptVersion || '未记录')
     const day = new Date(run.at).toISOString().slice(0, 10)
@@ -660,6 +660,9 @@ export class Dispatcher {
         taskCode: task.code || task.id,
         sessionId,
         expert: expert.id,
+        // 卡上真正指派的专家 id：列负责人是「角色位」时，expert.id 是角色（dev），
+        // 只按它统计会把同一个人的记录拆成两行（dev 有派单、expert-xxx 有卡）。
+        expertId: String(task.expert ?? ''),
         expertName: expert.name,
         model: String(this.modelFor(expert)?.model ?? ''),
         promptVersion: String(expert.promptVersion ?? ''),

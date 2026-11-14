@@ -58,10 +58,12 @@ export function buildQuality(state, runs) {
   }
   const runRows = (runs?.byExpert ?? []).map(item => ({ name: String(item.key ?? ''), runs: Number(item.runs) || 0, ms: Number(item.ms) || 0 }))
   const runByName = new Map(runRows.map(item => [item.name.toLowerCase(), item]))
+  const runById = new Map(runRows.map(item => [item.name, item]))
   const experts = [...perExpert.values()].map(row => {
     const info = (state?.config?.experts ?? []).find(item => item.id === row.key)
     const label = info === undefined ? row.key : `${info.emoji ?? ''} ${info.name}`.trim()
-    const run = runByName.get(String(info?.name ?? row.key).toLowerCase())
+    // 先按 id 认领（派单日志里带了 expertId），再退回名字。
+    const run = runById.get(row.key) ?? runByName.get(String(info?.name ?? row.key).toLowerCase())
     return {
       expert: row.key,
       label,
