@@ -56,7 +56,23 @@ export function buildQuality(state, runs) {
     if (rework) row.rework += 1
     if (done && !rework) row.firstPass += 1
   }
-  const runRows = (runs?.byExpert ?? []).map(item => ({ name: String(item.key ?? ''), runs: Number(item.runs) || 0, ms: Number(item.ms) || 0 }))
+  // 老的派单日志记的是「角色位」（dev），卡上记的是专家 id。一个角色只有一位专家时直接归并，
+  // 否则同一个人会在表里出现两行（一行有派单没卡、一行有卡没派单）。
+  const byRole = new Map()
+  for (const expert of state?.config?.experts ?? []) {
+    const role = String(expert.role ?? '')
+    if (role === '') continue
+    byRole.set(role, [...(byRole.get(role) ?? []), String(expert.id ?? '')])
+  }
+  const runRows = (runs?.byExpert ?? []).map(item => {
+    const key = String(item.key ?? '')
+    const holders = byRole.get(key) ?? []
+    return {
+      name: holders.length === 1 ? holders[0] : key,
+      runs: Number(item.runs) || 0,
+      ms: Number(item.ms) || 0,
+    }
+  })
   const runByName = new Map(runRows.map(item => [item.name.toLowerCase(), item]))
   const runById = new Map(runRows.map(item => [item.name, item]))
   const experts = [...perExpert.values()].map(row => {

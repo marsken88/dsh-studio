@@ -537,6 +537,21 @@ test('host: unverified code facts warn but do not block exit', async () => {
   assert.equal(none.warnings.some(item => item.includes('核对不通过')), false)
 })
 
+test('host: role-keyed runs fold into the only expert with that role', async () => {
+  const { buildQuality } = await import('../src/host/quality.js')
+  const state = {
+    config: { experts: [{ id: 'expert-1', name: '开发工程师', role: 'dev' }, { id: 'expert-2', name: '架构师', role: 'architect' }] },
+    tasks: [{ expert: 'expert-1', status: 'dev', history: [] }],
+  }
+  const merged = buildQuality(state, { byExpert: [{ key: 'dev', runs: 3, ms: 6000 }] })
+  assert.equal(merged.experts.length, 1)
+  assert.equal(merged.experts[0].expert, 'expert-1')
+  assert.equal(merged.experts[0].dispatched, 3)
+  // 一个角色挂了两位专家时不能瞎认领：没有卡能对上，就不生成行（派单数只跟着有卡的专家走）
+  const ambiguous = buildQuality({ config: { experts: [{ id: 'a', role: 'dev' }, { id: 'b', role: 'dev' }] }, tasks: [] }, { byExpert: [{ key: 'dev', runs: 2, ms: 0 }] })
+  assert.equal(ambiguous.experts.length, 0)
+})
+
 test('host: a merge request survives the patch normalizer', async () => {
   const { normalizePatch } = await import('../src/host/domain.js')
   const fromObject = normalizePatch({ gitlabMR: { iid: 42, title: 'feat: x', state: 'opened', url: 'https://git/x/-/merge_requests/42' } })
