@@ -1,5 +1,6 @@
 // webhook 订阅者：把事件 POST 给配置里的地址。失败只记健康，不重试、不阻塞。
 import { emitEvent, subscribe } from './events.js'
+import { markHealth } from './integrations.js'
 
 export const WEBHOOK_EVENTS = ['task/moved', 'case/failed', 'gate/blocked', 'agent/failed', 'regression/finished']
 
@@ -23,14 +24,17 @@ export async function deliverWebhooks(config, event) {
   const hooks = (config?.webhooks ?? []).filter(hook => hook.enabled !== false && (hook.events ?? []).includes(event.type))
   for (const hook of hooks) {
     try {
-      await fetch(hook.url, {
+      const response = await fetch(hook.url, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify(event),
         signal: AbortSignal.timeout(5000),
       })
-    } catch {
-      /* 外网/内网抖动是常态；事件本身已经进了台账，不在这里重试 */
+      // 投递结果进「集成健康」，否则地址写错了没人知道——事件是 fire-and-forget，不会报错给你。
+      if (response.ok) markHealth('webhook', 'ok', hook.id + ' ' + event.type)
+      else markHealth('webhook', 'fail', hook.id + ' HTTP ' + response.status)
+    } catch (error) {
+      markHealth('webhook', 'fail', hook.id + ' ' + String(error?.message ?? error).slice(0, 120))
     }
   }
 }

@@ -24,6 +24,7 @@ const CHANNELS = {
   gitlab: { label: 'GitLab', hint: '拉 Issue、回写评论、对 MR' },
   drive: { label: '飞书云盘归档', hint: '需求文件夹与产物文档（lark-cli）' },
   worktree: { label: '代码隔离', hint: 'git worktree 的创建与回收' },
+  webhook: { label: '出站 webhook', hint: '卡片流转/用例失败/门禁/回归结果推给外部系统' },
 }
 const HEALTH = new Map()
 export function healthState(channel) {
