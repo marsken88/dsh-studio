@@ -25,6 +25,8 @@ import { tmpdir } from 'node:os'
 import { dirname, extname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
+import { formRowIndex, isProbeCard, normalizePointValue } from '../lib/panel-selectors.mjs'
+
 const here = dirname(fileURLToPath(import.meta.url))
 const repo = join(here, '..', '..')
 
@@ -215,21 +217,38 @@ try {
   check('①c 默认口令有可见提示', (localAuth.mustChange === true) === showsDefaultHint, `mustChange=${localAuth.mustChange} 页面可见=${showsDefaultHint}`)
 
   // ② 抽屉：用例归功能点
-  // 必须点探针自己造的那张卡：看板上还有真实卡片，点第一张会打开别人的卡（没有 pointId），
-  // 于是这条断言永远失败，看起来像产品 bug。2026-11-21 真机定位到这里。
-  await page.evaluate(() => {
-    const card = [...document.querySelectorAll('[data-kanban-card]')]
-      .find(node => (node.textContent ?? '').includes('（探针）看板卡片'))
-    ;(card ?? document.querySelector('[data-kanban-card]'))?.click()
-  })
+  // 这条断言以前「量错了对象」，红出来的值是别人的卡 / 别人的用例（2026-11-22 用真浏览器逐条复现）：
+  //   a) 找不到探针卡就退化成点第一张卡 → 读到的是别的卡。实测打开 pointId=p3 那张卡，
+  //      读到的正是 {"value":"p3","hint":true}：看起来像「默认值没继承」，其实是样本换人了。
+  //   b) 「第一个带『不归功能点』的下拉」也不是新用例表单：卡上每条既有用例自己有归属下拉，
+  //      排在表单前面（真机 3 条用例 = 4 个下拉，第 1 个是用例的），读到的是某条用例的功能点。
+  // 所以判据分两步：先证明点开的是探针卡（找不到就算红，不许换样本），再只认「这条用例算在」那一行。
+  const cardTexts = await page.evaluate(() => [...document.querySelectorAll('[data-kanban-card]')].map(node => String(node.textContent ?? '')))
+  const probeIndex = cardTexts.findIndex(text => isProbeCard(text))
+  const openedProbeCard = probeIndex < 0
+    ? false
+    : await page.evaluate(index => {
+      const card = document.querySelectorAll('[data-kanban-card]')[index]
+      if (card === undefined) return false
+      card.click()
+      return true
+    }, probeIndex)
+  check('② 点开的是探针自己造的那张卡（p1）', openedProbeCard, openedProbeCard ? '' : '看板上找不到「（探针）看板卡片」：不许拿别人的卡当样本，先修数据再跑')
   await new Promise(resolve => setTimeout(resolve, 900))
   const sections = await page.evaluate(() => [...document.querySelectorAll('[data-drawer-section]')].map(node => String(node.textContent ?? '')))
   check('② 抽屉打开且有分区', sections.length > 0, `${sections.length} 个分区`)
   check('② 抽屉里有「测试用例」区', sections.some(text => text.includes('测试用例')))
-  const casePoint = await page.evaluate(() => {
-    const select = [...document.querySelectorAll('select')].find(node => [...node.options].some(option => String(option.textContent).includes('不归功能点')))
-    return select === undefined ? null : { value: select.value, hint: [...document.querySelectorAll('[data-case-point-row]')].some(node => String(node.textContent).includes('默认跟卡上的功能点')) }
-  })
+  /* 新用例表单那一行用 [data-case-point-row] 认（当前面板的 DOM 钩子），不再取第一个带「不归功能点」的下拉：
+     卡上每条既有用例自己有归属下拉，排在表单前面，读到的是某条用例的功能点（真机 3 条用例 = 4 个下拉）。
+     formRowIndex 仍按「这条用例算在」认行，避免以后 DOM 顺序再变时又量错对象。 */
+  const drawerRows = await page.evaluate(() => [...document.querySelectorAll('[data-case-point-row], [data-drawer-case-row]')].map(node => ({
+    text: String(node.textContent ?? ''),
+    value: node.querySelector('select')?.value ?? null,
+  })))
+  const formRow = drawerRows[formRowIndex(drawerRows.map(row => row.text))] ?? null
+  const casePoint = formRow === null || formRow.value === null
+    ? null
+    : { value: formRow.value, empty: normalizePointValue(formRow.value) === '', hint: formRow.text.includes('默认跟卡上的功能点') }
   check('② 新用例表单的功能点选择器默认继承卡（p1）', casePoint !== null && casePoint.value === 'p1', JSON.stringify(casePoint))
   check('② 选择器旁有「默认跟卡上的功能点」说明', casePoint?.hint === true)
 
