@@ -38,6 +38,20 @@ export async function splitRequirement(store, input, createTask) {
   const uncovered = points.filter(point => !before.tasks.some(task => task.requirementId === requirement.id && task.pointId === point.id))
   if (uncovered.length === 0) throw new Error('这些功能点都已经有卡了')
 
+  /* 产品这一棒的价值在「把需求挖到能验收」：功能点没有可判定的验收条件就不许拆卡。
+     没有验收条件的卡，研发只能猜、测试只能编，后面的门禁全是空转。
+     确认不适用时可在设置里关 requirementGate.requireAcceptance。 */
+  const gate = before.config?.requirementGate ?? {}
+  if (gate.requireAcceptance !== false) {
+    const bare = uncovered.filter(point => (Array.isArray(point.acceptance) ? point.acceptance : [])
+      .every(item => String(item?.text ?? '').trim() === ''))
+    if (bare.length > 0) {
+      throw new Error('这些功能点还没有可判定的验收条件，先补上再拆卡：'
+        + bare.map(point => `${point.id} ${point.title}`).join('、')
+        + '（用 studio_requirement_save 的 points[].acceptance 写；确实不适用可在设置里关 requirementGate.requireAcceptance）')
+    }
+  }
+
   const created = []
   for (const point of uncovered) {
     const checklist = checklistFromAcceptance(point.acceptance)

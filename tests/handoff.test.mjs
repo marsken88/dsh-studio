@@ -67,7 +67,9 @@ test('handoff: 派单提示词先读契约，再读最近评论', () => {
   assert.ok(prompt.indexOf('交接契约') < prompt.indexOf('最近评论'), '契约要排在评论之前')
 
   const bare = buildExpertPrompt({ ...base, handoff: null }, expert, column, config, undefined, '', undefined, { config, tasks: [{ ...base, handoff: null }] }, [])
-  assert.doesNotMatch(bare, /交接契约/)
+  // 协作约定里始终会提「交接契约」这个词；这里要断言的是**卡上没有契约时不渲染契约内容**。
+  assert.doesNotMatch(bare, /决策：用 SQLite 事务/)
+  assert.doesNotMatch(bare, /未决：要不要分表/)
   assert.equal(handoffBlock(null), '')
 })
 

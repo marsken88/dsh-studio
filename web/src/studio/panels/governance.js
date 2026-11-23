@@ -304,6 +304,15 @@ export function ColumnsPanel({ state, onChanged }) {
       await onChanged()
     } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)) } finally { setBusy(false) }
   }
+  /* 拆卡闸门：功能点没有可判定验收条件时不许拆（产品这一棒的质量底线）。 */
+  const acceptanceGateEnabled = config.requirementGate?.requireAcceptance !== false
+  const saveAcceptanceGate = async requireAcceptance => {
+    setBusy(true); setError(null)
+    try {
+      await api('/config', { requirementGate: { ...(config.requirementGate ?? {}), requireAcceptance } })
+      await onChanged()
+    } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)) } finally { setBusy(false) }
+  }
   const toggleGateColumn = id => {
     const next = gateColumns.includes(id) ? gateColumns.filter(item => item !== id) : [...gateColumns, id]
     void saveDesign({ columns: next })
@@ -377,6 +386,16 @@ export function ColumnsPanel({ state, onChanged }) {
           disabled: busy, 'data-tier-gate': tierGateEnabled ? 'on' : 'off',
           onClick: () => void saveTierGate(!tierGateEnabled),
         }, tierGateEnabled ? '三层测试闸门：已开启' : '三层测试闸门：已关闭'),
+      ),
+      h('div', { className: HINT },
+        '拆卡闸门：需求的每个功能点至少要有一条**可判定**的验收条件（输入/操作 + 可观察结果），否则不允许拆成卡（默认开启）。',
+        '没有验收条件的卡，研发只能猜、测试只能编，后面的门禁会空转。'),
+      h('div', { className: ROW },
+        h(Button, {
+          variant: acceptanceGateEnabled ? 'primary' : 'secondary', size: 'sm',
+          disabled: busy, 'data-requirement-gate': acceptanceGateEnabled ? 'on' : 'off',
+          onClick: () => void saveAcceptanceGate(!acceptanceGateEnabled),
+        }, acceptanceGateEnabled ? '拆卡验收条件闸门：已开启' : '拆卡验收条件闸门：已关闭'),
       ),
       error !== null ? h('div', { className: ERR, role: 'alert' }, error) : null,
     ),
