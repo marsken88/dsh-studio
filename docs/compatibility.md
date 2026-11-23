@@ -6,12 +6,12 @@
 
 | 项 | 值 |
 | --- | --- |
-| dsh-studio | `package.json` `version: 0.10.7` |
+| dsh-studio | `package.json` `version: 0.11.0` |
 | DeepSeek Harness | `0.2.2-rc.1`（`dsh --version`） |
 | Node | `v24.22.2`（Linux 目标机）；本机 Windows `v24.19.0` |
 | 目标系统 | Ubuntu 24.04，`dsh web` 监听 `18080`，nginx `:80` 反代并注入 `dsh-auth-*` cookie |
 | 插件安装方式 | npm：`dsh plugin --profile web add @marsken/dsh-studio`；本地开发：`add link:~/dsh-studio`（profile `web`） |
-| 验证范围 | 0.10.7：**本机 Windows desktop + CI**（459 单测 / 48 项页面与 AX 探针 / 面板探针 31 项）**+ Linux 目标机已部署**（Ubuntu 24.04 / `192.168.120.218:18080`）：`probe:panel` 31/31、`/agents/policy` 回显 `escalation`、`/config` 往返生效 |
+| 验证范围 | 0.11.0：**本机 Windows desktop 活实例（代码同版）+ CI**（474 单测 / 48 项页面与 AX 探针 / `probe:panel` 33 项 / `verify:tiers` 31 项）：面板探针 33/33、三层测试探针 31/31、测试专家按三层真跑 6/6；**Linux 目标机未部署 0.11.0**（0.10.7 仍在线） |
 | 兼容声明 | `engines.dsh: ">=0.2.2-rc.1"`、`dsh.compatibility.dshReleases: { "0.2.2-rc.1+": "compatible" }` |
 
 > 结论：只在 **0.2.2-rc.1** 上做过端到端验证。0.2.2 正式版、以及 `<0.2.2` 均未验证。
@@ -26,7 +26,7 @@
 | --- | --- | --- |
 | `export const inject = ['tools','systemPrompt']` | 插件声明必须的服务 | 插件不加载；面板消失 |
 | `ctx.systemPrompt.section({ name, order, text })` | 注入 `studio-protocol`（order 70），告诉 agent 如何用 `studio_*` 工具 | agent 不写讨论、不推进卡片 |
-| `ctx.tools.register(tool)` ×46 | 全部 `studio_*` 工具（建卡、派单、门禁、发布…） | 工具消失；LLM 报 unknown tool |
+| `ctx.tools.register(tool)` ×47 | 全部 `studio_*` 工具（建卡、派单、门禁、发布…） | 工具消失；LLM 报 unknown tool |
 | `ctx.inject(['webServer'], ctx => ctx.webServer.register({ kind:'prefix', path:'/studio-api', handler }))` | 所有 HTTP 路由（135 条，含 `/suite/*`、`/coding/gitlab`、`/requirement/impact`、`/task/design`） | 前端全 404，面板空壳 |
 | `ctx.inject(['agents','sessionController','workspaceRegistry','permissionPresets','agentDefaultModel'], …)` | 派单引擎 `Dispatcher`：起会话、发指令、收 `agent/status` 事件 | 派单报「这一列还没人负责」或会话永远 idle |
 | `ctx.agents.create / resume / get / list / abort` | 一卡一会话（`studio-<taskId>-<expertId>`） | 会话起不来；`has no provider/model`；槽位泄漏 |
