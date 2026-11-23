@@ -1112,3 +1112,28 @@ issue #4「抽屉头部被窗口按钮盖住」的修复过程，记下来给以
 验证：`npm test` 375/375（本地 + UTC），TDZ 38 文件，`release:check` 7 项，panel-probe 29/29、pages-probe 25/25，真库 `smoke:store` 通过。
 
 教训更新：行数闸门不是「下一批再说」——`domain.js` 与 `executor.js` 贴到 1999 时，批 9 的字段改动只能先拆再改；现在四个大文件（index 2551、client.src 2460、domain 1948、executor 1742）都有余量。
+
+## 2026-11-23 · 派单会话落在项目工作区里（不再是「未分组」）
+
+现象：派出去的智能体在 DSH 侧栏里落在「未分组」，工作区里那几个名字还都叫「需求&任务工作空间」。
+
+查下来是两件事叠在一起：DSH 的 `workspaceRegistry` 按会话 **canonical cwd** 归属工作区，而派单的 cwd 是
+`agents.workspaceDir`（默认 `~/dsh-workspace`）或工作区同级的 worktree 根——这两个目录不属于任何项目工作区；
+同时 dispatcher 还会为它 `workspaceRegistry.create(dir, '需求&任务工作空间')`，于是每张卡都可能多出一个同名工作区
+（那个字符串本来是看板标题，被当成了工作区名）。
+
+改法：
+
+- 新增 `src/host/dispatch-cwd.js`（纯函数）：`projectContext` 解析卡所属项目/服务的「本机代码目录」，
+  `dispatchDirFor` 决定会话目录与工作区名，`worktreeBaseFor` 决定 worktree 根
+- 会话 cwd 规则改成 **worktree > 项目仓库 > 兜底目录**；worktree 默认建在仓库内 `.agents/worktrees`
+  （显式配 `worktreeRoot` 仍然优先）；兜底目录的工作区名固定为「Studio 工作区」
+- 项目代码目录不存在时不再用 `mkdir` 造假仓库：记一行日志并退回兜底目录
+- `qualityTargetFor` 与派单共用同一份项目/服务解析（`card-quality.js` 里删了一段重复逻辑）
+
+验证：`npm test` 454/454（本地 + UTC，新增 8 例纯函数 + 4 例走真实 `ensureSession` 的桩测试），
+TDZ 41 文件，`pnpm build` 后 `cmp dist/client.js client.js` 一致，`probe:panel --base :49244` 30/30
+（新增 ④e：设置页自动派单要讲清会话目录）。
+
+没验到的：宿主侧要重启 DSH 才加载新代码（desktop profile 是指向仓库的链接），
+所以「侧栏里真的出现在项目工作区下」这一条要等重启后的第一次派单确认。
