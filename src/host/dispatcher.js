@@ -1149,7 +1149,7 @@ export function buildExpertPrompt(task, expert, column, config, team, instructio
             '· 端到端测试（tier=e2e）：真开浏览器，从用户入口走主流程与关键异常路径：{browser:{url, expectText, expectSelector, steps:[{click},{fill,text},{waitFor}]}}（需要先开 allowBrowser）。没有前端改动的卡，在测试计划里写明这一层不适用并给出理由。',
             '',
             '硬性要求：',
-            '1. 每条用例必须能跑：studio_task_add_cases 会当场试跑第一条，跑不通就改断言/地址再调；只有标题没有断言的「用例」不许写（那是待办，不是用例）。真跑不了的（要人工操作、连设备、看第三方系统）用 studio_task_case 登记成描述型用例，自己执行后回填 result 并写清证据。',
+            '1. 每条用例必须能跑：studio_task_add_cases 会当场试跑第一条，跑不通就改断言/地址再调；只有标题没有断言的「用例」不许写（那是待办，不是用例）。卡上已有同名空壳时，工具会**原地升级**成可执行（不会新增重复），补齐断言重新调用即可。真跑不了的（要人工操作、连设备、看第三方系统）用 studio_task_case 登记成描述型用例，自己执行后回填 result 并写清证据。',
             '2. 用 studio_test_run 让平台真的跑（发请求、比对状态码与响应体、写回结果、留执行记录）。**用例一旦判 fail，平台会自动开缺陷卡（挂同一需求、父任务指向本卡），不要手工再建、也不要重复建**。',
             '3. 三层收口：三条线要么有可执行用例并跑出结论，要么用 studio_task_test_plan 写明「不适用 + 理由」（例如本次只改后端接口、没有前端改动 → e2e 不适用）。准出按这个判定，缺一层会被拦。',
             '4. 登记测试报告（studio_task_artifact，kind=report）：每条线的用例数 / 通过 / 失败 / 未跑，失败项的实际结果与复现路径，遗留风险。',

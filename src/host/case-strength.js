@@ -58,6 +58,22 @@ export function resolveCaseResult(rawResult, raw) {
   return isExecutable(raw) ? 'pass' : 'pending'
 }
 
+/** 去掉标题里的「可执行」标记：`a1 正常除法（可执行）` → `a1 正常除法`。 */
+export function stripExecutableMarker(text) {
+  return String(text ?? '')
+    .trim()
+    .replace(/^可执行(?:断言)?[：:]\s*/u, '')
+    .replace(/\s*[（(]\s*可执行(?:断言)?\s*[)）]\s*$/u, '')
+    .replace(/\s*[-—·]\s*可执行(?:断言)?\s*$/u, '')
+    .trim()
+}
+
+/** 用例标题归一：判断「这条可执行用例是不是在补一条同名草稿」用。
+ *  去掉「可执行」标记、空白和大小写差异；不做模糊匹配，避免把不同断言误合并。 */
+export function normalizeCaseTitle(text) {
+  return stripExecutableMarker(text).replace(/\s+/gu, '').toLowerCase()
+}
+
 /** 从验收条件推断用例：能推断出可执行断言就给出断言，推断不出就标 draft。
  *
  * 以前是「一条验收条件 = 一个只有标题的用例」，全库 101 条里 0 条能跑。

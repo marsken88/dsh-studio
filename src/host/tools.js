@@ -665,7 +665,8 @@ export function registerTools(ctx, store) {
 
   register(defineStudioTool({
     name: 'studio_task_design',
-    description: 'Record the design review on a card: drafts (name + link + note, max 8), which draft is chosen (chosenId), and the review status (pending | approved | changes_requested). 设计闸门要求 status=approved **且**已定案才准进开发；定案的那一稿会写进研发的派单提示词。部分更新即可（合并而不是覆盖）。',
+    description: 'Record the design review on a card: drafts (name + link + note, max 8), which draft is chosen (chosenId), and the review status (pending | approved | changes_requested). 设计闸门要求 status=approved **且**已定案才准进开发；定案的那一稿会写进研发的派单提示词。部分更新即可（合并而不是覆盖）。\n'
+      + '**不能自审**：下 approved 的评审人不能是这些稿的作者（同一个人提交会被拒），需要另一位专家或用面板以「人」的身份通过。',
     parameters: {
       id: { type: 'string', required: true, description: 'Task id.' },
       status: { type: 'string', description: 'pending | approved | changes_requested' },
@@ -744,6 +745,7 @@ export function registerTools(ctx, store) {
     name: 'studio_task_add_cases',
     description: '把**带可执行断言**的测试用例写进这张卡，并当场试跑第一条：跑不通就不算生成成功。接口用例形如 {title, method, path, body?, expectStatus, expectContains?}；shell 形如 {title, command, expectExit?}（需在设置里开 allowShell）；数据库形如 {title, db:{file, sql, expectColumn?, expectValue?}}（需开 allowDb）；浏览器形如 {title, browser:{url|path, expectText?, expectSelector?}}（需开 allowBrowser）。\n'
       + '**测试层级 tier**：每条可写 tier=unit（单元测试：跑单测命令）/ integration（集成测试：接口、数据库、契约）/ e2e（端到端：真开浏览器走用户路径）/ other（其它探针）。不写就按断言推断：browser→e2e、http/db→integration、shell 看命令（单测 runner→unit、playwright/cypress 等→e2e）。代码类卡上三条线都要有可执行用例，或用 studio_task_test_plan 写明哪一层不适用。\n'
+      + '**同名空壳原地升级**：卡上已有同名的「只有标题」用例时（含 `（可执行）` 这类后缀差异），会**补断言到原用例上**并保留 id / 功能点 / 验收条件，不会再追加一条重复的；同名且已可执行的会跳过。\n'
       + '**归属功能点**：每条可带 pointId（这条用例算在哪个需求功能点）和 acceptanceId（验哪条验收条件，矩阵按它逐条判覆盖）；**不填 pointId 就继承卡上的 pointId**——一个功能点多条用例时不用每条都重复写。\n'
       + '**地址规则**：path 可以写相对地址（用测试环境的 baseUrl 解析），完整地址只认 http(s)。\n'
       + '有一条不合法就整体拒绝、一条都不写（错误里会点名第几条、为什么）。',
@@ -765,8 +767,9 @@ export function registerTools(ctx, store) {
       })
       const strength = result.strength ?? { total: 0, executable: 0, rate: null }
       const rate = strength.rate === null ? '—' : `${Math.round(strength.rate * 100)}%`
+      const upgraded = Number(result.upgraded) || 0
       const lines = [
-        `已写入 ${result.added} 条用例${result.skipped > 0 ? `（${result.skipped} 条与已有用例重名，跳过）` : ''}；这张卡现在 ${result.total} 条，其中可执行 ${strength.executable} 条（${rate}）。`,
+        `已写入 ${result.added} 条用例${upgraded > 0 ? `，并把 ${upgraded} 条同名空壳原地升级为可执行（保留原 id / 归属，不新增重复）` : ''}${result.skipped > 0 ? `（${result.skipped} 条与已有用例重名且已可执行，跳过）` : ''}；这张卡现在 ${result.total} 条，其中可执行 ${strength.executable} 条（${rate}）。`,
       ]
       const verified = result.verified
       if (verified === null) {

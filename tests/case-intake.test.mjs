@@ -121,6 +121,24 @@ test('用例入库：试跑打不通要说实话，不能报成已生成', async
   assert.match(store.state.tasks[0].cases[0].note, /失败/)
 })
 
+test('用例入库：同名空壳会原地升级成可执行，不再追加重复', async () => {
+  const store = fakeStore(
+    { testing: testing({ allowShell: true }) },
+    [{ id: 't-1', title: '卡片', cases: [{ id: 'c-draft', title: 'a1 正常除法', result: 'pending', note: '' }], updates: 0, updatedAt: 0 }],
+  )
+  const result = await addAssertedCases(store, 't-1', [
+    { title: 'a1 正常除法（可执行）', command: 'node -e "process.exit(0)"', expectExit: 0 },
+  ], { by: '测试专家' })
+  assert.equal(result.added, 0, '不能再新增一条重复用例')
+  assert.equal(result.upgraded, 1)
+  assert.equal(store.state.tasks[0].cases.length, 1, '同名空壳要原地升级，数量不变')
+  const saved = store.state.tasks[0].cases[0]
+  assert.equal(saved.id, 'c-draft', 'id 要保留（历史/归属不丢）')
+  assert.equal(saved.title, 'a1 正常除法', '「（可执行）」后缀要去掉')
+  assert.equal(isExecutable(saved), true, '升级后必须算可执行')
+  assert.equal(result.verified?.id, 'c-draft', '升级后也要当场试跑')
+})
+
 test('用例入库：重名的跳过但不重复写入', async () => {
   const store = fakeStore({ testing: testing({}) }, [{ id: 't-1', title: '卡片', cases: [{ id: 'c-old', title: '已有用例', result: 'pending' }], updates: 0, updatedAt: 0 }])
   const result = await addAssertedCases(store, 't-1', [

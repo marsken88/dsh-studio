@@ -1,7 +1,7 @@
 // -------------------------------------------------- 执行记录与接口测试执行器（P4）
 // 代码事实核对、用例执行、缺陷回流、健康检查。宿主级依赖通过 configureExecutor() 注入。
 
-import { COVERAGE_TARGET, coverageStrength, draftCasesFromCriteria, isExecutable } from './case-strength.js'
+import { COVERAGE_TARGET, coverageStrength, draftCasesFromCriteria, isExecutable, normalizeCaseTitle, stripExecutableMarker } from './case-strength.js'
 import { gapMessage, needsTierPlan, sanitizeTier, testPlanSummary } from './test-plan.js'
 import { isAiSignoff } from './intervention.js'
 import { reviewGate } from './quality.js'
@@ -1804,20 +1804,61 @@ export async function addAssertedCases(store, taskId, rawCases, options = {}) {
     throw new Error(`${rejected.length}/${list.length} 条用例不合法，一条都没写进去：${shown}${more}`)
   }
 
-  const existing = new Set((task.cases ?? []).map(item => item.title))
+  const existingTitles = new Set((task.cases ?? []).map(item => String(item.title ?? '')))
   /* 没写 pointId 就继承卡的功能点：一个功能点通常多条用例，让调用方每条都重复写一遍纯属噪音。
      想看「这条用例到底覆盖哪个功能点」的人，读到的就是卡上的那个（issue #11）。 */
   for (const item of prepared) {
     if (String(item.pointId ?? '') === '') item.pointId = String(task.pointId ?? '')
   }
-
-  const fresh = prepared.filter(item => !existing.has(item.title))
-  if (fresh.length === 0) {
-    return { added: 0, skipped: prepared.length, total: (task.cases ?? []).length, verified: null, env: null }
+  /* 同名空壳**原地升级**，不再追加一条重复用例：以前只按标题完全相等去重，于是
+     「a1 正常除法」和「a1 正常除法（可执行）」会并存 —— 真机四棒接力就这样在 15 条里塞了 7 条
+     永远跑不了的草稿，把需求级「可执行覆盖率 ≥60%」拖到 53%。保留原 id / 功能点 / 验收条件。 */
+  const draftByKey = new Map((task.cases ?? [])
+    .filter(item => !isExecutable(item))
+    .map(item => [normalizeCaseTitle(item.title), item]))
+  const upgrades = []
+  const fresh = []
+  for (const item of prepared) {
+    if (existingTitles.has(item.title)) continue
+    const key = normalizeCaseTitle(item.title)
+    const target = key === '' ? undefined : draftByKey.get(key)
+    if (target !== undefined) {
+      upgrades.push({ target, item })
+      continue
+    }
+    fresh.push(item)
+  }
+  if (fresh.length === 0 && upgrades.length === 0) {
+    return { added: 0, upgraded: 0, skipped: prepared.length, total: (task.cases ?? []).length, verified: null, env: null }
   }
   const ids = []
+  const upgradedIds = []
   await store.mutate(state => {
     const entry = state.tasks.find(item => item.id === task.id)
+    for (const { target, item } of upgrades) {
+      upgradedIds.push(target.id)
+      entry.cases = entry.cases.map(existing => {
+        if (existing.id !== target.id) return existing
+        return sanitizeCase({
+          ...existing,
+          title: stripExecutableMarker(item.title) || existing.title,
+          expected: item.expected !== '' ? item.expected : existing.expected,
+          result: 'pending',
+          tier: item.tier !== '' ? item.tier : existing.tier,
+          pointId: item.pointId !== '' ? item.pointId : existing.pointId,
+          acceptanceId: item.acceptanceId !== '' ? item.acceptanceId : existing.acceptanceId,
+          note: `由草稿升级为可执行（原结果 ${existing.result} 作废）`,
+          draft: false,
+          by,
+          at: Date.now(),
+          http: item.http ?? null,
+          shell: item.shell ?? null,
+          db: item.db ?? null,
+          browser: item.browser ?? null,
+          lastRun: null,
+        }, 0)
+      })
+    }
     for (const [index, item] of fresh.entries()) {
       const id = `c-${randomBytes(3).toString('hex')}`
       ids.push(id)
@@ -1843,8 +1884,8 @@ export async function addAssertedCases(store, taskId, rawCases, options = {}) {
     entry.updatedAt = Date.now()
   })
 
-  // 当场试跑第一条：跑不通就在这里暴露，而不是等谁来点「▶ 跑」。
-  const created = (store.snapshot().tasks.find(item => item.id === task.id)?.cases ?? []).filter(item => ids.includes(item.id))
+  // 当场试跑第一条：新用例优先，没有新的就试跑刚升级的那条。跑不通就在这里暴露，而不是等谁来点「▶ 跑」。
+  const created = (store.snapshot().tasks.find(item => item.id === task.id)?.cases ?? []).filter(item => [...ids, ...upgradedIds].includes(item.id))
   const first = created[0]
   let verified = null
   if (first !== undefined) {
@@ -1883,7 +1924,8 @@ export async function addAssertedCases(store, taskId, rawCases, options = {}) {
   const total = (after?.cases ?? []).length
   return {
     added: fresh.length,
-    skipped: prepared.length - fresh.length,
+    upgraded: upgrades.length,
+    skipped: prepared.length - fresh.length - upgrades.length,
     total,
     verified,
     env: env === undefined ? null : { id: env.id, name: env.name, baseUrl: env.baseUrl },
