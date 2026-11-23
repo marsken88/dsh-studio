@@ -1,5 +1,21 @@
 # 更新日志
 
+## [未发布]
+
+### 派单会话落在项目工作区里，不再散成「未分组」
+
+- 新增 `src/host/dispatch-cwd.js`（纯函数）：`projectContext` 解析卡所属项目/服务的「本机代码目录」，
+  `dispatchDirFor` 决定会话目录与工作区名，`worktreeBaseFor` 决定 worktree 根
+- 派单会话 cwd 规则改成 **worktree > 项目代码目录 > 兜底目录**：卡挂在配了 `repoPath` 的项目上时，
+  会话直接跑在那个仓库里（宿主按会话 cwd 归属工作区，所以它会出现在侧栏的项目工作区下）；
+  worktree 默认建在仓库内 `.agents/worktrees`（以前在工作区同级 `dsh-worktrees`），
+  显式配「worktree 根目录」仍然优先
+- 新建工作区不再一律叫「需求&任务工作空间」（那是看板标题）：项目仓库用项目名、
+  worktree 用「项目名 · 卡号」、兜底目录固定「Studio 工作区」
+- 项目「本机代码目录」配错（目录不存在）时不再靠 `mkdir` 把空目录造出来当仓库：记一行日志并退回兜底目录
+- `qualityTargetFor` 与派单共用同一份项目/服务解析，避免「检查跑在 A 仓库、会话跑在 B 目录」
+- 设置面板「工作区目录」改为「兜底工作目录」并补说明；`.gitignore` 忽略 `.agents/`；
+  `AGENTS.md` §1 登记新模块；`docs/manual.md` 补「派单会话落在未分组」的排障条目
 
 ## [0.10.5] — 2026-11-23
 

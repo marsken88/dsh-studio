@@ -123,8 +123,9 @@ export function AutoDispatchPane({ form, setForm, saveBar }) {
       ),
       field('agentsMaxConcurrent', '同时最多几个 agent', '2'),
       field('agentsPreset', 'Agent 预设', 'standard'),
-      field('agentsWorkspace', '工作区目录', '~/dsh-workspace'),
       h('div', { className: HINT }, '预设决定 agent 手里有哪些工具：standard 带 shell 与文件读写，minimal 只有基础工具。'),
+      field('agentsWorkspace', '兜底工作目录', '~/dsh-workspace'),
+      h('div', { className: HINT }, '卡挂在配了「本机代码目录」的项目上时，派单会话跑在那个仓库里 —— 它才会出现在侧栏的项目工作区下；项目没配代码目录时才用这个兜底目录。'),
       selectOf('沙箱档位（这个会话能写哪、能跑什么）', 'agentsSandbox', [
         ['read-only', '只读：能看不能改'],
         ['workspace-write', '只写工作区（推荐）：能改自己的目录，改不到系统别处'],
@@ -136,7 +137,8 @@ export function AutoDispatchPane({ form, setForm, saveBar }) {
         ['worktree', '一卡一个 git worktree（推荐给多卡并行）'],
       ]),
       h('div', { className: HINT }, '开启后，卡要挂在配了「本机代码目录」的项目上，派单时会为它切一条 task/<编号> 分支。'),
-      field('agentsWorktreeRoot', 'worktree 根目录', '留空 = 工作区同级的 dsh-worktrees'),
+      field('agentsWorktreeRoot', 'worktree 根目录', '留空 = 仓库内 .agents/worktrees'),
+      h('div', { className: HINT }, '留空时 worktree 建在仓库的 .agents/worktrees 下，侧栏里挂在项目工作区下；项目没配代码目录时退回工作区同级的 dsh-worktrees。'),
       selectOf('卡完成时', 'agentsCleanup', [
         ['manual', '保留 worktree 和分支，等人看 diff'],
         ['on_done', '自动删掉 worktree 和分支'],

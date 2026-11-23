@@ -397,6 +397,19 @@ try {
   check('④d 角色与模型面板真的渲染', modelsPane.text.includes('角色与模型') && modelsPane.inputs >= 4, `inputs=${modelsPane.inputs}`)
   await page.screenshot({ path: join(outDir, 'role-models.png') })
 
+  // ④e 设置 → 自动派单：会话跑在哪个目录要写清楚（决定它落在侧栏哪个工作区）。
+  // 以前这一项叫「工作区目录」，看不出会话会跑在 ~/dsh-workspace 里、落在「未分组」。
+  const agentsNav = await clickExact('自动派单')
+  if (agentsNav === true) await new Promise(resolve => setTimeout(resolve, 700))
+  const agentsText = await page.evaluate(() => document.body.innerText)
+  const agentsPaneOk = agentsNav === true && agentsText.includes('兜底工作目录') && agentsText.includes('本机代码目录')
+  check(
+    '④e 设置页自动派单讲清了会话目录',
+    agentsPaneOk,
+    agentsPaneOk ? '' : `nav=${agentsNav} 兜底=${agentsText.includes('兜底工作目录')} 本机代码目录=${agentsText.includes('本机代码目录')}`,
+  )
+  await page.screenshot({ path: join(outDir, 'agents.png') })
+
   // ⑤ 设置 → 技能库：使用读数
   const skillsNav = await clickExact('技能库')
   if (skillsNav === true) await new Promise(resolve => setTimeout(resolve, 800))

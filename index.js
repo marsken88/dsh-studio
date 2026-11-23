@@ -30,6 +30,7 @@ export const inject = ['tools', 'systemPrompt']
 import { sanitizeProjectFolders, ACCESS_ROLE_LABEL, ACCESS_ROLES, ADMIN_ROUTES, ARTIFACT_KINDS, ARTIFACT_STATUS, CASE_HTTP_METHODS, CASE_PRIORITIES, CASE_RESULTS, CASE_TYPE_LABEL, CASE_TYPES, cleanId, CODE_PREFIX, CODING_FILE_CHANGES, CODING_REVIEW_STATUS, codingSummary, COLUMN_STRATEGIES, DEFAULT_ROLES, defaultColumns, defaultConfig, defaultDeployEnvs, defaultTemplates, DEPLOY_ENV_KINDS, FALLBACK_AGENT_MODEL, hashLocalPassword, ISOLATION_MODES, LEGACY_BLOCKED_STATUS, LEVEL_RANK, LOCAL_DEFAULT_PASSWORD, mergeCoding, mergeConfig, mergeSection, nextRequirementCode, nextTaskCode, normalizePatch, normalizeStrategy, publicArtifact, publicCases, publicChecklist, publicComments, PRIORITIES, ROLE_LABELS, canonicalAuthor, RELEASE_STATUSES, RELEASE_STATUS_LABEL, REQ_DOC_KIND_LABEL, REQ_DOC_KINDS, REQ_DOC_STATUS, REQ_REVIEW_LABEL, REQ_REVIEW_STATUS, REQ_STATUS_LABEL, REQ_STATUSES, ROLE_IDS, ROLE_LEVEL, SANDBOX_MODES, sanitizeAccess, sanitizeAllowHosts, sanitizeArtifact, sanitizeArtifacts, sanitizeBaseline, sanitizeBots, sanitizeBugSource, sanitizeCase, sanitizeCaseHttp, sanitizeCaseRun, sanitizeCases, sanitizeChangedFile, sanitizeChangedFiles, sanitizeChecklist, sanitizeChecklistItem, sanitizeCaseGate, sanitizeCoding, sanitizeColumns, sanitizeCommit, sanitizeCommits, sanitizeCosts, sanitizeDeployEnvs, sanitizeEnvs, sanitizeExperts, sanitizeIterations, sanitizeLdap, sanitizeLocalAuth, sanitizeProjects, sanitizeReqDoc, sanitizeReqDocs, sanitizeRelease, sanitizeRequirement, sanitizeRequirementChange, sanitizeRequirementHistory, sanitizeRequirementPoint, sanitizeRequirementPoints, sanitizeRequirementPool, sanitizeRequirementQuestions, sanitizeRequirementReview, sanitizeRequirements, sanitizeReviewGate, sanitizeServices, sanitizeSla, sanitizeTeams, sanitizeTemplates, sanitizeTesting, sanitizeTestRun, sanitizeTestRuns, sanitizeUsers, sanitizeWorkProjects, seedExperts, SEVERITIES, STATUS_IDS, STATUS_SET, STATUSES, TASK_TYPES, text, verifyLocalPassword, worktreeRoot } from './src/host/domain.js'
 import { accessLevelFor, checkAccess, isCrossSiteRequest, isLoopbackRequest, needsConfirm, needsLocalSource, READ_ONLY_POST_ROUTES } from './src/host/access.js'
 import { Dispatcher, RUN_LOG, attachRunLog, claimDispatchLock, clearAgentFailure, configureDispatcher, noteAgentFailure, parseMentions, runSummary } from './src/host/dispatcher.js'
+import { worktreeBaseFor } from './src/host/dispatch-cwd.js'
 import { mirrorCards } from './src/host/bitable.js'
 import { bugSeverityFor } from './src/host/bugs.js'
 import { automationRate } from './src/host/intervention.js'
@@ -1522,7 +1523,10 @@ async function ensureWorktree(store, task, config) {
     if (alive.ok && String(alive.stdout).includes(`worktree ${existing.path}`)) return existing
   }
   const branch = worktreeBranch(task)
-  const path = join(worktreeRoot(config), branch.replace(/^[a-z]+\//, ''))
+  // worktree 默认建在仓库内（.agents/worktrees）：DSH 的工作区按会话 cwd 归属，
+  // worktree 落在仓库外的话，这张卡的派单在侧栏里又是一个独立/未分组的工作区。
+  // 想放别处就显式配「worktree 根目录」。
+  const path = join(worktreeBaseFor(config, repo), branch.replace(/^[a-z]+\//, ''))
   await mkdir(dirname(path), { recursive: true })
   // 基准分支没有显式配就用仓库当前检出的分支：默认写死 main 会在用 master 的仓库上直接失败
   // 配置里默认写的是 main（sanitizeProject 的默认值），但很多仓库还在用 master：

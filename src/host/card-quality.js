@@ -8,6 +8,8 @@
 //   解析：qualityTargetFor —— 服务优先、项目兜底、cwd 优先卡的 worktree
 //   结果：sanitizeQuality —— 退出码/耗时/输出尾部，截断规则只有一个地方
 
+import { projectContext } from './dispatch-cwd.js'
+
 /** 检查输出只留尾部这么多字：整段日志塞进 state 会让轮询和快照都变慢。 */
 export const QUALITY_OUTPUT_LIMIT = 4000
 
@@ -48,15 +50,11 @@ export function sanitizeQuality(raw) {
  * 不是主目录上的代码。
  */
 export function qualityTargetFor(config, task, requirements = []) {
-  const projectId = String(task?.project ?? '').trim()
-    || String((Array.isArray(requirements) ? requirements : []).find(item => item.id === String(task?.requirementId ?? ''))?.project ?? '').trim()
-  const project = (config?.projects ?? []).find(item => item.id === projectId)
-  const services = Array.isArray(project?.services) ? project.services : []
-  const service = services.find(item => item.id === String(task?.service ?? ''))
-    ?? (services.length === 1 ? services[0] : undefined)
+  // 项目/服务的解析与「派单会话跑在哪个目录」共用一份（dispatch-cwd.js）：
+  // 两处各写一遍，迟早会出现「检查跑在 A 仓库、会话跑在 B 目录」。
+  const { project, service, repoPath } = projectContext(config, task, requirements)
   const cmd = String(service?.qualityCmd ?? '').trim() || String(project?.qualityCmd ?? '').trim()
   if (cmd === '') return null
-  const repoPath = String(service?.repoPath ?? '').trim() || String(project?.repoPath ?? '').trim()
   const worktree = task?.worktree !== null && typeof task?.worktree === 'object' ? String(task.worktree.path ?? '').trim() : ''
   const timeoutMs = Math.max(10_000, Math.min(600_000, Number(service?.qualityTimeoutMs) || Number(project?.qualityTimeoutMs) || 120_000))
   return {

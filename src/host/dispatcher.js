@@ -7,7 +7,8 @@ import { stripQuotedCode } from './mention-note.js'
 import { handoffBlock } from './handoff.js'
 import { emitEvent } from './events.js'
 import { loadTeamMemory, teamMemoryBlock } from './team-memory.js'
-import { mkdir, rename } from 'node:fs/promises'
+import { STUDIO_WORKSPACE_TITLE, dispatchDirFor, projectContext } from './dispatch-cwd.js'
+import { mkdir, rename, stat } from 'node:fs/promises'
 import { randomBytes } from 'node:crypto'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
@@ -401,6 +402,15 @@ export function dispatchLockInfo(store) {
   }
 }
 
+/** 目录存不存在：项目「本机代码目录」配错时，不能靠 mkdir 把空目录造出来再当成仓库用。 */
+async function directoryExists(dir) {
+  try {
+    return (await stat(dir)).isDirectory()
+  } catch {
+    return false
+  }
+}
+
 export class Dispatcher {
   constructor(ctx, store) {
     this.ctx = ctx
@@ -569,6 +579,7 @@ export class Dispatcher {
       agentPreset: cfg.agentPreset,
       sandbox: cfg.sandbox ?? 'workspace-write',
       isolation: cfg.isolation ?? 'none',
+      // 每张卡的 worktree 根按它自己的仓库算（仓库内 .agents/worktrees）；这里给的是没仓库时的兜底根。
       worktreeRoot: worktreeRoot(this.store.snapshot().config),
       cleanupWorktree: cfg.cleanupWorktree ?? 'manual',
       running: [...this.running.values()].map(info => ({ ...info })),
@@ -791,13 +802,25 @@ export class Dispatcher {
       this.note(`worktree: ${error?.message ?? error}`)
     }
     if (worktree?.skipped !== undefined) this.note(`worktree skipped: ${worktree.skipped}`)
-    const dir = worktree?.path !== undefined ? worktree.path : base
+    /* 会话跑在哪个目录，决定了它在 DSH 侧栏里属于哪个工作区（按 canonical cwd 归属）：
+       项目配了「本机代码目录」就跑到那个仓库里，会话才落在项目工作区下；否则退回工作区目录。
+       以前一律跑 workspaceDir 的临时目录，派出去的会话只能落在「未分组」。 */
+    const context = projectContext(this.config(), task, this.store.snapshot().requirements)
+    const plan = dispatchDirFor({ task, worktree, context, fallbackDir: base })
+    let dir = plan.dir !== '' ? plan.dir : base
+    let title = plan.title
+    if (plan.kind === 'repo' && !(await directoryExists(dir))) {
+      this.note(`项目代码目录不存在，退回工作区目录：${dir}`)
+      dir = base
+      title = STUDIO_WORKSPACE_TITLE
+    }
     await mkdir(dir, { recursive: true })
     try {
-      await ctx.workspaceRegistry.create(dir, '需求&任务工作空间')
+      await ctx.workspaceRegistry.create(dir, title)
     } catch (error) {
       this.note(`workspace: ${error?.message ?? error}`)
     }
+    this.note(`会话目录（${title}）：${dir}`)
     let agent
     // A session created by the factory carries no model unless we hand one in;
     // without it every turn ends with "agent has no provider/model".
