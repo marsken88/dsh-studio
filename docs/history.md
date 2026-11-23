@@ -1137,3 +1137,31 @@ TDZ 41 文件，`pnpm build` 后 `cmp dist/client.js client.js` 一致，`probe:
 
 没验到的：宿主侧要重启 DSH 才加载新代码（desktop profile 是指向仓库的链接），
 所以「侧栏里真的出现在项目工作区下」这一条要等重启后的第一次派单确认。
+
+## 派单会话的提权审批（2026-11-24）
+
+用户反馈：需求派单之后，对应的智能体还是会在目录访问权限上停下来问人；设置里也找不到「始终允许完全访问」。
+查下来是两件事叠在一起：
+
+- DSH 的 `permission preset` 是「沙箱档位 + 审批策略」一对：默认的 `workspace-write` 带 `approval: ask`。
+  派单会话是无人值守的，`ask` 没有人答；而 studio 早先的实现是**一律自动拒绝**并写一条评论 ——
+  于是正常活（往工作区外写文件、装插件）也被挡，用户看到的「一直在要权限」就是那条被拒的评论。
+- 设置里只有「沙箱档位」（read-only / workspace-write / danger-full-access），没有「审批怎么答」这一维：
+  想放行只能把沙箱整个调成无沙箱，连边界一起丢。
+
+改法：
+
+- 新增 `src/host/escalation.js`（纯函数）：`sanitizeEscalation` / `escalationFor` / `escalationOutcome`；
+  沙箱专家优先于全局，`read-only` 一律拒绝（自动批准不能把只读悄悄变成可写）
+- 新设置 `agents.escalation`（默认 `allow`），面板在「设置 → 自动派单 → 派单会话的提权审批」：
+  allow 时 `approval/request` 返回 `allowed-once`（等于始终允许完全访问），deny 时返回 `rejected`；
+  两种都把工具名与理由写成卡上评论
+- dispatcher 在 `permissionPresets.set` 之后把审批策略显式设成 `ask`（`danger-full-access` 跳过）：
+  有的部署把 `workspace-write` 的 approval 配成 `never`，那样请求到不了平台，开关就是摆设
+- `/agents/policy` 回显 `configured.escalation`，排障时不用再翻配置
+
+验证：`npm test` 459/459（本地 + `TZ=UTC`，新增 6 例），TDZ 扫描通过，`pnpm build` 后
+`cmp dist/client.js client.js` 一致，`probe:panel` 设置页里「派单会话的提权审批」可见可改。
+
+没验到的：目标机要部署 + 重启才加载新代码；「智能体真的不再被审批挡住」要么等一次真实派单，
+要么在目标机上按 `/agents/policy` 的回显 + 会话日志确认。

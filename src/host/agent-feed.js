@@ -90,14 +90,25 @@ export function shouldFlush(buffer, now, options = {}) {
   return now - last >= minMs
 }
 
-/** 审批被自动拒绝时写进评论的说明（既解释原因，也告诉人怎么放行）。 */
-export function approvalNote(req) {
+/**
+ * 提权审批写进评论的说明。mode 来自设置（见 src/host/escalation.js）：
+ *   allow = 平台自动批准（等于始终允许完全访问）；deny = 平台自动拒绝。
+ * 两种都写清「发生了什么、去哪儿改」，因为卡上的评论是唯一能让人事后追责的痕迹。
+ */
+export function approvalNote(req, mode = 'deny') {
   const tool = String(req?.toolName ?? '未知工具')
   const reason = String(req?.reason ?? '').trim()
+  if (mode === 'allow') {
+    return [
+      `「${tool}」需要提权，派单会话已自动批准（设置 → 自动派单 → 提权审批 = 自动批准）。`,
+      reason === '' ? '' : `请求理由：${clip(reason, 160)}`,
+      '这一步是真的放行了：它可能写到了工作区之外。不想放行就把「提权审批」改成自动拒绝，或者把沙箱档位调窄。',
+    ].filter(Boolean).join('\n\n')
+  }
   return [
     `「${tool}」需要提权，派单会话里已自动拒绝——派单跑在沙箱里，提权审批没有人实时盯着，等下去只会把整轮挂死（真机踩过：架构师会话卡在 plugin_manager 审批上三小时）。`,
     reason === '' ? '' : `请求理由：${clip(reason, 160)}`,
-    '要授权就人来做：设置 → 自动派单，把沙箱调宽；或者人在面板上手动跑这一次。',
+    '要放行就把「设置 → 自动派单 → 提权审批」改成自动批准（等于始终允许完全访问），或者把沙箱档位调宽；也可以人在面板上手动跑这一次。',
   ].filter(Boolean).join('\n\n')
 }
 

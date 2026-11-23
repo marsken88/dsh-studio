@@ -261,8 +261,9 @@ export function defaultConfig() {
       /** Agent preset that gives the card session its real tools (shell, fs). */
       agentPreset: 'standard',
       autoStatuses: ['design', 'dev_ready', 'test'],
-      /** 沙箱：卡会话的操作系统级文件/命令边界（DSH 的 permission preset）。 */
+      /** 沙箱：卡会话的操作系统级文件/命令边界（DSH 的 permission preset）；提权审批（allow/deny）口径见 escalation.js。 */
       sandbox: 'workspace-write',
+      escalation: 'allow',
       /** 隔离：none = 所有卡共用 workspaceDir；worktree = 每张卡一个 git worktree。 */
       isolation: 'none',
       worktreeRoot: '',

@@ -410,6 +410,26 @@ try {
   )
   await page.screenshot({ path: join(outDir, 'agents.png') })
 
+  // ④f 设置 → 自动派单 → 提权审批：用户要的「始终允许完全访问」必须有地方配。
+  // 判据按 DOM 量：这个面板里得有一个带两个口径（allow/deny）的下拉，
+  // 而不是只在别处出现一句文案。
+  const escalation = await page.evaluate(() => {
+    const pane = document.querySelector('[data-settings-pane="agents"]')
+    if (pane === null) return { pane: false, labels: [], options: [] }
+    const selects = [...pane.querySelectorAll('select')]
+    const hit = selects.find(sel => String(sel.innerText ?? '').includes('始终允许完全访问'))
+    return {
+      pane: true,
+      labels: selects.map(sel => String(sel.getAttribute('aria-label') ?? '').slice(0, 24)),
+      options: hit === undefined ? [] : [...hit.options].map(option => option.value),
+    }
+  })
+  check(
+    '④f 设置页自动派单能改提权审批（allow / deny 两个口径）',
+    escalation.pane === true && escalation.options.includes('allow') && escalation.options.includes('deny'),
+    JSON.stringify(escalation),
+  )
+
   // ⑤ 设置 → 技能库：使用读数
   const skillsNav = await clickExact('技能库')
   if (skillsNav === true) await new Promise(resolve => setTimeout(resolve, 800))

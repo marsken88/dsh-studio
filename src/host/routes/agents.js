@@ -1,4 +1,5 @@
 import { ISOLATION_MODES, SANDBOX_MODES } from '../domain.js'
+import { sanitizeEscalation } from '../escalation.js'
 const INJECTED = ["getDispatcher","publicState","readJsonBody","sendJson"]
 let host = {
   getDispatcher: () => undefined,
@@ -41,6 +42,7 @@ if (method === 'GET' && route === '/agents/policy') {
     ok: true,
     configured: {
       sandbox: SANDBOX_MODES.includes(String(cfg.sandbox ?? '')) ? cfg.sandbox : 'workspace-write',
+      escalation: sanitizeEscalation(cfg.escalation),
       isolation: ISOLATION_MODES.includes(String(cfg.isolation ?? '')) ? cfg.isolation : 'none',
       worktreeRoot: String(cfg.worktreeRoot ?? ''),
       cleanupWorktree: String(cfg.cleanupWorktree ?? 'manual'),
