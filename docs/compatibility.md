@@ -6,12 +6,12 @@
 
 | 项 | 值 |
 | --- | --- |
-| dsh-studio | `package.json` `version: 0.12.0` |
+| dsh-studio | `package.json` `version: 0.12.1` |
 | DeepSeek Harness | `0.2.2-rc.1`（`dsh --version`） |
 | Node | `v24.22.2`（Linux 目标机）；本机 Windows `v24.19.0` |
 | 目标系统 | Ubuntu 24.04，`dsh web` 监听 `18080`，nginx `:80` 反代并注入 `dsh-auth-*` cookie |
 | 插件安装方式 | npm：`dsh plugin --profile web add @marsken/dsh-studio`；本地开发：`add link:~/dsh-studio`（profile `web`） |
-| 验证范围 | 0.12.0：**本机 Windows desktop 活实例（代码同版）+ CI**（484 单测 / 48 项页面与 AX 探针 / `probe:panel` 34 项 / `verify:tiers` 32 项）：四棒提示词真机渲染（真实需求）、抽屉协作链四行、拆卡闸门真机返回 400、`probe:panel` 34/34；**Linux 目标机未部署 0.12.0**（0.10.7 仍在线） |
+| 验证范围 | 0.12.1：**本机 Windows desktop 活实例（代码同版）+ CI**（486 单测 / 48 项页面与 AX 探针 / `probe:panel` 34 项 / `verify:tiers` 32 项）；本机自检 2/2（同名空壳原地升级、设计自审被拒）；**目标机已部署这两个修复（0.12.0 代码），0.12.1 发布后复部署** |
 | 兼容声明 | `engines.dsh: ">=0.2.2-rc.1"`、`dsh.compatibility.dshReleases: { "0.2.2-rc.1+": "compatible" }` |
 
 > 结论：只在 **0.2.2-rc.1** 上做过端到端验证。0.2.2 正式版、以及 `<0.2.2` 均未验证。
