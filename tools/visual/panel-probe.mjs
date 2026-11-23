@@ -343,11 +343,13 @@ try {
     review: document.querySelector('[data-review-gate]')?.getAttribute('data-review-gate') ?? null,
     reviewText: document.querySelector('[data-review-gate]')?.textContent ?? null,
     tiers: document.querySelector('[data-tier-gate]')?.getAttribute('data-tier-gate') ?? null,
+    requirement: document.querySelector('[data-requirement-gate]')?.getAttribute('data-requirement-gate') ?? null,
   }))
   check('④ 设置页有设计闸门开关', gateButtons.design !== null, gateButtons.design ?? '')
   check('④ 设置页有评审闸门开关（在「列的负责人」里）', gateButtons.review !== null, gateButtons.reviewText ?? '没找到 [data-review-gate]')
   check('④ 评审闸门默认开启', gateButtons.review === 'on', gateButtons.reviewText ?? '')
   check('④ 设置页有三层测试闸门开关（默认开启）', gateButtons.tiers === 'on', gateButtons.tiers ?? '没找到 [data-tier-gate]')
+  check('④ 设置页有拆卡验收条件闸门开关（默认开启）', gateButtons.requirement === 'on', gateButtons.requirement ?? '没找到 [data-requirement-gate]')
   await page.screenshot({ path: join(outDir, 'settings-gates.png') })
 
   // ④b 设置 → 文档出口：出口选择真的渲染出来了（能建的东西必须有能用的路径）

@@ -14,6 +14,9 @@ import { resolveCaseResult } from './case-strength.js'
 import { publicCases, sanitizeTier } from './test-plan.js'
 /* `/state` 的用例摘要（含三层进度）住在 test-plan.js：口径与门禁同源，也避开 domain 的行数闸门。 */
 export { publicCases }
+import { DEFAULT_ROLES } from './role-playbooks.js'
+/* 角色手册住在 role-playbooks.js（domain 有 2000 行闸门）；这里 re-export 保持既有 import 不变。 */
+export { DEFAULT_ROLES }
 import { createHash, randomBytes, scryptSync, timingSafeEqual } from 'node:crypto'
 import { sanitizeDbCase } from './db-runner.js'
 import { sanitizeDiscovery } from './discovery.js'
@@ -114,69 +117,6 @@ export function defaultTemplates() {
 export const FALLBACK_AGENT_MODEL = 'deepseek-v4.1-flash'
 
 /** The four shipped personas; also the seed for a fresh expert roster. */
-export const DEFAULT_ROLES = {
-  product: {
-    label: '产品',
-    name: '产品经理',
-    emoji: '📋',
-    model: 'deepseek-v4.1-flash',
-    brief: '把模糊需求变成清晰的需求说明、边界与验收标准。',
-    prompt: [
-      '你是产品经理，负责把一句话的诉求变成能开工的需求。',
-      '动手前先读：需求页上的 PRD/原型文档、同一需求下已有的卡与评论、相关领域的历史卡。信息不足就明确列出「需要业务确认的问题」，不要自己编业务规则。',
-      '产出必须包含：目标用户与场景、主流程、异常与边界、业务规则（含参数与阈值）、验收口径（可判定的条件）。',
-      '需求要拆成功能点（每个功能点带验收条件），一条功能点对应一张或几张可交付的卡。',
-      '不确定优先级时按「影响客户/影响金额/上线时间」排序并写明理由。',
-      '收口前自检：卡上的验收清单是否可验证、是否留了交付物（文档正文）、是否需要找架构师确认技术可行性（要就 @架构师）。',
-    ].join('\n'),
-  },
-  architect: {
-    label: '架构',
-    name: '架构师',
-    emoji: '🏛️',
-    model: 'deepseek-v4.1-flash',
-    brief: '出技术方案、拆任务、定接口与改动边界。',
-    prompt: [
-      '你是架构师，负责技术方案、接口契约与改动边界。',
-      '先读现有代码与配置再下判断：用 ls/grep 找到相关模块、看已有约定，不要凭空设计。',
-      '方案必须给出：数据模型与迁移方式、接口契约（路径/入参/出参/错误码）、失败与回滚、并发与幂等、性能与容量估算、兼容性与灰度策略。',
-      '把方案拆成研发可以直接开工的步骤，每步写清改哪些文件、怎么自验。',
-      '明确列出「不做/遗留」的边界，以及需要业务或研发确认的风险点。',
-      '评审别人的 MR 时按「正确性→边界与异常→可读性与一致性→性能」四层给结论；要求修改必须给出可执行的修改点。',
-    ].join('\n'),
-  },
-  dev: {
-    label: '研发',
-    name: '开发工程师',
-    emoji: '🛠️',
-    model: 'deepseek-v4.1-flash',
-    brief: '按方案实现代码，自己先跑通，交可验证的改动。',
-    prompt: [
-      '你是开发工程师，负责把方案落成可验证的代码。',
-      '在卡专属的 worktree/目录里工作，只改这张卡需要的文件；动手前先看你将要改的函数和它被谁调用。',
-      '改动要小步：先跑通最小路径，再补异常分支；不顺手重构无关代码，不引入未评估的依赖。',
-      '自验：能跑测试就跑测试，把命令与结果贴进评论；跑不了就写清为什么没跑、需要谁在什么环境验证。',
-      '必须用 studio_task_coding 登记执行记录（Coding Agent、模型、分支、提交、改动文件、单测通过数），再用 studio_task_artifact 登记交付物（带正文）。',
-      '推卡前自检验收清单，逐条勾并附证据；做不到的项不要勾，直接说明卡在哪并 studio_task_block 写清原因。',
-    ].join('\n'),
-  },
-  qa: {
-    label: '测试',
-    name: '测试工程师',
-    emoji: '🧪',
-    model: 'deepseek-v4.1-flash',
-    brief: '设计用例、执行验证、给出可复现的缺陷与结论。',
-    prompt: [
-      '你是测试工程师，负责验证交付是否真的可用。',
-      '验证分三条线，缺哪条线都要么补上、要么在测试计划（studio_task_test_plan）里写明为什么不适用：① 单元测试——这次改动的函数/分支、边界值、异常输入，用 shell 用例跑仓库里的单测命令；② 集成测试——接口、数据库、服务间契约，用多步接口用例（登录→业务调用→查详情）或数据库断言；③ 端到端测试——从用户入口真开浏览器走主流程与关键异常路径。',
-      '用例来源：需求的验收条件、功能点的验收口径、上一次缺陷的复现路径。每个功能点至少覆盖正常流、边界值、异常流；接口类用例写成可执行的请求（method/path/期望状态码/期望响应片段），并用 studio_test_run 真跑；shell 用例跑真实的单测/脚本命令并断言退出码与输出。',
-      '结果只写实测：通过写实际状态码与关键字段，失败写请求、响应、期望与实际、可复现步骤。三条线的进度与结果要能在卡上看到，不要只在评论里说「测过了」。',
-      '判失败就如实判：平台会自动开缺陷卡并挂回这张卡，不要手工再建一张重复的。',
-      '不稳定（环境/数据导致）的用例标 flaky，不要为了绿灯把断言改松；真的缺陷不许标 flaky。',
-      '测试结论要给出准出建议：每条线验了什么、遗留哪些风险、是否建议发布。',
-    ].join('\n'),
-  },
-}
 
 /** Column → who owns the work when a card lands there. */
 export function defaultColumns() {
@@ -247,6 +187,11 @@ export function defaultConfig() {
      * 于是「门禁一次通过率」91%（>90% 说明这道门没在拦人）。显式 enabled:false 才关。
      */
     caseGate: { enabled: true, tiers: true },
+    /**
+     * 拆卡闸门：功能点没有**可判定的验收条件**时不许拆成卡（默认开）。
+     * 产品这一棒的价值就在「把需求挖到能验收」；没有验收条件的卡，研发只能猜、测试只能编。
+     */
+    requirementGate: { requireAcceptance: true },
     /** 成本闸门：只统计「跑了多少次、花了多少机上时间」，宿主没把 token 用量回传给插件。 */
     costs: { budgetRuns: 500, budgetHours: 80, warnAt: 80 },
     roles: {
@@ -456,6 +401,8 @@ export function mergeConfig(saved) {
     reviewGate: sanitizeReviewGate({ ...base.reviewGate, ...(saved.reviewGate !== null && typeof saved.reviewGate === 'object' ? saved.reviewGate : {}) }),
     // 用例闸门：默认开，只有显式 false 才算关。
     caseGate: sanitizeCaseGate({ ...base.caseGate, ...(saved.caseGate !== null && typeof saved.caseGate === 'object' ? saved.caseGate : {}) }),
+    // 拆卡闸门：功能点缺验收条件不许拆；默认开。
+    requirementGate: sanitizeRequirementGate({ ...base.requirementGate, ...(saved.requirementGate !== null && typeof saved.requirementGate === 'object' ? saved.requirementGate : {}) }),
     environments: (() => {
       const list = sanitizeDeployEnvs(saved.environments)
       return list.length > 0 ? list : defaultDeployEnvs()
@@ -480,6 +427,12 @@ export function sanitizeReviewGate(raw) {
 export function sanitizeCaseGate(raw) {
   const input = raw !== null && typeof raw === 'object' ? raw : {}
   return { enabled: input.enabled !== false, tiers: input.tiers !== false }
+}
+
+/** 拆卡闸门：功能点必须有可判定验收条件；显式 false 才关。 */
+export function sanitizeRequirementGate(raw) {
+  const input = raw !== null && typeof raw === 'object' ? raw : {}
+  return { requireAcceptance: input.requireAcceptance !== false }
 }
 
 /** 缺陷 SLA：每个严重级别给一个修复时限（小时）。 */

@@ -955,6 +955,41 @@ function Drawer({ task, state, onClose, onChanged }) {
     )
   }
 
+  /* 协作链：四个角色各自要交的东西，一行一个；状态只从已有事实推导（需求功能点/验收条件、设计定案、
+     执行记录与评审、三层测试进度），不另做一套统计。 */
+  const roleRow = (key, label, tone, chip, detail) => h('div', {
+    key,
+    className: LIST_LINE,
+    'data-role-row': key,
+    'data-role-state': tone,
+  },
+    h('div', { className: 'w-[72px] shrink-0 text-body-2-semibold text-text-primary' }, label),
+    h('div', { className: GROW },
+      h('div', { className: ROW, style: { gap: 8 } },
+        h(ChipField, { variant: tone === 'ok' ? 'lime' : tone === 'bad' ? 'rose' : tone === 'warn' ? 'yellow' : 'neutral' }, chip),
+        detail === '' ? null : h('span', { className: HINT }, detail),
+      ),
+    ),
+  )
+  const collabRequirement = (state.requirements ?? []).find(item => item.id === task.requirementId) ?? null
+  const collabPoints = Array.isArray(collabRequirement?.points) ? collabRequirement.points : []
+  const collabAcceptance = collabPoints.map(point => ({
+    point,
+    count: (Array.isArray(point.acceptance) ? point.acceptance : []).filter(item => String(item?.text ?? '').trim() !== '').length,
+  }))
+  const collabBare = collabAcceptance.filter(item => item.count === 0)
+  const collabDiscovery = collabRequirement?.discovery ?? {}
+  const collabMissingDiscovery = [['server', '有没有服务端'], ['auth', '谁做鉴权'], ['boundary', '交付边界']]
+    .filter(([key]) => String(collabDiscovery[key] ?? '').trim() === '')
+    .map(([, label]) => label)
+  const collabDesign = task.design ?? null
+  const collabDrafts = Array.isArray(collabDesign?.drafts) ? collabDesign.drafts : []
+  const collabChosen = collabDrafts.find(item => item.id === collabDesign?.chosenId) ?? null
+  const collabCoding = task.coding ?? null
+  const collabQuality = task.quality ?? null
+  const collabPlanRows = testPlanTiers.filter(row => CASE_TIERS.includes(row.tier) && row.tier !== 'other')
+  const collabGaps = testPlanGaps.map(gap => CASE_TIER_LABEL[gap.tier] ?? gap.tier)
+
   const columnLabel = (state.statuses.find(item => item.id === task.status) ?? {}).label ?? task.status
   const assignee = task.dispatch?.expert ? ownerLabel(state.config ?? {}, { kind: 'expert', id: task.dispatch.expert }) : ''
   return h('div', {
@@ -1077,6 +1112,51 @@ function Drawer({ task, state, onClose, onChanged }) {
             ),
           ].filter(Boolean)
         })()),
+      ),
+      h(Section, { pane: 'overview', current: pane, id: 'collab' },
+        h(SectionHead, null, '协作链',
+          h('span', { className: HINT }, '四个角色接力：产品挖需求与验收 → 架构出方案 → 研发实现并自测 → 测试按三层验；缺哪一棒一眼看到')),
+        h('div', { className: SECTION_BODY, 'data-role-chain': '' },
+          (() => {
+            if (collabRequirement === null) return roleRow('product', '产品', 'missing', '未挂需求', '先建需求并把卡挂上')
+            const detail = `${collabRequirement.code || collabRequirement.id} · 功能点 ${collabPoints.length} · 验收条件 ${collabAcceptance.reduce((sum, item) => sum + item.count, 0)} 条`
+            if (collabBare.length > 0 || collabMissingDiscovery.length > 0) {
+              const gaps = []
+              if (collabBare.length > 0) gaps.push(`缺验收：${collabBare.map(item => item.point.id).join('/')}`)
+              if (collabMissingDiscovery.length > 0) gaps.push(`缺三问：${collabMissingDiscovery.join('、')}`)
+              return roleRow('product', '产品', 'warn', '待补齐', `${detail} · ${gaps.join(' · ')}`)
+            }
+            return roleRow('product', '产品', 'ok', '需求可验收', detail)
+          })(),
+          (() => {
+            if (collabDesign === null) return roleRow('architect', '架构', 'missing', '未登记方案', '让架构师出方案（多稿 + 定案 + 评审）')
+            const label = { pending: '待评审', approved: '评审通过', changes_requested: '要求修改' }[String(collabDesign.status ?? '')] ?? '未登记'
+            const detail = `${label} · ${collabDrafts.length} 稿`
+            if (collabDesign.status === 'approved' && collabChosen !== null) return roleRow('architect', '架构', 'ok', '方案已定案', `${detail} · 定案「${collabChosen.name}」`)
+            return roleRow('architect', '架构', 'warn', collabChosen === null ? '方案未定案' : '方案待评审', detail)
+          })(),
+          (() => {
+            if (collabCoding === null) return roleRow('dev', '研发', 'missing', '没有执行记录', '研发还没登记 studio_task_coding')
+            const bits = [
+              collabCoding.branch ? `分支 ${collabCoding.branch}` : '',
+              `${(collabCoding.commits ?? []).length} 提交`,
+              `${(collabCoding.files ?? []).length} 文件`,
+              `单测 ${collabCoding.unitTests?.passed ?? 0}/${collabCoding.unitTests?.total ?? 0}`,
+              collabQuality === null ? '项目检查未跑' : `项目检查${collabQuality.ok === true ? '通过' : '未过'}`,
+            ].filter(Boolean).join(' · ')
+            const review = String(collabCoding.review?.status ?? '')
+            if (review === 'approved') return roleRow('dev', '研发', 'ok', '实现已评审', bits)
+            if (review === 'changes_requested') return roleRow('dev', '研发', 'bad', '评审要改', `${bits}${collabCoding.review?.note ? ` · ${String(collabCoding.review.note).slice(0, 80)}` : ''}`)
+            return roleRow('dev', '研发', 'warn', '实现待评审', bits)
+          })(),
+          (() => {
+            if (parts === null) return roleRow('qa', '测试', 'missing', '载入中', '')
+            if (collabPlanRows.length === 0) return roleRow('qa', '测试', 'missing', '没有用例', '测试还没登记用例')
+            const detail = collabPlanRows.map(row => `${CASE_TIER_LABEL[row.tier] ?? row.tier} ${row.pass}/${row.total}${row.applicable === false ? '（不适用）' : ''}`).join(' · ')
+            if (collabGaps.length > 0) return roleRow('qa', '测试', 'warn', `缺 ${collabGaps.join('/')}`, detail)
+            return roleRow('qa', '测试', 'ok', '三层已覆盖', detail)
+          })(),
+        ),
       ),
       h(Section, { pane: 'overview', current: pane, id: 'gate' },
         h(SectionHead, null, '准出检查',

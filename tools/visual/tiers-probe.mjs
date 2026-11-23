@@ -279,6 +279,15 @@ try {
 
     check('点开卡片', await clickText('[data-kanban-card]', '登录锁定测试卡'))
     await page.waitForSelector('[data-drawer]', { timeout: 15000 })
+    await sleep(600)
+    const chain = await page.evaluate(() => ({
+      block: document.querySelector('[data-role-chain]') !== null,
+      rows: [...document.querySelectorAll('[data-role-row]')].map(row => ({
+        key: row.getAttribute('data-role-row'),
+        state: row.getAttribute('data-role-state'),
+      })),
+    }))
+    check('抽屉概览有协作链（产品/架构/研发/测试四行）', chain.block === true && chain.rows.map(row => row.key).join(',') === 'product,architect,dev,qa', chain.rows.map(row => `${row.key}:${row.state}`).join(' '))
     await page.evaluate(() => document.querySelector('[data-drawer-tab="test"]')?.click())
     await sleep(900)
     await page.waitForSelector('[data-test-plan]', { timeout: 15000 })

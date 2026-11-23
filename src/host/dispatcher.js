@@ -6,6 +6,7 @@ import { driftNote, isModelDrift, sessionDirOf } from './model-drift.js'
 import { stripQuotedCode } from './mention-note.js'
 import { handoffBlock } from './handoff.js'
 import { planLine, testPlanSummary } from './test-plan.js'
+import { COLLABORATION_BRIEF, rolePlaybookFor } from './role-playbooks.js'
 import { emitEvent } from './events.js'
 import { loadTeamMemory, teamMemoryBlock } from './team-memory.js'
 import { STUDIO_WORKSPACE_TITLE, dispatchDirFor, projectContext } from './dispatch-cwd.js'
@@ -1116,6 +1117,12 @@ export function buildExpertPrompt(task, expert, column, config, team, instructio
     task.worktree !== null && task.worktree !== undefined
       ? `\n你的工作目录是这张卡专属的 git worktree：${task.worktree.path}${task.worktree.serviceName ? `（服务：${task.worktree.serviceName}）` : ''}\n分支 ${task.worktree.branch}（基线 ${task.worktree.base}），仓库 ${task.worktree.repo}。只在这个目录里改代码，提交到这条分支，不要动别人的 worktree 或主分支。`
       : '',
+    /* 四棒共用的协作约定：先读上游交接、逐条回应未决、给下一棒三句话、要谁配合就 @谁。
+       放在需求口径之后、角色手册之前：先知道「和谁协作」，再看「自己这一棒做什么」。 */
+    COLLABORATION_BRIEF,
+    /* 角色手册按卡当前所在的列注入（产品/架构/研发/评审各一份，测试在下面单独生成），
+       里面带当前事实：功能点缺不缺验收、设计定没定案、执行记录与项目检查跑没跑。 */
+    rolePlaybookFor(column.id, task, requirement),
     /* 澄清 / 方案阶段先查历史：重复造轮子是这个阶段最贵的浪费，而且事后没人看得出查没查过。
        命中要贴回卡上，没命中也要留一句——否则「跳过」和「查了没找到」长得一模一样（REQ-2026-001 / p3）。 */
     column.id === 'clarify' || column.id === 'design'
@@ -1125,12 +1132,6 @@ export function buildExpertPrompt(task, expert, column, config, team, instructio
 - 没命中：也要写一句「已检索，无命中」，不要沉默跳过；
 - 会话里没有检索工具：写明「本会话没有知识库检索工具」，不要编造查过。
 这条评论属于本阶段交付物的一部分：没有它，澄清/方案不算做完。`
-      : '',
-    column.id === 'dev' || column.id === 'dev_ready'
-      ? `\n这是研发环节，做完必须留下可审计的执行记录：调用 studio_task_coding，如实填写 agent/model、分支、commits（sha + message + 改动文件数）、改动文件清单、单测总数与通过数，以及你依据的需求基线版本。没登记执行记录的「完成」不算完成。`
-      : '',
-    column.id === 'review'
-      ? `\n这是评审环节：先读 MR 的改动（glab mr diff 或在 GitLab 上看），逐条对照方案、验收清单和执行记录里的 files / commits / 单测结果，把问题写清楚（文件、行、为什么、建议怎么改）。评完用 studio_task_coding action=review 写结论（approved / changes_requested + 说明）；没问题就说明通过理由，推进到「待测试」，有问题就 @ 开发同学，把卡退回「开发中」。`
       : '',
     task.requirement ? `\n需求描述：\n${task.requirement}` : '',
     column.id === 'test'
