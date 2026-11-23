@@ -1,6 +1,31 @@
 # 更新日志
 
 
+## [0.10.5] — 2026-11-23
+
+### 精选插件生态入口（社区贡献，经 #131 → #134 接管合入）
+
+在官方插件页注册一个轻量「精选插件」入口，接入 `dsh-featured` 生态：
+
+- 新增 `src/host/featured-source.js`（自包含零依赖）：向跨插件服务 `featured-plugins` 登记推荐源
+  `FEATURED_SOURCE`（id `@marsken/dsh-studio`，entries 留空——**接入只提供入口，是否上榜由 skillpie.cn 收录流程决定**），
+  首个激活的接入方挂聚合路由 `GET /dsh-plugins-plugin/featured`（同源校验、重复注册静默忽略）
+- `client.src.js` 的 `installFeatured`：未装完整版时引导一键安装 `dsh-featured`；已装则经
+  `window.__DSH_FEATURED_FULL__` 让位，不会出现双 tab；locale 服务不可用时退回内置中文文案
+- 依赖表补两行（`ctx.provide('featured-plugins')`、`plugins.tab` 槽 + `ctx.locale`），
+  README 功能地图加「精选插件」一行
+- 新增 `tests/featured.test.mjs`（5 例：推荐源形状 / 桩守卫 / 登记注销 / 跨域 403 / 让位契约）
+
+### 合并说明
+
+原作者分支与 main 冲突（提交后 main 前进了 30 多个版本）。合入前做了：
+
+- `package.json` 的 `test` 行取并集（main 437 + featured 5 = **442**）
+- `client.js` / `dist/client.js` 是构建产物，**重新 `pnpm build`** 而不是手挑一边
+- 目标机验证：`npm test` 442 全过、`module-sweep` 42 项全过（面板未受影响）、部署 `files=84 · state=200`
+
+宿主没有 `plugins.tab` 槽时静默降级，不影响面板与派单主流程。
+
 ## [0.10.4] — 2026-11-23
 
 ### 派单会话名解析、原型交付物、两套交付物口径（#127 / #128 / #129）
