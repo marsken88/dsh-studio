@@ -872,6 +872,16 @@ export class Dispatcher {
     } catch (error) {
       this.note(`permission preset ${sandbox} failed: ${error?.message ?? error}`)
     }
+    /* 审批策略显式设成 ask：有的部署把 workspace-write 这一档的 approval 配成 never，
+       那样提权请求根本到不了平台手上（只能被静默拒绝），「自动批准」也就是摆设。
+       danger-full-access 本来就不问人，跳过。真正怎么答由 index.js 的 approval/request 决定。 */
+    if (sandbox !== 'danger-full-access') {
+      try {
+        this.ctx.get?.('approval')?.setPolicy?.(agent, 'ask')
+      } catch (error) {
+        this.note(`approval policy ask failed: ${error?.message ?? error}`)
+      }
+    }
     try {
       await ctx.sessionController.rename({ sessionId, title: `[${expert.name}] ${task.title}`.slice(0, 120) })
     } catch (error) {

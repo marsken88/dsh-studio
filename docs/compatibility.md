@@ -34,6 +34,8 @@
 | `agent.inject()` + `agent.followup(text, { source:{ kind:'user' } })` | 真正驱动一轮 | 会话建好立刻 idle，卡片没有讨论 |
 | `ctx.effect(fn, label)` | 所有长生命周期资源（定时器、工具、section） | 热重载后重复注册 / 内存泄漏 |
 | `ctx.on('agent/status', …)` | `idle` 时结算槽位 | 并发闸门卡死 |
+| `ctx.on('approval/request', (req, next) => …)` | 派单会话的提权审批由平台代答（自动批准 / 自动拒绝，口径在 `src/host/escalation.js`），每次写成卡上评论 | 监听不到就退回宿主默认「问人」：无人值守时整轮挂死（真机踩过 3 小时），或者提权请求被静默拒绝 |
+| `ctx.get('approval').setPolicy(agent, 'ask')` | 派单时把审批策略显式设成 `ask`，否则 `approval: never` 的部署里请求到不了平台，「自动批准」成摆设（`danger-full-access` 跳过） | 服务/方法不存在时只记一行日志、不影响派单；代价是该部署上提权一律被静默拒绝（卡上只有工具自己的报错） |
 | `node:sqlite`（`DatabaseSync`） | 状态库 `~/.dsh/dsh-studio.db`（WAL、`meta.state`、10 份快照） | 启动即崩；数据不落盘 |
 | `llm.listModels(provider.id)`（模型下拉） | `/models` 端点 | 模型列表为空 |
 | `ctx.inject(['sessionProjections'])` → `stateOf(session, 'tokenMeasurement')` | 派单收尾（`dispatcher.settle`）趁会话还活着取引擎自己的 token 计量，落到卡的 `insight` | 取不到就只是少一行「引擎计量」，不影响派单；宿主改名/改签名时报 `session.snapshotEvents is not a function` |

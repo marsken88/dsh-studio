@@ -47,6 +47,7 @@ import { toolAccessTable, toolLevel } from './src/host/tool-access.js'
 import { isStudioProfile } from './src/host/profile-detect.js'
 import { isStalled } from './src/host/dispatch-state.js'
 import { approvalNote, createFeedBuffer, parseStudioSession } from './src/host/agent-feed.js'
+import { ESCALATION_MODES, escalationFor, escalationOutcome } from './src/host/escalation.js'
 import { sanitizeLimits } from './src/host/limits.js'
 import { attachWebhooks, sanitizeWebhooks } from './src/host/webhooks.js'
 import { updateTaskComment, removeTaskComment } from './src/host/comments.js'
@@ -1146,6 +1147,7 @@ async function applyConfig(store, patch) {
       if (typeof a.workspaceDir === 'string') config.agents.workspaceDir = a.workspaceDir.trim().slice(0, 400)
       if (typeof a.agentPreset === 'string') config.agents.agentPreset = a.agentPreset.trim().slice(0, 80) || 'standard'
       if (SANDBOX_MODES.includes(String(a.sandbox ?? ''))) config.agents.sandbox = String(a.sandbox)
+      if (ESCALATION_MODES.includes(String(a.escalation ?? ''))) config.agents.escalation = String(a.escalation)
       if (ISOLATION_MODES.includes(String(a.isolation ?? ''))) config.agents.isolation = String(a.isolation)
       if (typeof a.worktreeRoot === 'string') config.agents.worktreeRoot = a.worktreeRoot.trim().slice(0, 400)
       if (['on_done', 'manual'].includes(String(a.cleanupWorktree ?? ''))) config.agents.cleanupWorktree = String(a.cleanupWorktree)
@@ -2628,14 +2630,18 @@ export function apply(ctx) {
       try { feed.flushAll(Date.now()) } catch { /* 同上 */ }
     }, 15000)
     feedTimer.unref?.()
-    /* 派单会话的提权审批一律自动拒绝并留痕。
-       以前没人盯着审批：架构师会话点了 plugin_manager（要 danger-full-access），
-       approval/asked 之后就永久挂起——界面显示「正在跑」，评论里一片空白，abort 也不解除。 */
+    /* 派单会话的提权审批由平台代答（口径见 src/host/escalation.js）：
+         · allow = 自动批准，等于「始终允许完全访问」（默认）；
+         · deny  = 自动拒绝，并把被拒的工具与理由写成卡上评论。
+       以前一律拒绝：没人盯着审批，架构师会话点了 plugin_manager（要 danger-full-access），
+       approval/asked 之后就永久挂起——界面显示「正在跑」，评论里一片空白，abort 也不解除；
+       可一律拒绝又让「往工作区外写一个文件」这种正常活做不成。所以交给设置。 */
     const offApproval = dispatcherCtx.on('approval/request', async (request, next) => {
       const parsed = parseStudioSession(String(request?.agent?.id ?? ''))
       if (parsed === null) return next()
-      void commentTask(store, parsed.taskId, approvalNote(request), '系统', 'agent').catch(() => {})
-      return 'rejected'
+      const decision = escalationFor(store.snapshot().config, parsed.expertId)
+      void commentTask(store, parsed.taskId, approvalNote(request, decision.mode), '系统', 'agent').catch(() => {})
+      return escalationOutcome(decision.mode)
     })
     return () => {
       dispatcher?.stop()

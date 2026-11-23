@@ -132,6 +132,11 @@ export function AutoDispatchPane({ form, setForm, saveBar }) {
         ['danger-full-access', '无沙箱：可以写任何地方（危险）'],
       ]),
       h('div', { className: HINT }, '由 DSH 的 permission preset 执行：read-only / workspace-write 走 bwrap 或 Landlock 隔离。单个专家可以在「专家」里覆盖。'),
+      selectOf('派单会话的提权审批', 'agentsEscalation', [
+        ['allow', '自动批准（推荐）：需要提权就放行，等于始终允许完全访问'],
+        ['deny', '自动拒绝：只做沙箱允许的事，被拒的写进卡上评论'],
+      ]),
+      h('div', { className: HINT }, '派单是无人值守的：DSH 弹出审批时没有人在点。选「自动批准」就不会再问、也不会卡住（每次放行都会写一条卡上评论留痕）；沙箱选「只读」时一律拒绝。'),
       selectOf('代码隔离', 'agentsIsolation', [
         ['none', '不隔离：所有卡共用一个工作区'],
         ['worktree', '一卡一个 git worktree（推荐给多卡并行）'],
