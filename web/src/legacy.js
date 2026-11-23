@@ -1877,6 +1877,108 @@ function installKeyboardActivation() {
       )
     }
 
+    // ------------------------------------------------- 精选插件入口(社区精选)
+
+    /* 「精选插件」生态集成:在官方插件页注册一个轻量入口,未安装完整版时
+       引导一键安装 dsh-featured;已安装完整版则自动让位,任何激活顺序下都
+       不会出现双 tab。接入只提供入口,是否上榜由 skillpie.cn 收录流程决定,
+       约定见 https://github.com/skillpie/dsh-plugins (dsh-featured/AI-INTEGRATION.md)。 */
+    const FEATURED_NS = 'dsh-plugins-plugin'
+    const FEATURED_PKG = 'dsh-featured'
+    const FEATURED_COPY = {
+      zh: {
+        tabLabel: '精选插件',
+        welcome: '精选插件完整版(dsh-featured)未安装。',
+        installFull: '安装完整版',
+        installing: '正在安装完整版…',
+        installed: '已安装,刷新后即可使用完整功能。',
+        installedShort: '已安装',
+        desc: '一个入口逛完社区精选的好插件:搜索、标签筛选、一键安装、README 详情。',
+      },
+      en: {
+        tabLabel: 'Featured plugins',
+        welcome: 'The full Featured plugins module (dsh-featured) is not installed.',
+        installFull: 'Install the full version',
+        installing: 'Installing…',
+        installed: 'Installed — refresh to get the full experience.',
+        installedShort: 'Installed',
+        desc: 'One tab for community-curated plugins: search, tag filters, one-click install and README details.',
+      },
+    }
+
+    function installFeatured(ctx) {
+      if (typeof window === 'undefined') return () => {}
+      if (window.__DSH_FEATURED_APPLIED__) return () => {}
+      window.__DSH_FEATURED_APPLIED__ = true
+      if (window.__DSH_FEATURED_FULL__) {
+        // 完整版 dsh-featured 已加载:让位,保证永远只有一个精选 tab。
+        return () => { window.__DSH_FEATURED_APPLIED__ = false }
+      }
+      let t = (key) => FEATURED_COPY.zh[key]
+      let localeNS = null
+      try {
+        ctx.locale.register(FEATURED_NS, FEATURED_COPY)
+        t = ctx.locale.bind(FEATURED_NS)
+        localeNS = FEATURED_NS
+      } catch { /* locale 服务不可用时退回内置中文文案 */ }
+      const slotProps = { name: 'plugins.tab', id: FEATURED_NS, label: () => t('tabLabel'), priority: 100 }
+      if (localeNS) slotProps.locale = localeNS
+      function FeaturedSection(props) {
+        const install = props.install
+        const [st, setSt] = React.useState('idle') // idle | running | installed
+        const openInstall = () => {
+          if (st !== 'idle' || typeof install !== 'function') return
+          setSt('running')
+          try {
+            install({ spec: FEATURED_PKG, title: t('tabLabel'), version: '' })
+            setSt('installed')
+          } catch { setSt('installed') }
+        }
+        React.useEffect(() => {
+          if (st !== 'idle') return
+          if (typeof install !== 'function') { setSt('installed'); return }
+          setSt('running')
+          try {
+            install({ spec: FEATURED_PKG, title: t('tabLabel'), version: '' })
+            setSt('installed')
+          } catch { setSt('installed') }
+        }, [st, install])
+        const label = st === 'running' ? t('installing')
+          : (st === 'installed' ? t('installedShort') : t('installFull'))
+        return h('div', { style: { padding: '24px 16px', maxWidth: 560, display: 'flex', flexDirection: 'column', gap: 12 } },
+          h('p', { style: { fontSize: 13, lineHeight: 1.7, margin: 0, color: 'var(--dsw-alias-label-secondary)' } }, t('desc')),
+          st === 'idle' ? h('p', { style: { fontSize: 13, lineHeight: 1.7, margin: 0, color: 'var(--dsw-alias-label-primary)' } }, t('welcome')) : null,
+          h('button', {
+            type: 'button',
+            style: {
+              alignSelf: 'flex-start', cursor: st === 'installed' ? 'default' : 'pointer', font: 'inherit',
+              fontSize: 13, fontWeight: 500, padding: '7px 16px', borderRadius: 8,
+              border: '1px solid var(--dsw-alias-border-l1)',
+              background: 'var(--dsw-alias-brand-primary)', color: '#fff',
+              opacity: st === 'installed' ? 0.6 : 1,
+            },
+            disabled: st === 'installed',
+            onClick: openInstall,
+          }, label))
+      }
+      let tabDispose = null
+      ctx.slots.inject('plugins.tab', () => {
+        tabDispose = ctx.slots.register(slotProps, FeaturedSection)
+        return tabDispose
+      }, 'dsh-studio: featured tab')
+      window.__DSH_FEATURED_ENTRY__ = {
+        kind: 'inline',
+        dispose() {
+          try { if (typeof tabDispose === 'function') tabDispose() } catch { /* 已卸载 */ }
+          window.__DSH_FEATURED_APPLIED__ = false
+          window.__DSH_FEATURED_ENTRY__ = null
+        },
+      }
+      return () => {
+        try { window.__DSH_FEATURED_ENTRY__?.dispose?.() } catch { /* 已卸载 */ }
+      }
+    }
+
     // ----------------------------------------------------------------- mount
 
     return {
@@ -1896,5 +1998,6 @@ function installKeyboardActivation() {
       StudioPage,
       StudioIcon,
       useUIKit,
+      installFeatured,
     }
 }

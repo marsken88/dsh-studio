@@ -53,6 +53,7 @@ text =
       StudioPage,
       StudioIcon,
       useUIKit,
+      installFeatured,
     }
 }
 `

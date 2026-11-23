@@ -112,6 +112,13 @@ window.__ModuleLoader__.load({
       inject: ['slots'],
       apply(ctx) {
         const disposers = []
+        // 精选插件生态入口（与 legacy 手写半边的 installFeatured 同一份实现）：
+        // 未装完整版时引导一键安装 dsh-featured，已装则让位，不会双 tab。
+        if (typeof studio.installFeatured === 'function') {
+          try { disposers.push(studio.installFeatured(ctx)) } catch (error) {
+            console.error('[dsh-studio] featured entry failed to register', error)
+          }
+        }
         disposers.push(ctx.slots.inject('main', () => ctx.slots.register(
           { name: 'main', key: 'studio' }, StudioBridge,
         )))

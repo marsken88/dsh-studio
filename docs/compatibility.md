@@ -37,6 +37,7 @@
 | `node:sqlite`（`DatabaseSync`） | 状态库 `~/.dsh/dsh-studio.db`（WAL、`meta.state`、10 份快照） | 启动即崩；数据不落盘 |
 | `llm.listModels(provider.id)`（模型下拉） | `/models` 端点 | 模型列表为空 |
 | `ctx.inject(['sessionProjections'])` → `stateOf(session, 'tokenMeasurement')` | 派单收尾（`dispatcher.settle`）趁会话还活着取引擎自己的 token 计量，落到卡的 `insight` | 取不到就只是少一行「引擎计量」，不影响派单；宿主改名/改签名时报 `session.snapshotEvents is not a function` |
+| `ctx.provide('featured-plugins', registry)` / `ctx.get('featured-plugins')` | 精选插件生态（`src/host/featured-source.js`）：首个激活的接入插件提供该跨插件服务，dsh-studio 登记推荐源 `FEATURED_SOURCE` 并挂聚合路由 `GET /dsh-plugins-plugin/featured`（`kind:'exact'`） | 服务不存在/路由被占时静默退化为纯登记方或仅数据方，**不影响面板与派单主流程**；精选入口只少一块目录 |
 
 已知会直接暴露的宿主错误文案（排障关键词）：
 
@@ -65,6 +66,8 @@
 | `require('react')` / `require('react-dom')` | 使用宿主模块表里的 React（**不打包第二份**） | 白屏 / hooks 报错 |
 | `ctx.slots.inject('main', …)` + `ctx.slots.register({ name:'main', key })` | 中央页面 | 页面空 |
 | `ctx.slots.inject('sidebar.panellist', …)` + `register({ id, order, label })` | 侧栏入口「需求&任务工作空间」 | 侧栏没有入口 |
+| `ctx.slots.inject('plugins.tab', …)` + `register({ name:'plugins.tab', id:'dsh-plugins-plugin', locale })` | 精选插件入口 tab（`client.src.js` 的 `installFeatured`）：未装完整版时引导一键安装 `dsh-featured`，已装则经 `window.__DSH_FEATURED_FULL__` 让位 | 槽位缺失只是没有精选入口；已装完整版时本入口自动让位，不会出现双 tab |
+| `ctx.locale.register(NS, dict)` / `ctx.locale.bind(NS)` | 精选入口文案走 `dsh-plugins-plugin` 命名空间（内置 zh/en 兜底） | locale 服务不可用时退回内置中文文案，不影响注册 |
 | 宿主 CSS 约定 | 我们所有 DOM 挂在 `[data-dsh-studio]` 下，弹层额外带 `data-dsh-studio-portal` | 样式失效、弹窗不可见 |
 
 ## 4. 运行时依赖（目标机）

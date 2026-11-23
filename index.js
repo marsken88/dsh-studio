@@ -54,6 +54,7 @@ import { publicDocsConfig, sanitizeDocsConfig } from './src/host/doc-sink.js'
 import { addAssertedCases, addDraftCases, buildDashboard, codingVerifyLine, commentTask, configureExecutor, larkJson, ensureReqFolder, larkCliReady, invalidateLarkProbe, larkProbeCache, mutateReqDoc, probeEnv, pullFeishuDoc, requirementGate, requirementMatrix, requirementProgress, requirementRollup, runCommand, runSuite, runTaskCases, saveRequirement, syncArtifact, syncRequirementArtifacts, taskExitGate, updateTask, verifyCodingRecord } from './src/host/executor.js'
 import { configureAuthRoutes, handleAuthRoute } from './src/host/routes/auth.js'
 import { configureExportRoutes, handleExportRoute } from './src/host/routes/exports.js'
+import { integrateFeaturedPlugins, FEATURED_SOURCE } from './src/host/featured-source.js'
 import { findSession, sessionKeyFor, sessionTokenHash } from './src/host/sessions.js'
 import { releaseGate, releaseNotes } from './src/host/release-model.js'
 import { INTAKE_HTML, MINE_HTML, STATUS_HTML } from './src/host/intake-pages.js'
@@ -2642,4 +2643,11 @@ export function apply(ctx) {
       clearInterval(feedTimer)
     }
   })
+
+  // 精选插件生态集成(社区精选目录入口,零运行时依赖;失败不进主流程)。
+  try {
+    integrateFeaturedPlugins(ctx, FEATURED_SOURCE)
+  } catch (error) {
+    console.error('[dsh-studio] featured-plugins integration failed; continuing', error)
+  }
 }
