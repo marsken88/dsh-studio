@@ -71,10 +71,14 @@ test('设计评审工具：部分更新不会抹掉已有多稿，定案留历�
     })
     const first = await saveTaskDesign(store, 't-d1', {
       drafts: [{ id: 'a', name: '方案 A', link: 'https://x/a' }, { id: 'b', name: '方案 B', link: 'https://x/b' }],
-      status: 'approved',
     }, '产品经理')
     assert.equal(first.drafts.length, 2)
     assert.equal(first.chosenId, '', '两稿不定案')
+
+    // 评审由另一个人下：自己放稿自己批是自审，评审环节等于没有
+    const approved = await saveTaskDesign(store, 't-d1', { status: 'approved', chosenId: 'b' }, '人')
+    assert.equal(approved.status, 'approved')
+    assert.equal(approved.chosenId, 'b')
 
     // 只传 chosenId：多稿必须还在（合并而不是覆盖）
     const second = await saveTaskDesign(store, 't-d1', { chosenId: 'b' }, '产品经理')
@@ -86,6 +90,38 @@ test('设计评审工具：部分更新不会抹掉已有多稿，定案留历�
     // 过期的 chosenId：只剩一稿时回落成那一稿
     const third = await saveTaskDesign(store, 't-d1', { drafts: [{ id: 'a', name: '方案 A', link: 'https://x/a' }], chosenId: 'ghost' }, '产品经理')
     assert.equal(third.chosenId, 'a')
+  } finally {
+    store.db?.close?.()
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('设计评审不能自审：稿子和 approved 都是同一个人就拒绝', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'dsh-design-self-'))
+  const store = new StudioStore(join(dir, 'state.json'), { dbFile: join(dir, 'state.db'), secrets: new SecretStore(join(dir, '.secrets.json')) })
+  try {
+    await store.ready
+    await store.mutate(state => {
+      state.tasks.push({
+        id: 't-d2', code: 'DEV-002', title: '自审', status: 'design', role: 'architect',
+        requirementId: '', checklist: [], artifacts: [], comments: [], history: [], cases: [], blocked: null,
+      })
+    })
+    await assert.rejects(
+      () => saveTaskDesign(store, 't-d2', {
+        drafts: [{ id: 'a', name: '方案 A', link: 'https://x/a' }],
+        status: 'approved',
+      }, '架构师'),
+      /设计不能自审/,
+    )
+    const blocked = store.snapshot().tasks.find(item => item.id === 't-d2')
+    assert.ok(blocked.design === null || blocked.design === undefined, '被拒的自审提交不能落库')
+
+    // 同一个人只放稿（不下结论）可以；换一个人来批就通过
+    const drafted = await saveTaskDesign(store, 't-d2', { drafts: [{ id: 'a', name: '方案 A', link: 'https://x/a' }] }, '架构师')
+    assert.equal(drafted.status, 'pending')
+    const approved = await saveTaskDesign(store, 't-d2', { status: 'approved' }, '人')
+    assert.equal(approved.status, 'approved', '另一个评审人下 approved 要能通过')
   } finally {
     store.db?.close?.()
     rmSync(dir, { recursive: true, force: true })

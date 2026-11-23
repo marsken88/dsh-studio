@@ -8,6 +8,7 @@ import {
   pushDiffHistory,
   sanitizeDesign,
 } from './design.js'
+import { isSelfReview } from './quality.js'
 
 /** 需求引用归一化：认内部 id（`req-078f16`）也认编号（`REQ-2026-001`）。
  *
@@ -63,9 +64,27 @@ export async function reviewRequirement(store, { id, decision = 'approve', by = 
 
 /** 设计评审 / 多稿定案：合并而不是覆盖（只带 diff 的调用不该把 link/status 抹掉）。 */
 export async function saveTaskDesign(store, taskId, incoming, by = '人') {
-  const patch = incoming !== null && typeof incoming === 'object' ? incoming : {}
+  const patch = incoming !== null && typeof incoming === 'object' ? { ...incoming } : {}
   const actor = String(by ?? '人').slice(0, 40)
   let design = null
+  /* 每一稿的作者：新稿没写 by 就记成这次提交的人 —— 评审时才能判断是不是自审。 */
+  if (Array.isArray(patch.drafts)) {
+    patch.drafts = patch.drafts.map(item => (item !== null && typeof item === 'object' && String(item.by ?? '').trim() === ''
+      ? { ...item, by: actor }
+      : item))
+  }
+  const before = store.snapshot().tasks.find(entry => entry.id === String(taskId ?? ''))
+  if (before === undefined) throw new Error(`no task ${taskId}`)
+  /* 自审不能当评审通过：这次提交是在下 approved、而稿子全是同一个人放的，就直接拒绝。
+     设计评审的价值在「另一个人看过」，自己写稿自己批等于没有评审（四棒接力真机踩过）。 */
+  if (String(patch.status ?? '') === 'approved') {
+    const current = sanitizeDesign(before.design)
+    const drafts = patch.drafts !== undefined ? patch.drafts : (current?.drafts ?? [])
+    const authors = [...new Set(drafts.map(item => String(item?.by ?? '').trim()).filter(Boolean))]
+    if (authors.length > 0 && authors.every(name => isSelfReview(name, actor))) {
+      throw new Error(`设计不能自审：这 ${drafts.length} 稿都是「${actor}」放的。评审结论要另一个专家或人来下（例如 @架构师 代评审，或用面板以「人」的身份通过），通过后再定案推进`)
+    }
+  }
   await store.mutate(state => {
     const task = state.tasks.find(entry => entry.id === String(taskId ?? ''))
     if (task === undefined) throw new Error(`no task ${taskId}`)

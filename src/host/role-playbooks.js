@@ -142,6 +142,7 @@ export function architectPlaybook(task) {
     '3) 给测试的预习：把每条验收条件标上用哪条测试线验（unit / integration / e2e）；验不了的写明理由，测试会按这个建用例。',
     '4) 给研发的开工包：改动文件清单、实现顺序、每步怎么自验、风险与需要谁确认。',
     '5) 设计走 studio_task_design（多稿 + 定案 + 评审通过）；方案正文用 studio_task_artifact(kind=design) 或评论留全，下一棒只读你的方案就该知道改哪、怎么验。',
+    '6) **设计评审不能自审**：评审人不能是这些稿的作者。自己放的稿要另找一位专家或用面板以「人」的身份下 approved，通过后再定案推进。',
     '',
     facts,
   ].join('\n')
