@@ -90,7 +90,10 @@ export function ConfirmDialog({
               rows={3}
               value={value}
               placeholder={placeholder}
-              onChange={(event) => onChange?.(event.target.value)}
+              /* BoardUI 的 Textarea 走 react-aria：onChange 给的是**字符串**，不是 DOM 事件。
+                 以前写成 event.target.value —— 一敲字就 TypeError，所有 prompt 弹窗
+                 （标记阻塞、测试计划写「不适用」的理由…）在真机上直接不可用。 */
+              onChange={(next) => onChange?.(String(next ?? ""))}
               className="mt-3"
             />
           ) : null}

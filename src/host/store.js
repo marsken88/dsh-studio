@@ -28,6 +28,7 @@ import {
 import { sanitizeQuality } from './card-quality.js'
 import { sanitizeMergeGate } from './merge-gate.js'
 import { sanitizeDesign } from './design.js'
+import { sanitizeTestPlan } from './test-plan.js'
 import { looksHashed, sessionTokenHash } from './sessions.js'
 
 /** 持久化层：SQLite 台账（单写者 + 快照）与 0600 密钥文件。 */
@@ -274,6 +275,8 @@ export class StudioStore {
       task.checklist = sanitizeChecklist(task.checklist)
       task.cases = sanitizeCases(task.cases)
       task.testRuns = sanitizeTestRuns(task.testRuns)
+      // 测试计划（三层里哪一层不适用 + 理由）：老库没有这个字段，补 null 而不是 undefined。
+      task.testPlan = sanitizeTestPlan(task.testPlan)
       task.coding = sanitizeCoding(task.coding)
       // 项目检查（本地质量命令）的结果：老库没有这个字段，补 null 而不是 undefined。
       task.quality = sanitizeQuality(task.quality)

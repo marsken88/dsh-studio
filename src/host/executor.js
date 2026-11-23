@@ -2,6 +2,7 @@
 // 代码事实核对、用例执行、缺陷回流、健康检查。宿主级依赖通过 configureExecutor() 注入。
 
 import { COVERAGE_TARGET, coverageStrength, draftCasesFromCriteria, isExecutable } from './case-strength.js'
+import { gapMessage, needsTierPlan, sanitizeTier, testPlanSummary } from './test-plan.js'
 import { isAiSignoff } from './intervention.js'
 import { reviewGate } from './quality.js'
 import { overrideSummary } from './override.js'
@@ -816,6 +817,13 @@ export function taskExitGate(state, task) {
   else {
     const pending = cases.filter(item => item.result === 'pending' || item.result === 'skip').length
     if (pending > 0) warnings.push(`${pending} 条用例还没跑`)
+  }
+  /* 三层测试（单元 / 集成 / 端到端）：代码类卡上，每条线要么有可执行用例，要么由测试专家
+     在测试计划里写明「不适用 + 理由」。以前一条打接口的用例就能让卡收口，
+     代码分支与页面上的真实操作没人验，「测过了」只覆盖了集成这一层。 */
+  if (needsTierPlan(task) && state?.config?.caseGate?.enabled !== false && state?.config?.caseGate?.tiers !== false && cases.length > 0) {
+    const plan = testPlanSummary(cases, task.testPlan)
+    if (plan.gaps.length > 0) blockers.push(gapMessage(plan.gaps))
   }
   const artifacts = task.artifacts ?? []
   // 核对过但没通过：给一句提醒（不拦准出：拦不拦是产品决定）。
@@ -1698,6 +1706,8 @@ export async function addAssertedCases(store, taskId, rawCases, options = {}) {
     }
     const expected = text(item.expected, 300) ?? title
     const expectContains = String(item.expectContains ?? '').trim().slice(0, 300)
+    /* 测试层级：写就按写的（unit / integration / e2e / other），不写留空由 test-plan.js 按断言推断。 */
+    const tier = sanitizeTier(item.tier)
     const path = String(item.path ?? item.url ?? '').trim()
     if (path !== '') {
       const method = String(item.method ?? '').trim().toUpperCase()
@@ -1727,6 +1737,7 @@ export async function addAssertedCases(store, taskId, rawCases, options = {}) {
       prepared.push({
         title,
         expected,
+        tier,
         pointId: String(item.pointId ?? '').slice(0, 24),
         acceptanceId: String(item.acceptanceId ?? '').slice(0, 24),
         http: { method, url: path.slice(0, 500), body: String(item.body ?? '').slice(0, 8000), expectStatus, expectContains, headers: item.headers },
@@ -1748,7 +1759,7 @@ export async function addAssertedCases(store, taskId, rawCases, options = {}) {
         rejected.push(`「${title}」只给了相对地址 ${target}，但还没配测试环境 baseUrl：补上环境，或者写完整地址`)
         continue
       }
-      prepared.push({ title, expected, pointId: String(item.pointId ?? '').slice(0, 24), acceptanceId: String(item.acceptanceId ?? '').slice(0, 24), browser: browserSpec })
+      prepared.push({ title, expected, tier, pointId: String(item.pointId ?? '').slice(0, 24), acceptanceId: String(item.acceptanceId ?? '').slice(0, 24), browser: browserSpec })
       continue
     }
     const dbSpec = sanitizeDbCase(item.db)
@@ -1757,7 +1768,7 @@ export async function addAssertedCases(store, taskId, rawCases, options = {}) {
         rejected.push(`「${title}」是数据库用例，但设置里没开 allowDb（设置 → 测试执行）`)
         continue
       }
-      prepared.push({ title, expected, pointId: String(item.pointId ?? '').slice(0, 24), acceptanceId: String(item.acceptanceId ?? '').slice(0, 24), db: dbSpec })
+      prepared.push({ title, expected, tier, pointId: String(item.pointId ?? '').slice(0, 24), acceptanceId: String(item.acceptanceId ?? '').slice(0, 24), db: dbSpec })
       continue
     }
     const command = String(item.command ?? '').trim()
@@ -1772,6 +1783,7 @@ export async function addAssertedCases(store, taskId, rawCases, options = {}) {
       prepared.push({
         title,
         expected,
+        tier,
         pointId: String(item.pointId ?? '').slice(0, 24),
         acceptanceId: String(item.acceptanceId ?? '').slice(0, 24),
         shell: {
@@ -1816,6 +1828,7 @@ export async function addAssertedCases(store, taskId, rawCases, options = {}) {
         title: item.title,
         expected: item.expected,
         result: 'pending',
+        tier: item.tier ?? '',
         pointId: item.pointId,
         acceptanceId: item.acceptanceId ?? '',
         by,
@@ -1866,13 +1879,16 @@ export async function addAssertedCases(store, taskId, rawCases, options = {}) {
     }
   }
 
-  const total = (store.snapshot().tasks.find(item => item.id === task.id)?.cases ?? []).length
+  const after = store.snapshot().tasks.find(item => item.id === task.id)
+  const total = (after?.cases ?? []).length
   return {
     added: fresh.length,
     skipped: prepared.length - fresh.length,
     total,
     verified,
     env: env === undefined ? null : { id: env.id, name: env.name, baseUrl: env.baseUrl },
-    strength: coverageStrength(store.snapshot().tasks.find(item => item.id === task.id)?.cases ?? []),
+    strength: coverageStrength(after?.cases ?? []),
+    /* 三层测试的当前进度与缺口：工具回报里直接给，专家不用再猜「还差哪一层」。 */
+    plan: testPlanSummary(after?.cases ?? [], after?.testPlan),
   }
 }

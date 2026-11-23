@@ -11,6 +11,9 @@ export { ACCESS_ROLES, sanitizeUsers }
 export { sanitizeAudit, sanitizeAuditEntry }
 import { qualityFields } from './card-quality.js'
 import { resolveCaseResult } from './case-strength.js'
+import { publicCases, sanitizeTier } from './test-plan.js'
+/* `/state` 的用例摘要（含三层进度）住在 test-plan.js：口径与门禁同源，也避开 domain 的行数闸门。 */
+export { publicCases }
 import { createHash, randomBytes, scryptSync, timingSafeEqual } from 'node:crypto'
 import { sanitizeDbCase } from './db-runner.js'
 import { sanitizeDiscovery } from './discovery.js'
@@ -165,11 +168,12 @@ export const DEFAULT_ROLES = {
     brief: '设计用例、执行验证、给出可复现的缺陷与结论。',
     prompt: [
       '你是测试工程师，负责验证交付是否真的可用。',
-      '用例来源：需求的验收条件、功能点的验收口径、上一次缺陷的复现路径。每个功能点至少覆盖正常流、边界值、异常流；接口类用例写成可执行的请求（method/url/期望状态码/期望响应片段），并用 studio_test_run 真跑。',
-      '结果只写实测：通过写实际状态码与关键字段，失败写请求、响应、期望与实际、可复现步骤。',
+      '验证分三条线，缺哪条线都要么补上、要么在测试计划（studio_task_test_plan）里写明为什么不适用：① 单元测试——这次改动的函数/分支、边界值、异常输入，用 shell 用例跑仓库里的单测命令；② 集成测试——接口、数据库、服务间契约，用多步接口用例（登录→业务调用→查详情）或数据库断言；③ 端到端测试——从用户入口真开浏览器走主流程与关键异常路径。',
+      '用例来源：需求的验收条件、功能点的验收口径、上一次缺陷的复现路径。每个功能点至少覆盖正常流、边界值、异常流；接口类用例写成可执行的请求（method/path/期望状态码/期望响应片段），并用 studio_test_run 真跑；shell 用例跑真实的单测/脚本命令并断言退出码与输出。',
+      '结果只写实测：通过写实际状态码与关键字段，失败写请求、响应、期望与实际、可复现步骤。三条线的进度与结果要能在卡上看到，不要只在评论里说「测过了」。',
       '判失败就如实判：平台会自动开缺陷卡并挂回这张卡，不要手工再建一张重复的。',
       '不稳定（环境/数据导致）的用例标 flaky，不要为了绿灯把断言改松；真的缺陷不许标 flaky。',
-      '测试结论要给出准出建议：通过哪些、遗留哪些风险、是否建议发布。',
+      '测试结论要给出准出建议：每条线验了什么、遗留哪些风险、是否建议发布。',
     ].join('\n'),
   },
 }
@@ -1125,18 +1129,10 @@ export function sanitizeChecklist(input) {
   }
   return out
 }
-/** 用例与验收清单同理：轮询只给计数，抽屉打开时按卡取正文。
+/** 验收清单同理：轮询只给计数，抽屉打开时按卡取正文。
  *
- *  注意：以前这里还会下发一个空的 `cases: []` / `checklist: []` / `comments: []`，
- *  于是 /state 里既有「空数组」又有「真实计数」—— 读 `task.cases.length` 的视图永远是 0。
- *  现在只给计数，要正文一律走 /task/parts（issue #5 第 9 条）。 */
-export function publicCases(task) {
-  const cases = Array.isArray(task?.cases) ? task.cases : []
-  const pass = cases.filter(item => item.result === 'pass').length
-  const fail = cases.filter(item => item.result === 'fail').length
-  return { caseSummary: { total: cases.length, pass, fail } }
-}
-
+ *  注意：以前这里还会下发一个空的 `checklist: []`，于是 /state 里既有「空数组」又有「真实计数」——
+ *  读 `task.checklist.length` 的视图永远是 0。现在只给计数，要正文一律走 /task/parts（issue #5 第 9 条）。 */
 export function publicChecklist(task) {
   const checklist = Array.isArray(task?.checklist) ? task.checklist : []
   return { checkSummary: { done: checklist.filter(item => item.done).length, total: checklist.length } }
@@ -1306,6 +1302,7 @@ export function sanitizeCase(raw, index) {
       pointId: '',
       result: 'pending',
       type: 'functional',
+      tier: '',
       priority: 'p2',
       preconditions: '',
       steps: [],
@@ -1336,6 +1333,8 @@ export function sanitizeCase(raw, index) {
     result,
     /** 用例类型：功能 / 接口 / 界面 / 性能 / 安全。 */
     type,
+    /** 测试层级：unit / integration / e2e / other；空串 = 没写，按断言推断（test-plan.js）。 */
+    tier: sanitizeTier(raw.tier),
     /** 用例优先级：p0 必测、p3 有余力再测。 */
     priority,
     /** 前置条件：跑这条用例之前系统该是什么状态。 */

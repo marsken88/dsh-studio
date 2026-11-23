@@ -5,6 +5,7 @@ import { abandonedRetry } from './dispatch-state.js'
 import { driftNote, isModelDrift, sessionDirOf } from './model-drift.js'
 import { stripQuotedCode } from './mention-note.js'
 import { handoffBlock } from './handoff.js'
+import { planLine, testPlanSummary } from './test-plan.js'
 import { emitEvent } from './events.js'
 import { loadTeamMemory, teamMemoryBlock } from './team-memory.js'
 import { STUDIO_WORKSPACE_TITLE, dispatchDirFor, projectContext } from './dispatch-cwd.js'
@@ -1040,6 +1041,24 @@ export function buildExpertPrompt(task, expert, column, config, team, instructio
       const extra = [links.prd ? `PRD ${links.prd}` : '', links.proto ? `原型 ${links.proto}` : '', links.acceptance ? `验收标准 ${links.acceptance}` : ''].filter(Boolean).join('；')
       return `所属需求：${requirement.code || requirement.id}｜${requirement.title}${extra ? `（${extra}）` : ''}`
     })(),
+    /* 功能点的验收条件必须进提示词：以前任何角色都看不到「要验什么」，只能自己从标题猜。
+       测试尤其需要逐条对：验收条件才是「测全面」的锚点，不是用例数量。 */
+    (() => {
+      if (requirement === undefined) return ''
+      const points = Array.isArray(requirement.points) ? requirement.points : []
+      if (points.length === 0) return ''
+      const shown = points.slice(0, 8)
+      const lines = shown.map(point => {
+        const acceptance = (Array.isArray(point.acceptance) ? point.acceptance : [])
+          .filter(item => String(item.text ?? '').trim() !== '')
+          .slice(0, 4)
+        const head = `- ${point.id} ${point.title}`
+        if (acceptance.length === 0) return `${head}（还没写验收条件）`
+        return `${head}\n${acceptance.map(item => `  · ${item.id} ${String(item.text).slice(0, 120)}`).join('\n')}`
+      })
+      const more = points.length > shown.length ? `\n（还有 ${points.length - shown.length} 个功能点没列出来，用 studio_requirement_get 看全）` : ''
+      return `\n需求的功能点与验收条件（工作与验收都按这里逐条对，别自己另起一套口径）：\n${lines.join('\n')}${more}`
+    })(),
     `当前列：${column.label}`,
     `优先级：${task.priority}`,
     task.project ? `所属项目：${(config.projects ?? []).find(entry => entry.id === task.project)?.name ?? task.project}${task.iteration ? ` · 迭代 ${(config.projects ?? []).find(entry => entry.id === task.project)?.iterations?.find(iter => iter.id === task.iteration)?.name ?? task.iteration}` : ''}` : '',
@@ -1081,11 +1100,13 @@ export function buildExpertPrompt(task, expert, column, config, team, instructio
     /* 卡上有「跑不了」的用例时，不看列：谁接手谁负责补断言。
        以前只有测试列的提示词提这件事，于是别的列推进卡片时把 41 条空壳一路带到了待验收。 */
     (() => {
-      const bare = (task.cases ?? []).filter(item => item.http == null && item.shell == null && item.db == null)
+      /* 判「跑不了」要认四种执行方式：以前漏了 browser，浏览器用例被当成空壳，
+         提示词反复让专家去补一条已经能跑的用例。 */
+      const bare = (task.cases ?? []).filter(item => item.http == null && item.shell == null && item.db == null && item.browser == null)
       if (bare.length === 0) return ''
       const names = bare.slice(0, 5).map(item => item.title).join('、')
       return `\n这张卡上有 ${bare.length} 条用例没有可执行断言（跑不了，也不计入覆盖率）：${names}${bare.length > 5 ? ' 等' : ''}。
-它们不能靠「标成通过」过关。你手上有对应的验证条件时，用 studio_task_add_cases 把断言补上（接口给 method + path + expectStatus，shell 给 command + expectExit），工具会当场试跑一条并把结果回给你；确实补不了就在评论里说明为什么，别留空壳。`
+它们不能靠「标成通过」过关。你手上有对应的验证条件时，用 studio_task_add_cases 把断言补上（接口给 method + path + expectStatus，shell 给 command + expectExit，数据库给 db，浏览器给 browser；可带 tier=unit / integration / e2e），工具会当场试跑一条并把结果回给你；确实补不了就在评论里说明为什么，别留空壳。`
     })(),
     (task.gitlabMR?.iid ?? 0) > 0 ? `\n关联 MR：!${task.gitlabMR.iid} ${task.gitlabMR.title}（${task.gitlabMR.state}）${task.gitlabMR.url ? ` ${task.gitlabMR.url}` : ''}` : '',
     task.coding !== null && task.coding !== undefined && codingSummary(task.coding) !== ''
@@ -1113,8 +1134,33 @@ export function buildExpertPrompt(task, expert, column, config, team, instructio
       : '',
     task.requirement ? `\n需求描述：\n${task.requirement}` : '',
     column.id === 'test'
-      ? `\n这是测试环节：**先写能跑的用例，再谈通过**。用例用 studio_task_add_cases 登记，每条必须带可执行断言：接口用例给 {title, method, path, body?, expectStatus, expectContains?}（path 可以写相对地址，平台会拼上测试环境的 baseUrl），shell 用例给 {title, command}（需要管理员先开 allowShell），数据库用例给 {title, db:{file, sql}}（需要先开 allowDb），浏览器用例给 {title, browser:{url}}（需要先开 allowBrowser）。这个工具**写完会当场试跑第一条**，把试跑结果原样回给你——试跑不通过就改断言或地址再调一次，**不要把跑不了的用例留在卡上**（只有标题、没有断言的「用例」不许写，那不是用例，是待办）。真跑不了的（要人工操作、要看 UI、要连设备）才用 studio_task_case 登记成描述型用例，自己执行后用 result 回填 pass/fail/skip，失败要写清环境与复现步骤。其余用例用 studio_test_run 让平台真的去跑（它会发请求、比对状态码与响应体、把结果写回用例并留下执行记录，失败的自动开缺陷卡）。**用例一旦判 fail，平台会自动开一张缺陷卡（挂同一需求、父任务指向本卡），你不用再手工建 Bug，也不要重复建**。全部用例有结论后：有用例失败就 @ 开发同学退回「开发中」；全通过就推进到「待验收」，并登记一份测试报告（kind=cases）。` +
-        (task.bugSource == null ? '' : `\n这张卡来自缺陷 ${task.bugSource.code || task.bugSource.taskId}（用例「${task.bugSource.caseTitle}」）。修复已进入待测试，平台把来源用例重置成了待执行：请复跑这一条，确认通过后把本卡推进到「待验收」，并通过就把缺陷关闭。`)
+      ? (() => {
+          const summary = testPlanSummary(task.cases ?? [], task.testPlan)
+          const gaps = summary.gaps
+          return [
+            '\n这是测试环节：目标是**把这张卡验全面**，不是把用例点绿。按三条线走，能验的一条都不能漏。',
+            '',
+            '第一步先对齐验收口径：上面列出的需求功能点与验收条件、这张卡的验收清单、研发执行记录里的改动文件。把「改了什么 → 哪条验收条件 → 用哪条测试线验」列成一张小表写进评论，再动手写用例。',
+            '',
+            '三条线各自的落法（都用 studio_task_add_cases 登记，可显式给 tier；不给就按断言推断）：',
+            '· 单元测试（tier=unit）：针对这次改动的新增/修改函数与分支，先跑仓库里已有的单测，再补边界值、异常分支、空输入。落成 shell 用例 {title, command, tier:"unit", expectExit:0, expectContains?, cwd}（需要管理员先开 allowShell），cwd 指到这张卡的 worktree；命令按仓库实际情况写（node --test tests/x.test.mjs / npm test / pnpm vitest run / pytest -q / go test ./... 等）。先跑通一条再批量登记。',
+            '· 集成测试（tier=integration）：接口、数据库、服务间契约。多步接口用例用 steps：[{method,url,expectStatus,expectContains,extract}]（例如登录拿 token → 调业务接口 → 用返回的 id 查详情）；断言带业务码，别只断言状态码。数据库断言用 {db:{file, sql, expectColumn, expectValue}}（需要先开 allowDb）。',
+            '· 端到端测试（tier=e2e）：真开浏览器，从用户入口走主流程与关键异常路径：{browser:{url, expectText, expectSelector, steps:[{click},{fill,text},{waitFor}]}}（需要先开 allowBrowser）。没有前端改动的卡，在测试计划里写明这一层不适用并给出理由。',
+            '',
+            '硬性要求：',
+            '1. 每条用例必须能跑：studio_task_add_cases 会当场试跑第一条，跑不通就改断言/地址再调；只有标题没有断言的「用例」不许写（那是待办，不是用例）。真跑不了的（要人工操作、连设备、看第三方系统）用 studio_task_case 登记成描述型用例，自己执行后回填 result 并写清证据。',
+            '2. 用 studio_test_run 让平台真的跑（发请求、比对状态码与响应体、写回结果、留执行记录）。**用例一旦判 fail，平台会自动开缺陷卡（挂同一需求、父任务指向本卡），不要手工再建、也不要重复建**。',
+            '3. 三层收口：三条线要么有可执行用例并跑出结论，要么用 studio_task_test_plan 写明「不适用 + 理由」（例如本次只改后端接口、没有前端改动 → e2e 不适用）。准出按这个判定，缺一层会被拦。',
+            '4. 登记测试报告（studio_task_artifact，kind=report）：每条线的用例数 / 通过 / 失败 / 未跑，失败项的实际结果与复现路径，遗留风险。',
+            '5. 全通过 → 推进到「待验收」；有用例失败 → @ 开发同学退回「开发中」。',
+            '',
+            `这张卡当前的测试进度：${planLine(summary)}。`,
+            gaps.length === 0
+              ? '三条线都已有可执行用例。'
+              : `缺口：${gaps.map(gap => `${gap.label}（${gap.why}）`).join('、')}——补能跑的用例，或用 studio_task_test_plan 写明不适用 + 理由。`,
+            task.bugSource == null ? '' : `\n这张卡来自缺陷 ${task.bugSource.code || task.bugSource.taskId}（用例「${task.bugSource.caseTitle}」）。修复已进入待测试，平台把来源用例重置成了待执行：请复跑这一条，确认通过后把本卡推进到「待验收」，并通过就把缺陷关闭。`,
+          ].join('\n')
+        })()
       : '',
     task.type === 'bug'
       ? `\n这是一张缺陷卡（严重级别 ${String(task.severity || 'p2').toUpperCase()}），不是新需求，处理方式不同：

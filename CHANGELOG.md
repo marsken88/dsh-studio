@@ -1,5 +1,28 @@
 # 更新日志
 
+## [Unreleased]
+
+### 三层测试：单元 / 集成 / 端到端，缺层看得见、也拦得住
+
+以前「用例有可执行断言」只保证能跑，不保证验全：真机上几乎每张卡都只有一条打接口的用例，
+代码分支（单元）和页面上的真实操作（端到端）没人验，测试专家也无从知道还差哪一层。
+
+- 每条用例可带 `tier`（`unit` / `integration` / `e2e` / `other`），不写就按断言推断：
+  `browser` → 端到端、`http`/`db` → 集成、shell 里的单测 runner → 单元、playwright/cypress → 端到端；
+  口径只在 `src/host/test-plan.js` 一份
+- 新工具 `studio_task_test_plan`：三条线里哪一条确实不适用，必须写理由；不适用 = 不算缺口
+- 卡准出：代码类卡（dev / test / bug）三条线每条都要有可执行用例，或写明不适用；
+  缺层进 blockers（`config.caseGate.tiers=false` 才关）
+- 测试专家的派单提示词：需求功能点与验收条件、**这张卡当前三层的进度与缺口**、每层怎么落
+  （shell 跑单测 / 多步接口与数据库断言 / 浏览器走用户路径），缺层时补用例或写清为什么验不了
+- 卡片正面：代码类卡缺层时显示「· 缺 单元/端到端」；抽屉「测试」页有三层进度条、
+  每层「跑这层 / 不适用（要理由）/ 恢复适用」、最近 3 次执行批次
+- 用例行可直接改层级（自动·推断 / 单元 / 集成 / 端到端 / 其它）
+- 顺带修一个真 bug：`web/src/boardui/dialog.tsx` 的输入弹窗把 react-aria 的 `onChange(字符串)`
+  当成 DOM 事件读 `event.target.value`，**一敲字就 TypeError**——所有 prompt 弹窗
+  （标记阻塞、写「不适用」的理由…）在真机上不可用
+- `npm run verify:tiers`（`tools/visual/tiers-probe.mjs`）：真宿主 + 真 client.js + 真 Chrome，31 项
+
 ## [0.10.7] — 2026-11-24
 
 ### 派单会话的提权审批可以配了：默认自动批准（= 始终允许完全访问）

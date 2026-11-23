@@ -8,7 +8,7 @@
  * 定位只认 data-kanban-card（tools/visual/*.mjs 按它点开抽屉），不再挂手写类名。
  */
 
-import { PRIORITY_LABEL, ROLE_LABEL } from './labels.js'
+import { CASE_TIER_LABEL, PRIORITY_LABEL, ROLE_LABEL } from './labels.js'
 import { statusDot, uiIcon } from './icons.js'
 import { fmtDate, fmtTime } from './format.js'
 import { artifactsWithoutBody, cardOwner, caseSummaryOf, checkSummaryOf, commentCountOf } from './roster.js'
@@ -179,8 +179,25 @@ function Card({ task, onOpen, config, requirements, onPickRequirement, onPickPro
       caseRun.total > 0 ? h('span', {
         className: caseRun.fail > 0 ? DANGER : undefined,
         'data-case': '1',
-        title: `测试用例：通过 ${caseRun.pass}/${caseRun.total}${caseRun.fail > 0 ? `，不通过 ${caseRun.fail}` : ''}`,
+        title: `测试用例：通过 ${caseRun.pass}/${caseRun.total}${caseRun.fail > 0 ? `，不通过 ${caseRun.fail}` : ''}${(() => {
+          const tiers = task.caseTiers ?? {}
+          const rows = ['unit', 'integration', 'e2e'].map(tier => `${CASE_TIER_LABEL[tier]} ${tiers[tier]?.pass ?? 0}/${tiers[tier]?.total ?? 0}${tiers[tier]?.applicable === false ? '（不适用）' : ''}`)
+          return rows.length > 0 ? `；${rows.join(' · ')}` : ''
+        })()}`,
       }, uiIcon(h, caseRun.fail > 0 ? 'resultFail' : 'resultPass'), ` ${caseRun.pass}/${caseRun.total}`) : null,
+      /* 三层测试缺口：代码类卡上三条线要各有能跑的用例（或写明不适用）。
+         这是**缺口**不是结论，所以只在有缺口且卡上已经有测试动作时提示，避免新卡一片黄。 */
+      (() => {
+        if (!['dev', 'test', 'bug'].includes(String(task.type ?? ''))) return null
+        const tiers = task.caseTiers ?? {}
+        const missing = ['unit', 'integration', 'e2e'].filter(tier => (tiers[tier]?.applicable !== false) && (tiers[tier]?.executable ?? 0) === 0)
+        if (missing.length === 0 || (caseRun.total === 0 && (tiers.unit?.total ?? 0) + (tiers.integration?.total ?? 0) + (tiers.e2e?.total ?? 0) === 0)) return null
+        return h('span', {
+          className: 'text-status-yellow-text',
+          'data-tier-gap': missing.join(','),
+          title: `三条测试线还缺：${missing.map(tier => CASE_TIER_LABEL[tier]).join('、')}。补能跑的用例，或在大模型会话里用 studio_task_test_plan 写明这一层为什么不适用`,
+        }, '· 缺 ', missing.map(tier => CASE_TIER_LABEL[tier]).join('/'))
+      })(),
       noBody > 0 ? h('span', { className: DANGER, 'data-nobody-warn': '1', title: `${noBody} 件交付物还没写正文，云盘文档里只有标题` }, statusDot(h, 'warn'), ' 缺正文') : null,
       commentCountOf(task) > 0 ? h('span', {}, `· ${commentCountOf(task)} 评论`) : null,
       h('span', { className: 'ml-auto tabular-nums' }, fmtTime(task.updatedAt)),
