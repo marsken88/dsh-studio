@@ -430,7 +430,11 @@ export async function handleTaskRoute({ method, route, req, res, store, url }) {
       ok: true,
       cases: (task.cases ?? []).map(item => ({ ...item, tierEffective: tierOf(item) })),
       checklist: task.checklist ?? [],
-      testRuns: task.testRuns ?? [],
+      /* 执行批次只给摘要（最近 5 次）：抽屉只显示「什么时候、过了几条」，
+         每条 run 的逐条 results 最多 60 条，全下发会让这个接口白白翻几倍。 */
+      testRuns: (task.testRuns ?? []).slice(-5).map(run => ({
+        id: run.id, at: run.at, by: run.by, env: run.env, total: run.total, passed: run.passed, failed: run.failed,
+      })),
       testPlan: task.testPlan ?? null,
       plan: testPlanSummary(task.cases ?? [], task.testPlan),
     })
