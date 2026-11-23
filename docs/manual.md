@@ -47,6 +47,8 @@
 
 **一句话记法**：需求是锚点，功能点是可验收的最小单位，卡是能派单的工作单元，用例和交付物是证据。
 
+**两套交付物模型的分工**（issue #129）：`requirement.docs` 是**需求级文档**（PRD / 原型 / 验收标准，有版本与基线，显示在需求页）；`task.artifacts` 是**卡级交付物**（方案 / MR / 用例集 / 报告 / 原型，会归档到云盘、按类型进子目录）。问「这条需求交付齐了吗」时把两者合起来看：矩阵与准出的交付物数量已经把 `docs` 算进去了。
+
 ---
 
 ## §3 一条需求的完整旅程（人视角）
@@ -246,6 +248,7 @@ studio_task_check          { id, itemId, note }         // 清单逐项勾，附
 | 面板渲染体检（改前端后必跑） | `npm run probe:panel -- --base http://127.0.0.1:<端口>` |
 | README 截图重拍 | `npm run shots -- --base http://127.0.0.1:<端口>` |
 | 云盘孤儿目录体检 / 清理 | `npm run drive:gc -- --base <端口>` / 加 `--apply` |
+| 派单会话目录体检 / 清理幽灵卡 | `npm run gc:sessions`（预览）/ 加 `--apply` 才删。判据是「卡已不在台账里」，先看预览再删 |
 | 平台全闭环自检 | `STUDIO_BASE=… node tools/e2e-loop.mjs --k 3`（跑完自删） |
 | 真库能不能起 | `npm run smoke:store -- ~/.dsh/dsh-studio.db` |
 | 发版前文档一致性 | `npm run release:check` |

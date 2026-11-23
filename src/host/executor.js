@@ -1075,7 +1075,7 @@ export async function larkJson(args, timeoutMs = 45000, options = {}) {
 }
 
 export const ARTIFACT_FILE_LABEL = {
-  requirement: '需求', design: '方案', mr: '合并请求', cases: '用例', report: '报告',
+  requirement: '需求', design: '方案', prototype: '原型', mr: '合并请求', cases: '用例', report: '报告',
   release: '发布', doc: '文档', screenshot: '截图', other: '交付物',
 }
 

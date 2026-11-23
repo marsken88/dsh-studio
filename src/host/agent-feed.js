@@ -18,6 +18,12 @@ export function parseStudioSession(sessionId) {
   const text = String(sessionId ?? '')
   if (!text.startsWith('studio-')) return null
   const body = text.slice('studio-'.length)
+  /* 任务 id 恒为 t-<8位hex>，专家 id 可能自带连字符（expert-2d22ad）。
+     以前用 lastIndexOf('-') 切，会把 studio-t-x-expert-2d22ad 解析成
+     taskId=t-x-expert / expertId=2d22ad —— 派单会话认错卡（issue #127）。 */
+  const matched = /^(t-[0-9a-zA-Z]+)-(.+)$/.exec(body)
+  if (matched !== null) return { taskId: matched[1], expertId: matched[2] }
+  // 兜底：兼容不带 t- 前缀的老会话（studio-<taskId>-<expertId>）
   const dash = body.lastIndexOf('-')
   if (dash <= 0) return null
   const taskId = body.slice(0, dash)

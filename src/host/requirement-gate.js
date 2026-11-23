@@ -77,6 +77,10 @@ export function requirementMatrix(state, requirement) {
     fail: points.reduce((sum, point) => sum + point.cases.fail, 0),
     artifacts: points.reduce((sum, point) => sum + point.artifacts, 0),
   }
+  /* 需求文档（requirement.docs）也是「这一棒产出的文档」：矩阵的交付物数要一起算，
+     否则「PRD 写在 docs 里」的需求在矩阵上显示 0 件交付物（issue #129）。 */
+  summary.docArtifacts = (requirement.docs ?? []).filter(doc => String(doc.content ?? '').trim() !== '').length
+  summary.artifacts += summary.docArtifacts
   summary.passRate = summary.cases === 0 ? 0 : Math.round((summary.pass / summary.cases) * 100)
   /* 两个口径，以前都叫「覆盖率」，于是同一份数据里同时出现 coverageRate=100 与 coveredPoints=0（issue #109）：
      · pointsWithCasesRate：有多少功能点**至少有一条用例**（哪怕还没跑）
@@ -103,8 +107,17 @@ export function requirementGate(state, requirement) {
   const pool = requirement.pool ?? { score: 0 }
   if (!(pool.score > 0)) warnings.push('还没做需求池打分（RICE）：影响面、影响度、置信度、成本填一下就能排序')
   const openQuestions = (requirement.questions ?? []).filter(item => item.status === 'open')
-  if (String(requirement.links?.prd ?? '').trim() === '' && (requirement.docs ?? []).every(doc => String(doc.content ?? '').trim() === '') && requirement.baseline === null) {
+  const docs = requirement.docs ?? []
+  const docOfKind = kind => docs.some(doc => String(doc.kind ?? '') === kind && String(doc.content ?? '').trim() !== '')
+  const artifactOfKind = kind => tasks.some(task => (task.artifacts ?? []).some(item => String(item.kind ?? '') === kind))
+  if (String(requirement.links?.prd ?? '').trim() === '' && docs.every(doc => String(doc.content ?? '').trim() === '') && requirement.baseline === null && !artifactOfKind('requirement')) {
     blockers.push('需求还没有产品输出：先补 PRD 链接或正文，再拆卡')
+  }
+  /* 原型以前**不参与任何判断**（issue #128）：links.proto 填不填对流程毫无影响。
+     这里给一条 warning：有前端类的功能点时，提醒补原型（真正的「有没有前端」由澄清三问里的交付边界判断）。 */
+  const hasProto = String(requirement.links?.proto ?? '').trim() !== '' || docOfKind('proto') || artifactOfKind('prototype')
+  if (!hasProto && requirement.discovery?.boundary !== undefined && String(requirement.discovery.boundary).trim() !== '') {
+    warnings.push('还没有原型：交付边界写了要做界面时，产品应该给原型（links.proto / 需求文档 kind=proto / 卡交付物 kind=prototype 任一处）')
   }
   if (openQuestions.length > 0) blockers.push(`还有 ${openQuestions.length} 个待确认问题没回答：${openQuestions.slice(0, 3).map(item => item.text.slice(0, 18)).join('、')}`)
   if (tasks.length === 0) blockers.push('这条需求下还没有任何任务卡')
@@ -193,7 +206,11 @@ export function requirementGate(state, requirement) {
   }
   if (typed.length > 0) warnings.push(typed.length + ' 条用例的「通过」是手工标的、没有执行记录：' + typed.slice(0, 3).join('、') + (typed.length > 3 ? ' 等' : '') + '（跑一次才算验证过）')
   if (skipped.length > 0) warnings.push(skipped.length + ' 条用例被标成跳过：' + skipped.slice(0, 3).join('、') + (skipped.length > 3 ? ' 等' : '') + '（跳过要有理由）')
-  const artifacts = tasks.reduce((sum, task) => sum + (task.artifacts ?? []).length, 0)
+  /* 交付物口径（issue #129）：卡上的 artifacts 与需求级 docs 都是「这一棒产出的文档」。
+     以前只数 artifacts，于是「PRD 写在 docs 里」的需求会显示「还没有登记任何交付物」。 */
+  const taskArtifacts = tasks.reduce((sum, task) => sum + (task.artifacts ?? []).length, 0)
+  const docArtifacts = (requirement.docs ?? []).filter(doc => String(doc.content ?? '').trim() !== '').length
+  const artifacts = taskArtifacts + docArtifacts
   /* 验收条件逐条判覆盖：没被任何**通过**用例挂上的条件要单独点出来。
      以前矩阵是"功能点任意一条用例通过 = 所有条件都覆盖"，所以这条提醒以前根本不会出现。 */
   const acceptanceLines = matrix.points.flatMap(item => item.acceptance ?? [])

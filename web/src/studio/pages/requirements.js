@@ -145,6 +145,9 @@ export     function RequirementsPage({ state, onOpenTask, onChanged, createSigna
         } catch { return 'all' }
       })
       const [reqQuery, setReqQuery] = React.useState('')
+      /* 需求级沟通（issue #115 的界面那一半）：评论的草稿与提交态。 */
+      const [commentDraft, setCommentDraft] = React.useState('')
+      const [commentBusy, setCommentBusy] = React.useState(false)
       /* 排序沿用老口径：按 RICE 分从高到低（reqsort 从来没有写入点，别再假装可切）。 */
       const reqQueryText = reqQuery.trim().toLowerCase()
       const visibleRequirements = requirements
@@ -684,6 +687,70 @@ export     function RequirementsPage({ state, onOpenTask, onChanged, createSigna
                   review?.status === 'approved' ? h('span', { className: HINT }, '评审已通过，可以拆卡和派活了。') : null,
                 ),
                 reviewNote === null ? null : h('div', { className: HINT, style: { marginTop: 8 } }, reviewNote),
+              ),
+            )
+          })(),
+          (() => {
+            /* 沟通区：需求级的追问与结论落在这里，而不是覆盖正文或散到卡上（issue #115）。 */
+            const comments = Array.isArray(current.comments) ? current.comments : []
+            const sendComment = async () => {
+              const body = commentDraft.trim()
+              if (body === '') return
+              setCommentBusy(true)
+              try {
+                await api('/requirement/comment', { id: current.id, action: 'add', body, by: currentUser() })
+                setCommentDraft('')
+                toast('已发到需求沟通里')
+                if (typeof onChanged === 'function') onChanged()
+              } catch (error) { toast(error.message ?? String(error), 'error') }
+              finally { setCommentBusy(false) }
+            }
+            const removeComment = async comment => {
+              if (!(await confirmDialog('删掉这条需求沟通？删了之后只在历史里留痕。', { title: '删除沟通', danger: true, okText: '删除' }))) return
+              setCommentBusy(true)
+              try {
+                await api('/requirement/comment', { id: current.id, action: 'remove', commentId: comment.id, by: currentUser() })
+                toast('已删除')
+                if (typeof onChanged === 'function') onChanged()
+              } catch (error) { toast(error.message ?? String(error), 'error') }
+              finally { setCommentBusy(false) }
+            }
+            return h('div', { className: `${PANEL} mt-4`, 'data-requirement-comments': '' },
+              h('div', { className: PANEL_HEAD },
+                h('span', null, '沟通'),
+                h('span', { className: HINT, style: { marginLeft: 'auto' } }, comments.length === 0 ? '还没有人在这里说过话' : `${comments.length} 条`),
+              ),
+              h('div', { className: PANEL_BODY },
+                comments.length === 0
+                  ? h('div', { className: HINT }, '产品说「这里还要考虑退货」、架构问「边界含不含加盟」，都写在这里：需求页能直接看到，不用翻卡片的评论。')
+                  : h('div', { className: 'flex min-w-0 flex-col gap-3', 'data-requirement-comment-list': '' },
+                    comments.map((comment, index) => h('div', { key: comment.id, className: 'flex min-w-0 flex-col gap-1 border-b border-separator-border pb-3 last:border-b-0 last:pb-0', 'data-requirement-comment': comment.id },
+                      h('div', { className: 'flex flex-wrap items-center gap-2' },
+                        h('span', { className: 'text-body-2-medium text-text-primary' }, comment.by || '人'),
+                        h('span', { className: HINT }, fmtTime(comment.at)),
+                        (comment.edits ?? []).length > 0 ? h(Chip, { color: 'gray' }, `改过 ${comment.edits.length} 次`) : null,
+                        h(Button, { variant: 'ghost', size: 'sm', className: 'ms-auto', disabled: commentBusy, onClick: () => void removeComment(comment) }, '删除'),
+                      ),
+                      h('div', { className: 'md-content text-text-primary', 'data-requirement-comment-body': '' }, renderMarkdown(String(comment.body ?? ''))),
+                    )),
+                  ),
+                h('div', { className: 'mt-3 flex min-w-0 flex-col gap-2', 'data-requirement-comment-composer': '' },
+                  h(TextAreaField, {
+                    rows: 3,
+                    placeholder: '写在这里的都会出现在需求页（支持 Markdown，Ctrl/⌘+Enter 发送）',
+                    value: commentDraft,
+                    onChange: event => setCommentDraft(event.target.value),
+                    onKeyDown: event => {
+                      if ((event.metaKey || event.ctrlKey) && (event.key === 'Enter' || event.key === 'NumpadEnter')) {
+                        event.preventDefault()
+                        void sendComment()
+                      }
+                    },
+                  }),
+                  h('div', { className: ROW, style: { justifyContent: 'flex-end' } },
+                    h(Button, { variant: 'primary', size: 'sm', disabled: commentBusy || commentDraft.trim() === '', onClick: () => void sendComment() }, commentBusy ? '发送中…' : '发送'),
+                  ),
+                ),
               ),
             )
           })(),

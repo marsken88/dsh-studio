@@ -51,7 +51,8 @@ export const TASK_TYPES = ['requirement', 'bug', 'design', 'dev', 'test', 'ops']
 export const SEVERITIES = ['p0', 'p1', 'p2', 'p3']
 
 /** 交付物的种类：一张卡干完，得留下能给人看的东西。 */
-export const ARTIFACT_KINDS = ['requirement', 'design', 'mr', 'cases', 'report', 'release', 'doc', 'screenshot', 'other']
+/* prototype：产品这一棒的原型/线框图。以前没有这个类型，原型只能塞进 doc/other，归档文件名退化成「交付物-x」（issue #128）。 */
+export const ARTIFACT_KINDS = ['requirement', 'design', 'prototype', 'mr', 'cases', 'report', 'release', 'doc', 'screenshot', 'other']
 /** 交付物状态：draft 草稿 / delivered 已交付 / accepted 已验收。 */
 export const ARTIFACT_STATUS = ['draft', 'delivered', 'accepted']
 

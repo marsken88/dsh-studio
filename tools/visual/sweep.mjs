@@ -139,6 +139,19 @@ const teamForm = await page.evaluate(() => {
 await page.keyboard.press('Escape')
 check('专家团编辑表单的成员勾选框都有文字', teamOpened === false || (teamForm.boxes > 0 && teamForm.empty === 0), `勾选框 ${teamForm.boxes} · 无文字 ${teamForm.empty} · 已勾 ${teamForm.checked}`)
 
+/* 需求页的「沟通」区（issue #115 的界面那一半）：只断言它在、不是空壳。 */
+await goTab('需求')
+await sleep(900)
+const requirementComments = await page.evaluate(() => {
+  const panel = document.querySelector('[data-dsh-studio] [data-requirement-comments]')
+  return {
+    panel: Boolean(panel),
+    hasComposer: Boolean(document.querySelector('[data-dsh-studio] [data-requirement-comment-composer] textarea')),
+    text: (panel?.innerText ?? '').length,
+  }
+})
+check('需求页有「沟通」区且带输入框', requirementComments.panel && requirementComments.hasComposer && requirementComments.text > 10, `面板 ${requirementComments.panel} · 输入框 ${requirementComments.hasComposer} · ${requirementComments.text} 字`)
+
 check('全程无 pageerror', errors.length === 0, errors.join(' | '))
 await browser.close()
 
