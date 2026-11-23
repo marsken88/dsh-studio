@@ -903,6 +903,10 @@ function Drawer({ task, state, onClose, onChanged }) {
      每行可以「跑这一层」或标记「不适用 + 理由」。数字来自服务端 parts.plan，界面不重算口径。 */
   const testPlanBlock = () => {
     if (testPlanTiers.length === 0) return null
+    /* 产品/设计卡不受三层闸门约束：没有用例也没有测试计划时不显示这个块，
+       否则每张需求卡一打开「测试」页都是「缺 单元/集成/端到端」，像在报假警。 */
+    const codeLike = ['dev', 'test', 'bug'].includes(String(task.type ?? ''))
+    if (!codeLike && cases.length === 0 && testRuns.length === 0) return null
     const required = testPlanTiers.filter(row => CASE_TIERS.includes(row.tier) && row.tier !== 'other')
     if (required.length === 0) return null
     const gapSet = new Set(testPlanGaps.map(gap => gap.tier))
