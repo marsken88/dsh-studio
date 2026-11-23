@@ -12,6 +12,7 @@ import { clearTeamMemory, loadTeamMemory } from '../team-memory.js'
 import { sanitizeCaseShell } from '../shell-case.js'
 import { sanitizeDbCase } from '../db-runner.js'
 import { sanitizeCaseBrowser } from '../browser-runner.js'
+import { applyTierDeclarations, sanitizeTier, testPlanSummary, tierOf } from '../test-plan.js'
 import {
   CASE_HTTP_METHODS,
   CASE_PRIORITIES,
@@ -422,7 +423,21 @@ export async function handleTaskRoute({ method, route, req, res, store, url }) {
     const id = String(body.id ?? '')
     const task = store.snapshot().tasks.find(t => t.id === id)
     if (task === undefined) throw new Error(`no task ${id}`)
-    host.sendJson(res, 200, { ok: true, cases: task.cases ?? [], checklist: task.checklist ?? [] })
+    /* 用例正文、清单、执行批次、测试计划一起给：抽屉里的「测试」页要一次画完
+       （三层进度 + 每层哪几条 + 最近几次执行的结果），分开取会闪。
+       tierEffective 是「显式 tier 或按断言推断」的结果，界面按它分组，不用自己再推一遍。 */
+    host.sendJson(res, 200, {
+      ok: true,
+      cases: (task.cases ?? []).map(item => ({ ...item, tierEffective: tierOf(item) })),
+      checklist: task.checklist ?? [],
+      /* 执行批次只给摘要（最近 5 次）：抽屉只显示「什么时候、过了几条」，
+         每条 run 的逐条 results 最多 60 条，全下发会让这个接口白白翻几倍。 */
+      testRuns: (task.testRuns ?? []).slice(-5).map(run => ({
+        id: run.id, at: run.at, by: run.by, env: run.env, total: run.total, passed: run.passed, failed: run.failed,
+      })),
+      testPlan: task.testPlan ?? null,
+      plan: testPlanSummary(task.cases ?? [], task.testPlan),
+    })
     return true
   }
   if (method === 'POST' && route === '/task/comments') {
@@ -626,6 +641,7 @@ export async function handleTaskRoute({ method, route, req, res, store, url }) {
             merged.browser = sanitizeCaseBrowser(body.browser)
           }
           if (body.pointId !== undefined) merged.pointId = String(body.pointId).trim().slice(0, 24)
+          if (body.tier !== undefined) merged.tier = sanitizeTier(body.tier)
           if (body.flaky !== undefined) merged.flaky = body.flaky === true
           if (body.type !== undefined && CASE_TYPES.includes(String(body.type))) merged.type = String(body.type)
           if (body.priority !== undefined && CASE_PRIORITIES.includes(String(body.priority).toLowerCase())) merged.priority = String(body.priority).toLowerCase()
@@ -673,6 +689,34 @@ export async function handleTaskRoute({ method, route, req, res, store, url }) {
       bug: autoBug,
       error: autoBugError,
       skipped: autoBugSkipped,
+      state: host.publicState(store),
+    })
+    return true
+  }
+  if (method === 'POST' && route === '/task/test-plan') {
+    /* 测试计划：单元 / 集成 / 端到端里哪一层不适用（带理由）。
+       不传 tiers 只读回进度；声明不合法整条拒绝（和工具层同一份 applyTierDeclarations）。 */
+    const body = await host.readJsonBody(req)
+    const id = String(body.id ?? '')
+    const by = String(body.by ?? '测试').slice(0, 40)
+    const tiers = Array.isArray(body.tiers) ? body.tiers : []
+    const before = store.snapshot().tasks.find(item => item.id === id)
+    if (before === undefined) throw new Error(`no task ${id}`)
+    const applied = applyTierDeclarations(before.testPlan, tiers, { by, at: Date.now() })
+    if (applied.errors.length > 0) throw new Error(applied.errors.join('；'))
+    if (applied.changed > 0) {
+      await store.mutate(state => {
+        const task = state.tasks.find(item => item.id === id)
+        if (task === undefined) return
+        task.testPlan = applied.plan
+        task.updatedAt = Date.now()
+      })
+    }
+    const latest = store.snapshot().tasks.find(item => item.id === id)
+    host.sendJson(res, 200, {
+      ok: true,
+      task: latest,
+      plan: testPlanSummary(latest.cases ?? [], latest.testPlan),
       state: host.publicState(store),
     })
     return true

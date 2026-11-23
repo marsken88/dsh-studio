@@ -43,8 +43,13 @@ const card = (overrides = {}) => ({
   service: 'svc-1',
   requirementId: '',
   checklist: [],
-  // 一张能过用例闸门的卡：有可执行定义且跑通过（用例闸门默认开，dev 卡零用例会被拦）
-  cases: [{ id: 'c1', title: '冒烟', http: { method: 'GET', url: 'http://127.0.0.1:9/health', expectStatus: 200 }, result: 'pass' }],
+  // 一张能过用例闸门的卡：三条线各有一条可执行且通过的用例
+  // （用例闸门默认开，dev 卡零用例会被拦；三层测试闸门要求单元/集成/端到端各有能跑的）
+  cases: [
+    { id: 'c1', title: '冒烟', http: { method: 'GET', url: 'http://127.0.0.1:9/health', expectStatus: 200 }, result: 'pass' },
+    { id: 'c2', title: '单测', shell: { command: 'node --test', expectExit: 0 }, result: 'pass' },
+    { id: 'c3', title: '页面', browser: { url: '/' }, result: 'pass' },
+  ],
   artifacts: [],
   comments: [],
   history: [],

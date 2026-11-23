@@ -1165,3 +1165,34 @@ TDZ 41 文件，`pnpm build` 后 `cmp dist/client.js client.js` 一致，`probe:
 
 没验到的：目标机要部署 + 重启才加载新代码；「智能体真的不再被审批挡住」要么等一次真实派单，
 要么在目标机上按 `/agents/policy` 的回显 + 会话日志确认。
+
+## 三层测试：单元 / 集成 / 端到端（2026-11-24）
+
+用户反馈：测试专家还不够智能，希望从单元、集成到端到端把需求测全面，并且能在卡片明细里看到测试进度与结果。
+查下来问题不在模型，而在尺子：用例闸门只问「有没有可执行用例」，一张卡一条打接口的用例就能收口；
+测试专家的提示词里既没有「还差哪一层」，也没有需求的验收条件可对。
+
+改法：
+
+- 新增 `src/host/test-plan.js`（纯函数）：`inferTier` / `tierOf` / `tierRows` / `testPlanSummary` /
+  `testPlanGaps` / `applyTierDeclarations` / `publicCases`；用例 `tier` 显式或按断言推断，
+  三条线（单元/集成/端到端）各有自己的通过 / 可执行 / 缺口
+- 用例模型加 `tier`；`/task/parts` 带 `testPlan` / `testRuns` / `plan` / 每条的 `tierEffective`；
+  `/state` 的 `caseSummary` 旁边给 `caseTiers`（对象，不下发数组，守住 `state-contract`）
+- 准出：代码类卡有缺口就拦，可用测试计划写「不适用 + 理由」；`config.caseGate.tiers=false` 才关
+- 新工具 `studio_task_test_plan` + `POST /studio-api/task/test-plan`（工具与路由共用 `applyTierDeclarations`）
+- 测试专家提示词：需求功能点与验收条件、当前三层进度与缺口、每层怎么落（shell 单测 / 多步 http 与 db / 浏览器）；
+  顺带修了「空壳判定漏了 browser」的提示词 bug
+- 抽屉「测试」页：三层进度块（通过/可执行/缺口/不适用理由、进度条、跑这层、不适用、恢复适用）+
+  最近 3 次执行批次；用例行可直接改层级；卡片正面缺层提示（`data-tier-gap`）
+- 修对话框真 bug：`web/src/boardui/dialog.tsx` 的 `Textarea` 是 react-aria 的，
+  `onChange` 给字符串，代码却读 `event.target.value` —— 一敲字就 TypeError，所有 prompt 弹窗在真机不可用
+
+验证：`npm test` 471/471（本地 + `TZ=UTC`，新增 12 例 `tests/test-plan.test.mjs`），
+`node --check` / `verify:tdz` 通过，`pnpm build` 后 `cmp dist/client.js client.js` 一致；
+新增 `npm run verify:tiers`（`tools/visual/tiers-probe.mjs`）：真宿主（`apply(ctx)` + 真路由 + 临时 SQLite）
++ 真 client.js + 真 Chrome，31/31，覆盖 `/state` 分层摘要、卡片缺层提示、抽屉三层进度、不适用/恢复适用
+真发请求、跑这层真执行、无 pageerror。
+
+没验到的：目标机未部署（desktop profile 指向仓库，需要重启 DSH 才加载新代码）；
+「测试专家真的按三层补用例」要等一次真实派单确认；存量卡补齐前会被新闸门拦住，这是预期。

@@ -77,7 +77,7 @@
 | **澄清门禁** | 拆卡时 | 三问没答完 | 答完三问（`discovery`） |
 | **设计闸门** | 卡进「开发中」 | 没有设计记录，或评审未通过，或多稿未定案 | 放设计稿 + 指认定案 + 评审通过 |
 | **评审闸门** | 卡进「待测试」 | 代码评审没有结论 | `studio_task_coding action=review status=approved` |
-| **准出门禁** | 卡进「已完成」 | 清单没勾完 / 有失败用例 / 卡被标阻塞 / 没人签字 / **项目检查没跑或没通过**；需求级另加**可执行用例占比 < 60%** | 逐项补齐；`override` 强推需写理由 |
+| **准出门禁** | 卡进「已完成」 | 清单没勾完 / 有失败用例 / 卡被标阻塞 / 没人签字 / **项目检查没跑或没通过** / **三层测试缺层（单元/集成/端到端，可用测试计划写「不适用 + 理由」）**；需求级另加**可执行用例占比 < 60%** | 逐项补齐；`override` 强推需写理由 |
 | **合并门禁** | 合 MR | 评审未过 / 可执行用例没通过 / 项目检查没过 / 登记的分支与 commits 对不上 | 同上；通过后可让平台代合并 |
 | **发布门禁** | 发布版本 | 有未完成卡 / 阻塞 / 未结缺陷 / 失败用例 / 没填 tag / 冒烟未过 / **没有审批记录** | 先「审批通过」再发布；确实要发走「强制发布」并写原因 |
 
@@ -123,7 +123,7 @@ studio_task_case           { id, cases:[…] }            // 或者 studio_task_
 studio_task_check          { id, itemId, note }         // 清单逐项勾，附证据
 ```
 
-### 5.4 工具清单（46 个，按用途分组）
+### 5.4 工具清单（47 个，按用途分组）
 
 | 组 | 工具 |
 | --- | --- |
@@ -131,7 +131,9 @@ studio_task_check          { id, itemId, note }         // 清单逐项勾，附
 | 需求 | `studio_requirement_list` `studio_requirement_get` `studio_requirement_save` `studio_requirement_review` `studio_requirement_split` `studio_requirement_signoff` `studio_requirement_folder` `studio_requirement_questions` `studio_requirement_comment` `studio_requirement_doc` `studio_requirement_requester` |
 | 设计/交付物 | `studio_task_design` `studio_task_artifact` |
 | 执行/评审 | `studio_task_coding` `studio_task_quality` `studio_merge_gate` |
-| 测试 | `studio_task_case` `studio_task_add_cases` `studio_task_generate_cases` `studio_test_run` `studio_test_suite` |
+| 测试 | `studio_task_case` `studio_task_add_cases` `studio_task_test_plan` `studio_task_generate_cases` `studio_test_run` `studio_test_suite` |
+
+**三层测试（单元 / 集成 / 端到端）**：每条用例可带 `tier`（不写按断言推断：`browser` → 端到端、`http`/`db` → 集成、shell 里的单测命令 → 单元）。代码类卡的准出要求**每条线要么有可执行用例，要么用 `studio_task_test_plan` 写明「不适用 + 理由」**（`config.caseGate.tiers=false` 才关）；卡片抽屉「测试」页有三层进度条、每层的「跑这层 / 不适用」按钮和最近执行批次，卡片正面会显示「缺 单元/端到端」。测试专家的派单提示词会带上需求功能点与验收条件、当前三层的缺口和每层怎么落，缺层时要么补用例、要么写清为什么验不了。
 | 缺陷/验收 | `studio_task_signoff` `studio_bug_duplicate` |
 | 版本 | `studio_release_list` `studio_release_get` `studio_release_save` `studio_release_publish` `studio_release_gray` |
 | 项目/度量 | `studio_project_list` `studio_project_save` `studio_dashboard` `studio_workload` `studio_burndown` `studio_analytics` `studio_costs` |
@@ -161,7 +163,7 @@ studio_task_check          { id, itemId, note }         // 清单逐项勾，附
 | 专家 | 角色 AI 名册：名字、模型、提示词、技能 | 新需求先来这里确认每列有专家 |
 | 专家团 | 多个专家组的团队（团长拆活） | 大需求用团长编排 |
 | 技能库 | 可复用的做法（命令/坑/清单） | 「用上几张卡 / 返工率」是**相关性**不是因果，0 不代表没用 |
-| **列的负责人** | 每列挂哪个角色/专家；**设计闸门 / 评审闸门** | 闸门默认开；关了看板顶部会挂提示 |
+| **列的负责人** | 每列挂哪个角色/专家；**设计闸门 / 评审闸门 / 用例闸门（含三层测试）** | 闸门默认开；关了看板顶部会挂提示 |
 | 代码仓库 | GitLab 地址、令牌、项目路径 | 改完点「测试连接」 |
 | 飞书机器人 | 通知 webhook、多维表格、**云盘根文件夹** | 云盘根目录必须配，否则交付物无处可去 |
 | 文档出口 | 交付物同步到哪：只飞书 / 只 WeKnora / 两个都写；WeKnora 地址、API Key、租户、知识库 | `both` 时飞书为主，WeKnora 失败只记 error、不阻塞登记；只写 WeKnora 时它才是主出口，失败会抛 |
@@ -239,6 +241,7 @@ studio_task_check          { id, itemId, note }         // 清单逐项勾，附
 | 技能库显示「还没被用上」 | 专家是否挂了该技能 | 这是相关性统计，不是因果；挂了技能后接过卡才会出现在计数里 |
 | 部署说成功，但界面还是旧的 | `deploy.mjs` 输出里的 `restart=` 与 `version=` | `restart=NOT-APPLIED` 说明文件传上去了、服务没重启（key 模式下 sudo 要密码就会这样），脚本会以退出码 4 结束；到目标机 `sudo systemctl restart dsh-web`，或用密码模式重跑。`version=` 应等于 `package.json` 的版本（2026-11-22 前 deploy 不传元数据，目标机会一直显示老版本） |
 | 准出被「这张是代码/测试类卡，但一条测试用例都没有」拦住 | 卡的「测试」页签 | 补一条**带可执行定义**的用例（http / shell / db / 浏览器任一）并跑通；产品或设计卡不会撞这条。确实不适用时，管理员可在「设置 → 列的负责人 → 用例闸门」关掉，关掉后只是 warning |
+| 准出被「三条测试线还有缺口」拦住 | 卡的「测试」页签 → 三层测试进度 | 每条线要么补一条**带可执行断言**的用例（单元用 shell 跑单测命令、集成用 http/db、端到端用 browser），要么在抽屉里点「不适用」并写明理由（等价于 `studio_task_test_plan`）。`studio_task_add_cases` 的每一条都可带 `tier`；不写会按断言推断。确实不想要这道闸门时，到「设置 → 列的负责人」关掉「三层测试闸门」（= `config.caseGate.tiers=false`），存量卡就不会被拦 |
 | `npm run shots` 拍出来的图是全白的 | 构建时有没有 console 报错、harness 的 `/react.js` 是否 404 | 工作树的 `web/node_modules` 不全时，假宿主的 React UMD 加载失败 → 面板渲染成空白（`pageerror` 不报）。补齐依赖后重跑；`capture.mjs` 现在会把 console error 也记进错误列表 |
 
 ---

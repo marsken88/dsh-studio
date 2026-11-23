@@ -13,6 +13,17 @@ export const CASE_RESULTS = ['pending', 'pass', 'fail', 'skip']
 export const CASE_RESULT_LABEL = { pending: '未跑', pass: '通过', fail: '不通过', skip: '跳过' }
 export const CASE_TYPES = ['functional', 'api', 'ui', 'performance', 'security', 'other']
 export const CASE_TYPE_LABEL = { functional: '功能', api: '接口', ui: '界面', performance: '性能', security: '安全', other: '其它' }
+/* 三层测试：界面上按这个顺序排，服务端口径在 src/host/test-plan.js。
+   「其它」不是必须覆盖的一层（一次性探针之类），所以不标 full。 */
+export const CASE_TIERS = ['unit', 'integration', 'e2e', 'other']
+export const CASE_TIER_LABEL = { unit: '单元', integration: '集成', e2e: '端到端', other: '其它' }
+export const CASE_TIER_FULL = { unit: '单元测试', integration: '集成测试', e2e: '端到端测试', other: '其它' }
+export const CASE_TIER_HINT = {
+  unit: '跑仓库里的单测命令：函数、分支、边界值（shell 用例）',
+  integration: '接口 / 数据库 / 服务间契约（多步 http 或 db 用例）',
+  e2e: '真开浏览器，从用户入口走主流程与异常路径（browser 用例）',
+  other: '有可执行断言的其它探针；不参与三条线的判定',
+}
 export const CASE_PRIORITIES = ['p0', 'p1', 'p2', 'p3']
 export const ARTIFACT_STATUS_LABEL = { draft: '草稿', delivered: '已交付', accepted: '已验收' }
 export const CODING_REVIEW_LABEL = { pending: '待评审', approved: '评审通过', changes_requested: '要求修改' }

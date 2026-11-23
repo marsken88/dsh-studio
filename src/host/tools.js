@@ -17,6 +17,7 @@ import { appendRequirementComment, removeRequirementComment, updateRequirementCo
 import { splitRequirement } from './split.js'
 import { skillUsage, skillUsageLine } from './skill-usage.js'
 import { mergeGateFor, mergeGateLine } from './merge-gate.js'
+import { REQUIRED_TIERS, TIER_LABEL, applyTierDeclarations, gapMessage, planLine, sanitizeTier, testPlanSummary, tierOf } from './test-plan.js'
 const INJECTED = ["activeDispatcher","activeSkills","addAssertedCases","addDraftCases","applyConfig","auditSummary","buildAnalytics","buildMetrics","burndownReport","checkToolAccess","createTask","markDuplicate","mergeMergeRequest","publicConfig","publishMergeGate","recordAudit","releaseGate","releaseNotes","skillsRoot","taskLine","toolLevel","toolOperator","upsertById","workloadReport"]
 let host = {
   activeDispatcher: () => {},
@@ -742,6 +743,7 @@ export function registerTools(ctx, store) {
   register(defineStudioTool({
     name: 'studio_task_add_cases',
     description: '把**带可执行断言**的测试用例写进这张卡，并当场试跑第一条：跑不通就不算生成成功。接口用例形如 {title, method, path, body?, expectStatus, expectContains?}；shell 形如 {title, command, expectExit?}（需在设置里开 allowShell）；数据库形如 {title, db:{file, sql, expectColumn?, expectValue?}}（需开 allowDb）；浏览器形如 {title, browser:{url|path, expectText?, expectSelector?}}（需开 allowBrowser）。\n'
+      + '**测试层级 tier**：每条可写 tier=unit（单元测试：跑单测命令）/ integration（集成测试：接口、数据库、契约）/ e2e（端到端：真开浏览器走用户路径）/ other（其它探针）。不写就按断言推断：browser→e2e、http/db→integration、shell 看命令（单测 runner→unit、playwright/cypress 等→e2e）。代码类卡上三条线都要有可执行用例，或用 studio_task_test_plan 写明哪一层不适用。\n'
       + '**归属功能点**：每条可带 pointId（这条用例算在哪个需求功能点）和 acceptanceId（验哪条验收条件，矩阵按它逐条判覆盖）；**不填 pointId 就继承卡上的 pointId**——一个功能点多条用例时不用每条都重复写。\n'
       + '**地址规则**：path 可以写相对地址（用测试环境的 baseUrl 解析），完整地址只认 http(s)。\n'
       + '有一条不合法就整体拒绝、一条都不写（错误里会点名第几条、为什么）。',
@@ -750,7 +752,7 @@ export function registerTools(ctx, store) {
       cases: {
         type: 'array',
         required: true,
-        description: '用例数组：每条必须有 title，并带 method + path + expectStatus（接口）、command（shell）、db:{file,sql}（数据库）或 browser:{url}（浏览器）之一。',
+        description: '用例数组：每条必须有 title，并带 method + path + expectStatus（接口）、command（shell）、db:{file,sql}（数据库）或 browser:{url}（浏览器）之一；可带 tier=unit|integration|e2e|other。',
         items: { type: 'object' },
       },
       env: { type: 'string', description: '测试环境 id，默认用设置里的默认环境。' },
@@ -775,6 +777,61 @@ export function registerTools(ctx, store) {
         lines.push(`**试跑不通过**：${verified.title} → ${verified.error || '没有返回结果'}。`)
         lines.push('这条用例写坏了或者环境不对：改断言/地址后重新调用，不要留着等别人发现。')
       }
+      if (result.plan !== undefined) {
+        lines.push(`三层测试进度：${planLine(result.plan)}。`)
+        const gaps = result.plan.gaps ?? []
+        if (gaps.length > 0) lines.push(`还缺：${gaps.map(gap => `${gap.label}（${gap.why}）`).join('、')}——补能跑的用例，或用 studio_task_test_plan 写明不适用 + 理由。`)
+        else lines.push('三条线都已有可执行用例。')
+      }
+      return lines.join('\n')
+    },
+  }))
+
+  register(defineStudioTool({
+    name: 'studio_task_test_plan',
+    description: '记录这张卡的测试计划：单元 / 集成 / 端到端三条线里，哪一条**确实不适用**（必须写理由）。'
+      + '不传 tiers 就是只读：返回三条线的进度与缺口。\n'
+      + '为什么要有它：代码类卡的准出要求「每条线要么有可执行用例，要么写明不适用」——'
+      + '没有理由的「不适用」和「忘了测」长得一模一样，所以不适用必须带一句能说服人的原因。',
+    parameters: {
+      id: { type: 'string', required: true, description: 'Task id.' },
+      tiers: {
+        type: 'array',
+        description: '声明哪几层不适用：[{tier:"unit"|"integration"|"e2e", applicable:false, reason:"为什么验不了"}]。applicable=true 表示恢复为适用（会清掉该层的理由）。',
+        items: { type: 'object' },
+      },
+      by: { type: 'string', description: '谁写的（你的专家名）。' },
+    },
+    async execute(args) {
+      const id = String(args.id ?? '')
+      const by = String(args.by ?? '测试专家').slice(0, 40)
+      const patch = Array.isArray(args.tiers) ? args.tiers : []
+      if (patch.length > 0) {
+        const before = store.snapshot().tasks.find(item => item.id === id)
+        if (before === undefined) throw new Error(`no task ${id}`)
+        const applied = applyTierDeclarations(before.testPlan, patch, { by, at: Date.now() })
+        if (applied.errors.length > 0) throw new Error(`测试计划没写入：${applied.errors.join('；')}`)
+        if (applied.changed > 0) {
+          await store.mutate(state => {
+            const task = state.tasks.find(item => item.id === id)
+            if (task === undefined) throw new Error(`no task ${id}`)
+            task.testPlan = applied.plan
+            task.updatedAt = Date.now()
+          })
+        }
+      }
+      const task = store.snapshot().tasks.find(item => item.id === id)
+      if (task === undefined) throw new Error(`no task ${id}`)
+      const plan = testPlanSummary(task.cases ?? [], task.testPlan)
+      const lines = [`三层测试进度：${planLine(plan)}。`]
+      if (patch.length > 0) {
+        const text = plan.tiers
+          .filter(row => REQUIRED_TIERS.includes(row.tier))
+          .map(row => (row.applicable === false ? `${TIER_LABEL[row.tier]} 不适用（${row.reason}）` : `${TIER_LABEL[row.tier]} 适用`))
+          .join('、')
+        lines.push(`已记录测试计划：${text}。`)
+      }
+      lines.push(plan.gaps.length === 0 ? '三条线都已有可执行用例（或已说明不适用）。' : gapMessage(plan.gaps) + '。')
       return lines.join('\n')
     },
   }))
@@ -1503,7 +1560,7 @@ export function registerTools(ctx, store) {
   register(defineStudioTool({
     name: 'studio_task_case',
     description: 'Record test cases on a task and their execution results. Test engineers write cases here before running them, then set each result to pass/fail/skip with evidence — this is the test deliverable the board shows.\n'
-      + '每条用例可带 pointId（归到哪个需求功能点，不填沿用卡上的）与 acceptanceId（验哪条验收条件）；要**可执行**的用例（method+path+expectStatus / command / browser / db）请用 studio_task_add_cases，它会当场试跑。',
+      + '每条用例可带 pointId（归到哪个需求功能点，不填沿用卡上的）与 acceptanceId（验哪条验收条件），以及 tier=unit|integration|e2e|other（测试层级，不填按断言推断）；要**可执行**的用例（method+path+expectStatus / command / browser / db）请用 studio_task_add_cases，它会当场试跑。',
     parameters: {
       id: { type: 'string', required: true, description: 'Task id.' },
       action: { type: 'string', description: 'add | update | remove (default add)' },
@@ -1517,6 +1574,7 @@ export function registerTools(ctx, store) {
             expected: { type: 'string', description: 'Expected result, e.g. 第 5 次返回 429 并锁定 10 分钟' },
             pointId: { type: 'string', description: 'Optional: 对应的需求功能点 id（可追溯矩阵靠它对齐）。' },
             acceptanceId: { type: 'string', description: 'Optional: 验的是哪条验收条件（矩阵按它逐条判覆盖）。' },
+            tier: { type: 'string', description: 'Optional: unit | integration | e2e | other（测试层级；不填按断言推断）。' },
             db: { type: 'object', description: 'Optional database case: {file, sql, expectColumn?, expectValue?}. Needs allowDb.' },
             method: { type: 'string', description: 'Optional HTTP method so the platform can run this case itself: GET | POST | PUT | PATCH | DELETE | HEAD.' },
             url: { type: 'string', description: 'Optional request path (relative to the test env baseUrl) or absolute URL on an allowed host.' },
@@ -1538,6 +1596,7 @@ export function registerTools(ctx, store) {
       note: { type: 'string', description: 'Evidence or failure detail: command, output, environment.' },
       pointId: { type: 'string', description: 'For update: 改归到哪个需求功能点。' },
       acceptanceId: { type: 'string', description: 'For update: 改挂到哪条验收条件。' },
+      tier: { type: 'string', description: 'For update: 改测试层级（unit | integration | e2e | other；空串 = 恢复按断言推断）。' },
       by: { type: 'string', description: 'Who recorded it (your expert name).' },
     },
     async execute(args) {
@@ -1563,6 +1622,7 @@ export function registerTools(ctx, store) {
             // 归到功能点/验收条件：不传就保持原值（issue #108）
             if (args.pointId !== undefined) merged.pointId = String(args.pointId).trim().slice(0, 24)
             if (args.acceptanceId !== undefined) merged.acceptanceId = String(args.acceptanceId).trim().slice(0, 24)
+            if (args.tier !== undefined) merged.tier = sanitizeTier(args.tier)
             if (args.db !== undefined) merged.db = args.db
             if (http !== undefined) merged.http = sanitizeCaseHttp(http)
             return merged
@@ -1590,12 +1650,15 @@ export function registerTools(ctx, store) {
       const total = task.cases.length
       const passed = task.cases.filter(item => item.result === 'pass').length
       const failed = task.cases.filter(item => item.result === 'fail').length
+      const plan = testPlanSummary(task.cases, task.testPlan)
       return [
         `${task.id} 测试用例 ${total} 条（通过 ${passed} / 不通过 ${failed} / 未跑 ${total - passed - failed}）：`,
         ...task.cases.map(item => {
           const mark = item.result === 'pass' ? '✅' : item.result === 'fail' ? '❌' : item.result === 'skip' ? '⏭️' : '⬜'
-          return `${mark} ${item.id} ${item.title}${item.expected ? `（期望：${item.expected}）` : ''}${item.note ? ` — ${item.note}` : ''}`
+          const tier = TIER_LABEL[tierOf(item)] ?? ''
+          return `${mark} ${item.id} ${item.title}${tier ? `［${tier}］` : ''}${item.expected ? `（期望：${item.expected}）` : ''}${item.note ? ` — ${item.note}` : ''}`
         }),
+        `三层测试进度：${planLine(plan)}。`,
       ].join('\n')
     },
   }))

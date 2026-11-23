@@ -1,7 +1,7 @@
 /* Card detail drawer: overview, content, plan, artifacts, tests, runs and talk. */
 
 import { expertIconName, statusDot, uiIcon } from './icons.js'
-import { ARTIFACT_KINDS, ARTIFACT_KIND_LABEL, ARTIFACT_STATUS, ARTIFACT_STATUS_LABEL, CASE_PRIORITIES, CASE_RESULT_LABEL, CASE_RESULTS, CASE_TYPES, CASE_TYPE_LABEL, CODING_REVIEW_LABEL, PRIORITY_LABEL, ROLE_LABEL, SEVERITY_LABEL, TYPE_LABEL } from './labels.js'
+import { ARTIFACT_KINDS, ARTIFACT_KIND_LABEL, ARTIFACT_STATUS, ARTIFACT_STATUS_LABEL, CASE_PRIORITIES, CASE_RESULT_LABEL, CASE_RESULTS, CASE_TIERS, CASE_TIER_FULL, CASE_TIER_HINT, CASE_TIER_LABEL, CASE_TYPES, CASE_TYPE_LABEL, CODING_REVIEW_LABEL, PRIORITY_LABEL, ROLE_LABEL, SEVERITY_LABEL, TYPE_LABEL } from './labels.js'
 import { artifactsWithoutBody, buildRoster, cardOwner, caseSummaryOf, checkSummaryOf, commentCountOf, filterRoster, fromDateInput, ownerLabel, toDateInput } from './roster.js'
 import { fmtTime } from './format.js'
 import { parseSteps } from './cases.js'
@@ -151,7 +151,7 @@ function Drawer({ task, state, onClose, onChanged }) {
   const [parts, setParts] = React.useState(null)
   React.useEffect(() => { setArtBodies({}); setArtRead(null); setArtEdit(null) }, [task.id])
   // 新用例的 pointId 默认跟卡走：一个功能点通常多条用例，别让人每条都选一次（issue #11 可发现性）
-  const [newCase, setNewCase] = React.useState({ title: '', expected: '', steps: '', stepsText: '', type: 'functional', priority: 'p2', preconditions: '', pointId: task.pointId ?? '' })
+  const [newCase, setNewCase] = React.useState({ title: '', expected: '', steps: '', stepsText: '', type: 'functional', tier: '', priority: 'p2', preconditions: '', pointId: task.pointId ?? '' })
   const [caseRun, setCaseRun] = React.useState({ busy: false, note: '' })
   const [caseGen, setCaseGen] = React.useState({ busy: false, note: '' })
   const [codingDraft, setCodingDraft] = React.useState(null)
@@ -175,6 +175,11 @@ function Drawer({ task, state, onClose, onChanged }) {
   const caseSum = caseSummaryOf(task)
   const checkSum = checkSummaryOf(task)
   const cases = parts !== null && Array.isArray(parts.cases) ? parts.cases : (Array.isArray(task.cases) ? task.cases : [])
+  /* 三层测试：服务端算好的分层进度与缺口（parts.plan），以及最近几次执行批次。
+     界面不自己重算一遍口径 —— 门禁读的也是服务端这一份。 */
+  const testPlanTiers = parts !== null && parts.plan !== null && parts.plan !== undefined && Array.isArray(parts.plan.tiers) ? parts.plan.tiers : []
+  const testPlanGaps = parts !== null && parts.plan !== null && parts.plan !== undefined && Array.isArray(parts.plan.gaps) ? parts.plan.gaps : []
+  const testRuns = parts !== null && Array.isArray(parts.testRuns) ? parts.testRuns : (Array.isArray(task.testRuns) ? task.testRuns : [])
   const [gate, setGate] = React.useState(null)
   const [gateNote, setGateNote] = React.useState('')
   const casePass = caseSum.pass
@@ -227,19 +232,22 @@ function Drawer({ task, state, onClose, onChanged }) {
     }).catch(() => { if (alive) setCommentList([]) })
     return () => { alive = false }
   }, [task.id, commentTotal])
-  // 用例与清单正文：抽屉打开（或某张卡的计数变了）时取一次，没内容就不发请求。
+  // 用例、清单、执行批次与测试计划正文：抽屉打开（或卡片有任何写入）时取一次。
+  // 以前空卡直接跳过请求，但「零用例 + 已声明某层不适用」也是要展示的状态，所以不再短路。
   React.useEffect(() => {
-    if (caseSum.total === 0 && checkSum.total === 0) { setParts({ cases: [], checklist: [] }); return undefined }
     let alive = true
     void api('/task/parts', { id: task.id }).then(json => {
       if (!alive) return
       setParts({
         cases: Array.isArray(json?.cases) ? json.cases : [],
         checklist: Array.isArray(json?.checklist) ? json.checklist : [],
+        testRuns: Array.isArray(json?.testRuns) ? json.testRuns : [],
+        testPlan: json?.testPlan ?? null,
+        plan: json?.plan ?? null,
       })
-    }).catch(() => { if (alive) setParts({ cases: [], checklist: [] }) })
+    }).catch(() => { if (alive) setParts({ cases: [], checklist: [], testRuns: [], testPlan: null, plan: null }) })
     return () => { alive = false }
-  }, [task.id, caseSum.total, caseSum.pass, caseSum.fail, checkSum.total, checkSum.done])
+  }, [task.id, task.updatedAt, caseSum.total, caseSum.pass, caseSum.fail, checkSum.total, checkSum.done])
   const [pane, setPane] = React.useState('overview')
   React.useEffect(() => { setPane('overview') }, [task.id])
   // 切页签时把内容滚回顶部，否则从长页面切到「讨论」会停在中间，看起来像只显示了半截。
@@ -254,7 +262,7 @@ function Drawer({ task, state, onClose, onChanged }) {
     { id: 'handoff', label: '交接', count: task.handoff !== null && task.handoff !== undefined ? '✓' : '', hint: '决策 / 假设 / 未决 / 风险 / 影响面；派单提示词先读它' },
     { id: 'design', label: '设计', count: designDrafts.length > 0 ? designDrafts.length : '', hint: '多稿对比与定案' },
     { id: 'deliver', label: '交付物', count: artifacts.length > 0 ? artifacts.length : '', hint: '文档 / MR / 用例 / 报告；空的交付物会被准出拦下' },
-    { id: 'test', label: '测试', count: caseSum.total > 0 ? `${casePass}/${caseSum.total}` : (checkSum.total > 0 ? `${doneCount}/${checkSum.total}` : ''), hint: '验收清单、用例执行记录；失败的用例会自动开缺陷' },
+    { id: 'test', label: '测试', count: caseSum.total > 0 ? `${casePass}/${caseSum.total}` : (checkSum.total > 0 ? `${doneCount}/${checkSum.total}` : ''), hint: '三层测试进度（单元/集成/端到端）、验收清单与执行记录；失败用例自动开缺陷' },
     { id: 'coding', label: '执行记录', count: coding === null ? '' : (coding.review?.status === 'approved' ? '✓ 已评审' : ''), hint: 'AI 的分支、提交、改动文件；可以「核对代码事实」' },
     { id: 'discuss', label: '讨论', count: commentTotal > 0 ? commentTotal : '', hint: '评论；在评论里 @ 专家或专家团即派单' },
   ]
@@ -432,12 +440,12 @@ function Drawer({ task, state, onClose, onChanged }) {
       if (expectText !== '' && columnName !== '') { spec.expectColumn = columnName; spec.expectValue = expectText }
       const title = ('db: ' + spec.sql).slice(0, 60)
       const server = String(column ?? 'n').trim() || 'n'
-      await api('/task/case', { id: task.id, action: 'add', cases: [{ title: title, expected: expectText === '' ? '能执行' : (server + ' = ' + expectText), db: spec }] })
+      await api('/task/case', { id: task.id, action: 'add', cases: [{ title: title, expected: expectText === '' ? '能执行' : (server + ' = ' + expectText), tier: 'integration', db: spec }] })
       await onChanged()
     } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)) } finally { setBusy(false) }
   }
-  const addShellCase = async () => {
-    const command = await promptDialog('shell 命令（断言退出码 0）', { title: '加一条 shell 用例', defaultValue: '' })
+  const addShellCase = async (tier = '') => {
+    const command = await promptDialog('shell 命令（断言退出码 0）', { title: tier === 'unit' ? '加一条单元测试用例' : '加一条 shell 用例', defaultValue: '' })
     if (command === null || String(command).trim() === '') return
     const expect = await promptDialog('期望输出里包含什么（可留空）', { title: '加一条 shell 用例', defaultValue: '' })
     if (expect === null) return
@@ -449,6 +457,7 @@ function Drawer({ task, state, onClose, onChanged }) {
         expected: expectText === '' ? '退出码 0' : ('退出码 0 且输出包含 ' + expectText),
         shell: { command: String(command).trim(), expectExit: 0, expectContains: expectText },
       }
+      if (tier !== '') item.tier = tier
       await api('/task/case', { id: task.id, action: 'add', cases: [item] })
       await onChanged()
     } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)) } finally { setBusy(false) }
@@ -469,7 +478,7 @@ function Drawer({ task, state, onClose, onChanged }) {
       if (expectText !== '') browser.expectText = expectText
       if (expectSelector !== '') browser.expectSelector = expectSelector
       const expected = expectText !== '' ? ('页面含「' + expectText + '」') : (expectSelector !== '' ? ('存在元素 ' + expectSelector) : '页面能打开')
-      await api('/task/case', { id: task.id, action: 'add', cases: [{ title: ('浏览器: ' + String(url).trim()).slice(0, 60), expected, browser }] })
+      await api('/task/case', { id: task.id, action: 'add', cases: [{ title: ('浏览器: ' + String(url).trim()).slice(0, 60), expected, tier: 'e2e', browser }] })
       await onChanged()
     } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)) } finally { setBusy(false) }
   }
@@ -538,12 +547,14 @@ function Drawer({ task, state, onClose, onChanged }) {
       if (steps.length > 0) item.http = { steps }
       if (newCase.type !== undefined && newCase.type !== 'functional') item.type = newCase.type
       if (newCase.priority !== undefined && newCase.priority !== 'p2') item.priority = newCase.priority
+      // 测试层级：空 = 按断言推断（接口/多步 → 集成，浏览器 → 端到端，单测命令 → 单元）
+      if (String(newCase.tier ?? '') !== '') item.tier = String(newCase.tier)
       if (String(newCase.preconditions ?? '').trim() !== '') item.preconditions = String(newCase.preconditions).trim()
       if (String(newCase.stepsText ?? '').trim() !== '') {
         item.steps = String(newCase.stepsText).split('\n').map(line => line.trim()).filter(line => line !== '')
       }
       await api('/task/case', { id: task.id, action: 'add', cases: [item] })
-      setNewCase({ title: '', expected: '', steps: '', stepsText: '', type: 'functional', priority: 'p2', preconditions: '', pointId: newCase.pointId ?? task.pointId ?? '' })
+      setNewCase({ title: '', expected: '', steps: '', stepsText: '', type: 'functional', tier: '', priority: 'p2', preconditions: '', pointId: newCase.pointId ?? task.pointId ?? '' })
       await onChanged()
     } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)) } finally { setBusy(false) }
   }
@@ -565,7 +576,9 @@ function Drawer({ task, state, onClose, onChanged }) {
     setCaseRun({ busy: true, note: '' })
     setError(null)
     try {
-      const out = await api('/task/case/run', { id: task.id, caseId, by: '我在界面里跑的' })
+      // caseId: 单条；caseIds: 一整层（「跑这一层」）；都不传：全部能跑的
+      const body = Array.isArray(caseId) ? { caseIds: caseId } : (caseId === undefined ? {} : { caseId })
+      const out = await api('/task/case/run', { id: task.id, ...body, by: '我在界面里跑的' })
       const run = out?.run ?? {}
       const made = (out?.bugs ?? []).filter(item => item.created === true).length
       const parts = [`跑了 ${run.total ?? 0} 条：通过 ${run.passed ?? 0}，不通过 ${run.failed ?? 0}`]
@@ -575,6 +588,47 @@ function Drawer({ task, state, onClose, onChanged }) {
     } catch (cause) {
       setCaseRun({ busy: false, note: cause instanceof Error ? cause.message : String(cause) })
     }
+  }
+  /* 三层测试：跑某一层 / 给某一层「不适用 + 理由」。界面直接改服务端同一份测试计划与用例分组，
+     不在前端另算一遍进度（门禁读的是服务端那份）。 */
+  const runTier = async tier => {
+    const ids = cases
+      .filter(item => (item.tierEffective ?? item.tier ?? '') === tier)
+      .filter(item => item.http != null || item.shell != null || item.db != null || item.browser != null)
+      .map(item => item.id)
+    if (ids.length === 0) {
+      setCaseRun({ busy: false, note: `${CASE_TIER_FULL[tier] ?? tier}这一层还没有能跑的用例：先加一条，或在大模型会话里用 studio_task_add_cases 补。` })
+      return
+    }
+    await runCases(ids)
+  }
+  const setTierApplicable = async (tier, applicable) => {
+    let reason
+    if (applicable !== true) {
+      reason = await promptDialog(`为什么「${CASE_TIER_FULL[tier] ?? tier}」这一层不适用？`, {
+        title: '测试计划',
+        defaultValue: '',
+        placeholder: '例如：本次只改后端接口，没有前端改动；或用例需要真实设备，环境拿不到',
+      })
+      if (reason === null || String(reason).trim() === '') return
+    }
+    setBusy(true); setError(null)
+    try {
+      await api('/task/test-plan', {
+        id: task.id,
+        tiers: applicable === true ? [{ tier, applicable: true }] : [{ tier, applicable: false, reason: String(reason).trim() }],
+        by: '我在界面里设的',
+      })
+      await onChanged()
+    } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)) } finally { setBusy(false) }
+  }
+  const setCaseTier = async (item, tier) => {
+    setBusy(true); setError(null)
+    try {
+      // 空串 = 恢复「按断言推断」，不是 other
+      await api('/task/case', { id: task.id, action: 'update', caseId: item.id, tier: String(tier ?? '') })
+      await onChanged()
+    } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)) } finally { setBusy(false) }
   }
   const generateCases = async () => {
     setCaseGen({ busy: true, note: '' })
@@ -843,6 +897,62 @@ function Drawer({ task, state, onClose, onChanged }) {
         : `GitLab 核对：文件 ${facts.files.declared}→${facts.files.actual} · 提交 ${facts.commits.declared}→${facts.commits.actual}${(facts.commitList ?? []).length > 0 ? `（拿到 ${facts.commitList.length} 条明细）` : ''}${facts.pipeline ? ` · 流水线 ${facts.pipeline}` : ''}${facts.ci ? ` · CI ${facts.ci.passed}/${facts.ci.total}` : ''}${(facts.mismatches ?? []).length > 0 ? ` · 不一致：${facts.mismatches.join('；')}` : ' · 一致'}`)
       await onChanged()
     } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)) } finally { setBusy(false) }
+  }
+
+  /* 三层测试进度块：单元 / 集成 / 端到端各一行（通过/总数、可执行数、缺口或理由），
+     每行可以「跑这一层」或标记「不适用 + 理由」。数字来自服务端 parts.plan，界面不重算口径。 */
+  const testPlanBlock = () => {
+    if (testPlanTiers.length === 0) return null
+    /* 产品/设计卡不受三层闸门约束：没有用例也没有测试计划时不显示这个块，
+       否则每张需求卡一打开「测试」页都是「缺 单元/集成/端到端」，像在报假警。 */
+    const codeLike = ['dev', 'test', 'bug'].includes(String(task.type ?? ''))
+    if (!codeLike && cases.length === 0 && testRuns.length === 0) return null
+    const required = testPlanTiers.filter(row => CASE_TIERS.includes(row.tier) && row.tier !== 'other')
+    if (required.length === 0) return null
+    const gapSet = new Set(testPlanGaps.map(gap => gap.tier))
+    return h('div', { className: PANEL, 'data-test-plan': '' },
+      h('div', { className: PANEL_HEAD },
+        h('div', { className: GROW },
+          h('div', { className: PANEL_LINE }, '三层测试进度'),
+          h('div', { className: HINT }, '单元 / 集成 / 端到端：每条线要么有能跑的用例，要么写明为什么验不了（门禁按这个判定）'),
+        ),
+        testPlanGaps.length === 0
+          ? h(ChipField, { variant: 'lime', 'data-test-gap': '0' }, '三条线齐全')
+          : h(ChipField, { variant: 'yellow', 'data-test-gap': testPlanGaps.map(gap => gap.tier).join(',') }, `缺 ${testPlanGaps.map(gap => CASE_TIER_LABEL[gap.tier] ?? gap.tier).join('/')}`),
+      ),
+      required.map(row => h('div', {
+        key: row.tier,
+        className: LIST_LINE,
+        'data-tier-row': row.tier,
+        'data-tier-state': row.applicable === false ? 'excluded' : (row.executable === 0 ? 'missing' : (row.fail > 0 ? 'fail' : 'ok')),
+      },
+        h('div', { className: 'w-[88px] shrink-0 text-body-2-semibold text-text-primary' }, CASE_TIER_FULL[row.tier]),
+        h('div', { className: GROW },
+          h('div', { className: ROW, style: { gap: 8 } },
+            h('span', { className: 'tabular-nums text-caption-1-regular text-text-secondary' }, `通过 ${row.pass}/${row.total}`),
+            h('span', { className: HINT }, `可执行 ${row.executable}`),
+            row.fail > 0 ? h(ChipField, { variant: 'rose' }, `不通过 ${row.fail}`) : null,
+            row.total - row.executable > 0 ? h(ChipField, { variant: 'yellow' }, `${row.total - row.executable} 条跑不了`) : null,
+            row.applicable === false
+              ? h(ChipField, { variant: 'neutral', title: row.reason }, '不适用')
+              : (gapSet.has(row.tier) ? h(ChipField, { variant: 'yellow' }, '缺') : h(ChipField, { variant: 'lime' }, '已覆盖')),
+          ),
+          row.applicable === false && row.reason !== '' ? h('div', { className: ART_REF }, `理由：${row.reason}`) : null,
+          h('div', { className: 'mt-1' },
+            h(ProgressTrack, { percentage: row.total === 0 ? 0 : Math.round(row.pass / row.total * 100), size: 'sm' }),
+          ),
+        ),
+        row.applicable === false
+          ? h(Button, { variant: 'ghost', size: 'sm', disabled: busy, title: '恢复为适用：这一层要补用例并跑通', onClick: () => void setTierApplicable(row.tier, true) }, '恢复适用')
+          : h(Button, { variant: 'ghost', size: 'sm', disabled: busy || caseRun.busy, title: '只跑这一层里能跑的用例', onClick: () => void runTier(row.tier) }, [uiIcon(h, 'run'), ' 跑这层']),
+        row.applicable === false ? null : h(Button, { variant: 'ghost', size: 'sm', disabled: busy, title: '这一层确实验不了：写明理由，门禁认它', onClick: () => void setTierApplicable(row.tier, false) }, '不适用'),
+      )),
+      testRuns.length === 0 ? null : h('div', { className: ROW, style: { gap: 10, marginTop: 2 }, 'data-test-runs': '' },
+        h('span', { className: HINT }, '最近执行'),
+        ...testRuns.slice(-3).reverse().map(run => h('span', { key: run.id, className: HINT, title: run.by ? `执行人：${run.by}` : '' },
+          `${fmtTime(run.at)} · ${run.passed ?? 0}/${run.total ?? 0} 通过${(run.failed ?? 0) > 0 ? ` · ${run.failed} 失败` : ''}`)),
+      ),
+    )
   }
 
   const columnLabel = (state.statuses.find(item => item.id === task.status) ?? {}).label ?? task.status
@@ -1681,6 +1791,7 @@ function Drawer({ task, state, onClose, onChanged }) {
         h('div', { className: SECTION_BODY, 'data-scroll': '1' },
           caseRun.note === '' ? null : h('div', { className: HINT }, caseRun.note),
           caseGen.note === '' ? null : h('div', { className: HINT }, caseGen.note),
+          testPlanBlock(),
           caseSum.total === 0
             ? h(EmptyState, { title: '还没有用例。', hint: '测试同学把用例登记在这里，逐条执行并回填结果。' })
             : parts === null
@@ -1699,6 +1810,17 @@ function Drawer({ task, state, onClose, onChanged }) {
                 h('div', { className: ART_TITLE }, item.title),
                 h('div', { className: ROW, style: { gap: 8, alignItems: 'center', marginTop: 2 } },
                   h(ChipField, { variant: 'soft' }, CASE_TYPE_LABEL[item.type ?? 'functional'] ?? '功能'),
+                  h(SelectField, {
+                    style: { width: 84, height: 22, fontSize: 11 },
+                    value: item.tier ?? '',
+                    disabled: busy,
+                    title: `${CASE_TIER_HINT[item.tierEffective ?? 'other'] ?? ''}（当前按${item.tier === '' || item.tier === undefined ? '断言推断' : '手动指定'}：${CASE_TIER_FULL[item.tierEffective ?? 'other'] ?? '其它'}）`,
+                    'data-case-tier-select': item.id,
+                    onChange: event => void setCaseTier(item, event.target.value),
+                  },
+                    h('option', { value: '' }, `自动·${CASE_TIER_LABEL[item.tierEffective ?? 'other'] ?? '其它'}`),
+                    CASE_TIERS.map(value => h('option', { key: value, value }, CASE_TIER_LABEL[value])),
+                  ),
                   h(ChipField, { variant: 'soft', 'data-pri': item.priority ?? 'p2' }, String(item.priority ?? 'p2').toUpperCase()),
                   String(item.preconditions ?? '') === '' ? null : h('span', { className: HINT }, `前置：${item.preconditions}`),
                   (item.steps ?? []).length === 0 ? null : h('span', { className: HINT }, `步骤 ${item.steps.length} 条`),
@@ -1765,6 +1887,7 @@ function Drawer({ task, state, onClose, onChanged }) {
               style: { flex: 1 }, value: newCase.expected, placeholder: '期望结果，例如 第 5 次返回 429 并锁定 10 分钟',
               onChange: event => setNewCase({ ...newCase, expected: event.target.value }),
             }),
+            h(Button, { variant: 'ghost', size: 'sm', disabled: busy, title: '加一条单元测试用例：跑仓库里的单测命令，断言退出码与输出（需要先在设置里打开 allowShell）', onClick: () => void addShellCase('unit') }, '＋ 单元'),
             h(Button, { variant: 'ghost', size: 'sm', disabled: busy, title: '加一条 shell 用例：跑命令看退出码与输出（需要先在设置里打开 allowShell）', onClick: () => void addShellCase() }, '＋ shell'),
             h(Button, { variant: 'ghost', size: 'sm', disabled: busy, title: '加一条数据库用例：查库断言行数与某列值（需要先在设置里打开 allowDb）', onClick: () => void addDbCase() }, '＋ 数据库'),
             h(Button, { variant: 'ghost', size: 'sm', disabled: busy, title: '加一条浏览器用例：真开 Chrome/Edge 打开页面，断言看得见的东西（需要先在设置里打开 allowBrowser）', onClick: () => void addBrowserCase() }, '＋ 浏览器'),
@@ -1794,6 +1917,13 @@ function Drawer({ task, state, onClose, onChanged }) {
               style: { width: 84 }, value: newCase.priority ?? 'p2',
               onChange: event => setNewCase({ ...newCase, priority: event.target.value }),
             }, CASE_PRIORITIES.map(value => h('option', { key: value, value }, value.toUpperCase()))),
+            h(SelectField, {
+              style: { width: 104 }, value: newCase.tier ?? '', title: '测试层级：自动 = 按断言推断（接口/数据库 → 集成，浏览器 → 端到端，单测命令 → 单元）',
+              onChange: event => setNewCase({ ...newCase, tier: event.target.value }),
+            },
+              h('option', { value: '' }, '层级·自动'),
+              CASE_TIERS.map(value => h('option', { key: value, value }, CASE_TIER_FULL[value])),
+            ),
             h(TextField, {
               style: { flex: 1, minWidth: 200 }, value: newCase.preconditions ?? '', placeholder: '前置条件，例如 会员等级≥银卡、账户余额充足',
               onChange: event => setNewCase({ ...newCase, preconditions: event.target.value }),
