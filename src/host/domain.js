@@ -246,7 +246,7 @@ export function defaultConfig() {
      * 默认开 —— 真机上 20 张到过验收的卡里有 6 张零用例，门禁对这种情况原本只给 warning，
      * 于是「门禁一次通过率」91%（>90% 说明这道门没在拦人）。显式 enabled:false 才关。
      */
-    caseGate: { enabled: true },
+    caseGate: { enabled: true, tiers: true },
     /** 成本闸门：只统计「跑了多少次、花了多少机上时间」，宿主没把 token 用量回传给插件。 */
     costs: { budgetRuns: 500, budgetHours: 80, warnAt: 80 },
     roles: {
@@ -476,10 +476,10 @@ export function sanitizeReviewGate(raw) {
   }
 }
 
-/** 用例闸门：默认开，只有显式 false 才算关。 */
+/** 用例闸门：默认开，只有显式 false 才算关。tiers = 「三层测试」那条：代码类卡缺单元/集成/端到端要拦。 */
 export function sanitizeCaseGate(raw) {
   const input = raw !== null && typeof raw === 'object' ? raw : {}
-  return { enabled: input.enabled !== false }
+  return { enabled: input.enabled !== false, tiers: input.tiers !== false }
 }
 
 /** 缺陷 SLA：每个严重级别给一个修复时限（小时）。 */

@@ -211,7 +211,7 @@ AI 是执行手，判定权在确定性规则和人手里。要变成 AI Native�
 | 用例的层级 | `case.tier ∈ {unit, integration, e2e, other}`；**不写就按断言推断**（`browser` → e2e、`http`/`db` → integration、shell 里出现单测 runner → unit、playwright/cypress → e2e、curl → integration），推断规则只在 `src/host/test-plan.js` 一份 |
 | 「测全面」的判据 | 代码类卡（dev / test / bug）上，三条线**每条要么有可执行用例，要么在测试计划里写明「不适用 + 理由」**；没写理由的「不适用」不算 |
 | 谁来声明不适用 | 测试专家（`studio_task_test_plan`）或人（抽屉里点「不适用」）；理由写清「为什么这一层验不了」，例如「本次只改后端接口，没有前端改动」 |
-| 拦在哪 | 单卡准出（`taskExitGate`）：有缺口就进 blockers；`config.caseGate.tiers=false` 可整条关掉。产品/设计卡不受约束 |
+| 拦在哪 | 单卡准出（`taskExitGate`）：有缺口就进 blockers；`config.caseGate.tiers=false` 可整条关掉（设置 → 列的负责人 → **三层测试闸门**）。产品/设计卡不受约束 |
 | 谁来推进 | 测试专家的派单提示词里带：需求功能点与验收条件、**当前三层的进度与缺口**、每层怎么落（shell 跑单测 / 多步接口与 db 断言 / 浏览器走用户路径） |
 
 ### 可观察的验收标准

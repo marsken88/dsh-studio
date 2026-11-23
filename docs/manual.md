@@ -241,7 +241,7 @@ studio_task_check          { id, itemId, note }         // 清单逐项勾，附
 | 技能库显示「还没被用上」 | 专家是否挂了该技能 | 这是相关性统计，不是因果；挂了技能后接过卡才会出现在计数里 |
 | 部署说成功，但界面还是旧的 | `deploy.mjs` 输出里的 `restart=` 与 `version=` | `restart=NOT-APPLIED` 说明文件传上去了、服务没重启（key 模式下 sudo 要密码就会这样），脚本会以退出码 4 结束；到目标机 `sudo systemctl restart dsh-web`，或用密码模式重跑。`version=` 应等于 `package.json` 的版本（2026-11-22 前 deploy 不传元数据，目标机会一直显示老版本） |
 | 准出被「这张是代码/测试类卡，但一条测试用例都没有」拦住 | 卡的「测试」页签 | 补一条**带可执行定义**的用例（http / shell / db / 浏览器任一）并跑通；产品或设计卡不会撞这条。确实不适用时，管理员可在「设置 → 列的负责人 → 用例闸门」关掉，关掉后只是 warning |
-| 准出被「三条测试线还有缺口」拦住 | 卡的「测试」页签 → 三层测试进度 | 每条线要么补一条**带可执行断言**的用例（单元用 shell 跑单测命令、集成用 http/db、端到端用 browser），要么在抽屉里点「不适用」并写明理由（等价于 `studio_task_test_plan`）。`studio_task_add_cases` 的每一条都可带 `tier`；不写会按断言推断。确实不想要这道闸门时把 `config.caseGate.tiers` 设为 `false` |
+| 准出被「三条测试线还有缺口」拦住 | 卡的「测试」页签 → 三层测试进度 | 每条线要么补一条**带可执行断言**的用例（单元用 shell 跑单测命令、集成用 http/db、端到端用 browser），要么在抽屉里点「不适用」并写明理由（等价于 `studio_task_test_plan`）。`studio_task_add_cases` 的每一条都可带 `tier`；不写会按断言推断。确实不想要这道闸门时，到「设置 → 列的负责人」关掉「三层测试闸门」（= `config.caseGate.tiers=false`），存量卡就不会被拦 |
 | `npm run shots` 拍出来的图是全白的 | 构建时有没有 console 报错、harness 的 `/react.js` 是否 404 | 工作树的 `web/node_modules` 不全时，假宿主的 React UMD 加载失败 → 面板渲染成空白（`pageerror` 不报）。补齐依赖后重跑；`capture.mjs` 现在会把 console error 也记进错误列表 |
 
 ---

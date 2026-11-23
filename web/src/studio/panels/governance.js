@@ -21,7 +21,7 @@ import { Table, TableHeader, TableColumn, TableBody, TableRow, TableCell } from 
 import { Pagination } from '../../components/base/pagination/pagination'
 import { Button } from '../../boardui/index'
 import { EmptyState } from '../../boardui/empty-state'
-
+
 const PANE = 'flex min-w-0 flex-col gap-3'
 const SECTION = 'flex min-w-0 flex-col gap-3 rounded-xl border border-separator-border bg-background-primary-default p-4'
 const SECTION_HEAD = 'flex flex-wrap items-start justify-between gap-3'
@@ -294,6 +294,16 @@ export function ColumnsPanel({ state, onChanged }) {
       await onChanged()
     } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)) } finally { setBusy(false) }
   }
+  /* 三层测试闸门（单独一个开关）：代码类卡上单元/集成/端到端每条线要么有可执行用例，
+     要么在测试计划里写明「不适用 + 理由」。存量卡补齐前会拦，想先放行就关这一条。 */
+  const tierGateEnabled = config.caseGate?.tiers !== false
+  const saveTierGate = async tiers => {
+    setBusy(true); setError(null)
+    try {
+      await api('/config', { caseGate: { ...(config.caseGate ?? {}), tiers } })
+      await onChanged()
+    } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)) } finally { setBusy(false) }
+  }
   const toggleGateColumn = id => {
     const next = gateColumns.includes(id) ? gateColumns.filter(item => item !== id) : [...gateColumns, id]
     void saveDesign({ columns: next })
@@ -357,6 +367,16 @@ export function ColumnsPanel({ state, onChanged }) {
           disabled: busy, 'data-case-gate': caseGateEnabled ? 'on' : 'off',
           onClick: () => void saveCaseGate(!caseGateEnabled),
         }, caseGateEnabled ? '用例闸门：已开启' : '用例闸门：已关闭'),
+      ),
+      h('div', { className: HINT },
+        '三层测试闸门：代码/测试类卡上，单元 / 集成 / 端到端每条线要么有可执行的用例，要么在卡的「测试」页写明「不适用 + 理由」；缺一层不允许收口（默认开启）。',
+        '存量卡会先被拦：补用例或写清哪一层验不了，再推进。'),
+      h('div', { className: ROW },
+        h(Button, {
+          variant: tierGateEnabled ? 'primary' : 'secondary', size: 'sm',
+          disabled: busy, 'data-tier-gate': tierGateEnabled ? 'on' : 'off',
+          onClick: () => void saveTierGate(!tierGateEnabled),
+        }, tierGateEnabled ? '三层测试闸门：已开启' : '三层测试闸门：已关闭'),
       ),
       error !== null ? h('div', { className: ERR, role: 'alert' }, error) : null,
     ),
