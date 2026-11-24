@@ -186,6 +186,8 @@ function Drawer({ task, state, onClose, onChanged }) {
   const [newItem, setNewItem] = React.useState('')
   const [artifact, setArtifact] = React.useState({ kind: 'doc', title: '', ref: '', content: '' })
   const [artEdit, setArtEdit] = React.useState(null)
+  // 交付物多了先筛再找：按标题 / 类型 / 链接。
+  const [artifactQuery, setArtifactQuery] = React.useState('')
   const [artRead, setArtRead] = React.useState(null)
   // 截图预览：只取 data URL，不把磁盘路径变成静态资源
   const [imageOf, setImageOf] = React.useState('')
@@ -197,7 +199,7 @@ function Drawer({ task, state, onClose, onChanged }) {
   const [commentList, setCommentList] = React.useState(null)
   // 用例与验收清单的正文同样按需取，轮询只给计数。
   const [parts, setParts] = React.useState(null)
-  React.useEffect(() => { setArtBodies({}); setArtRead(null); setArtEdit(null) }, [task.id])
+  React.useEffect(() => { setArtBodies({}); setArtRead(null); setArtEdit(null); setArtifactQuery('') }, [task.id])
   // 新用例的 pointId 默认跟卡走：一个功能点通常多条用例，别让人每条都选一次（issue #11 可发现性）
   const [newCase, setNewCase] = React.useState({ title: '', expected: '', steps: '', stepsText: '', type: 'functional', tier: '', priority: 'p2', preconditions: '', pointId: task.pointId ?? '' })
   const [caseRun, setCaseRun] = React.useState({ busy: false, note: '' })
@@ -235,6 +237,26 @@ function Drawer({ task, state, onClose, onChanged }) {
     setDiffPath(path)
     setFileView(null)
     if (diffMode === 'file' && path !== '') void loadFile(path)
+  }
+  /* 复制路径 / 复制内容：非安全上下文（http 的 .218）里 navigator.clipboard 不可用，退回 execCommand。 */
+  const copyPlain = async (text, label) => {
+    const value = String(text ?? '')
+    if (value === '') { setNotice('没有可复制的内容'); return }
+    let ok = false
+    try { await navigator.clipboard.writeText(value); ok = true } catch { /* 走下面的兜底 */ }
+    if (!ok) {
+      try {
+        const area = document.createElement('textarea')
+        area.value = value
+        area.style.position = 'fixed'
+        area.style.opacity = '0'
+        document.body.appendChild(area)
+        area.select()
+        ok = document.execCommand('copy')
+        area.remove()
+      } catch { ok = false }
+    }
+    setNotice(ok ? `已复制${label}（${value.length} 字）` : `复制失败：浏览器不允许写剪贴板，手动选中${label}吧`)
   }
   const loadDiff = async () => {
     if (diffBusy) return
@@ -285,6 +307,10 @@ function Drawer({ task, state, onClose, onChanged }) {
   const checklist = parts !== null && Array.isArray(parts.checklist) ? parts.checklist : (Array.isArray(task.checklist) ? task.checklist : [])
   const doneCount = checkSum.done
   const artifacts = task.artifacts ?? []
+  const artifactQueryText = artifactQuery.trim().toLowerCase()
+  const visibleArtifacts = artifactQueryText === ''
+    ? artifacts
+    : artifacts.filter(item => [item.title, item.ref, ARTIFACT_KIND_LABEL[item.kind] ?? item.kind].join(' ').toLowerCase().includes(artifactQueryText))
   // 轮询给的只有 contentLength；正文要么已经取过（artBodies），要么还在路上。
   const artifactBody = (item) => (artBodies[item.id] !== undefined ? artBodies[item.id] : String(item.content ?? ''))
   const artifactHasBody = (item) => (typeof item.contentLength === 'number' ? item.contentLength > 0 : String(item.content ?? '').trim() !== '')
@@ -1045,8 +1071,23 @@ function Drawer({ task, state, onClose, onChanged }) {
         ),
         row.applicable === false
           ? h(Button, { variant: 'ghost', size: 'sm', disabled: busy, title: '恢复为适用：这一层要补用例并跑通', onClick: () => void setTierApplicable(row.tier, true) }, '恢复适用')
-          : h(Button, { variant: 'ghost', size: 'sm', disabled: busy || caseRun.busy, title: '只跑这一层里能跑的用例', onClick: () => void runTier(row.tier) }, [uiIcon(h, 'run'), ' 跑这层']),
-        row.applicable === false ? null : h(Button, { variant: 'ghost', size: 'sm', disabled: busy, title: '这一层确实验不了：写明理由，门禁认它', onClick: () => void setTierApplicable(row.tier, false) }, '不适用'),
+          : h(Button, {
+            variant: 'ghost', size: 'sm',
+            disabled: busy || caseRun.busy || (row.executable ?? 0) === 0,
+            title: (row.executable ?? 0) === 0 ? '这一层还没有可执行用例：先补用例，或标「本层不适用」写明理由' : '只跑这一层里能跑的用例',
+            'data-tier-action': 'run',
+            onClick: () => void runTier(row.tier),
+          }, [uiIcon(h, 'run'), ' 跑这层']),
+        row.applicable === false
+          ? null
+          : h('button', {
+            type: 'button',
+            className: 'shrink-0 rounded px-1 text-caption-1-regular text-text-tertiary underline-offset-2 hover:text-text-secondary hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-border-focus-ring disabled:cursor-default disabled:opacity-50',
+            disabled: busy,
+            title: '这一层确实验不了：写明理由，门禁认它',
+            'data-tier-action': 'exclude',
+            onClick: () => void setTierApplicable(row.tier, false),
+          }, '本层不适用'),
       )),
       testRuns.length === 0 ? null : h('div', { className: ROW, style: { gap: 10, marginTop: 2 }, 'data-test-runs': '' },
         h('span', { className: HINT }, '最近执行'),
@@ -1662,7 +1703,10 @@ function Drawer({ task, state, onClose, onChanged }) {
                 h(ChipField, { variant: 'gray', 'data-diff-range': '1' }, `${diffView.branch || '(无分支)'} ← ${diffView.base}`),
                 h('span', { className: HINT, 'data-diff-totals': `${totals.files}-${totals.additions}-${totals.deletions}` },
                   `${totals.files} 个文件 · +${totals.additions} −${totals.deletions}${diffView.truncated === true ? '（已截断）' : ''}`),
-                h(Button, { variant: 'ghost', size: 'sm', disabled: diffBusy, onClick: () => void loadDiff() }, '刷新')),
+                h(Button, { variant: 'ghost', size: 'sm', disabled: diffBusy, onClick: () => void loadDiff() }, '刷新'),
+                (task.gitlabMR?.url ?? '') === ''
+                  ? null
+                  : h('a', { className: LINK, href: String(task.gitlabMR.url).replace(/\/$/, '') + '/diffs', target: '_blank', rel: 'noreferrer' }, '在 GitLab 看 diff')),
               h('div', { className: HINT }, `仓库：${diffView.dir}`),
               uncommitted.total > 0
                 ? h('div', { className: 'text-caption-1-regular text-status-yellow-text', 'data-diff-dirty': uncommitted.total },
@@ -1710,7 +1754,9 @@ function Drawer({ task, state, onClose, onChanged }) {
                           setDiffMode('file')
                           if (fileView === null || fileView.path !== selected.path) void loadFile(selected.path)
                         },
-                      }, '全文')),
+                      }, '全文'),
+                      h(Button, { variant: 'ghost', size: 'sm', 'data-diff-copy': 'path', onClick: () => void copyPlain(selected.path, '路径') }, '复制路径'),
+                      h(Button, { variant: 'ghost', size: 'sm', 'data-diff-copy': 'content', onClick: () => void copyPlain(diffMode === 'file' ? String(fileView?.data?.content ?? '') : selected.patch, diffMode === 'file' ? '全文' : 'diff') }, '复制内容')),
                     diffMode === 'file'
                       ? renderFileView(selected)
                       : (selected.patch === ''
@@ -1990,9 +2036,19 @@ function Drawer({ task, state, onClose, onChanged }) {
             }, '同步到云盘')
             : null),
         h('div', { className: SECTION_BODY, 'data-scroll': '1' },
-          (task.artifacts ?? []).length === 0
+          artifacts.length === 0
             ? h(EmptyState, { title: '还没有交付物。', hint: '文档、MR、用例、报告——交付要有东西，不只是一句「做完了」。' })
-            : (task.artifacts ?? []).map(item => h('div', { key: item.id, className: 'flex min-w-0 flex-col gap-2', 'data-drawer-artifact': item.id }, h('div', {
+            : h(React.Fragment, null,
+              artifacts.length > 5
+                ? h('div', { className: ROW, 'data-artifact-filter': '' },
+                  h('div', { className: 'w-64 max-w-full' },
+                    h(TextField, { value: artifactQuery, placeholder: '按标题 / 类型 / 链接筛…', 'aria-label': '筛交付物', onChange: event => setArtifactQuery(event.target.value) })),
+                  h('span', { className: HINT }, `显示 ${visibleArtifacts.length} / ${artifacts.length}`),
+                  artifactQuery === '' ? null : h(Button, { variant: 'ghost', size: 'xs', onClick: () => setArtifactQuery('') }, '清除'))
+                : null,
+              visibleArtifacts.length === 0
+                ? h('div', { className: HINT }, '没有匹配的交付物')
+                : visibleArtifacts.map(item => h('div', { key: item.id, className: 'flex min-w-0 flex-col gap-2', 'data-drawer-artifact': item.id }, h('div', {
               className: LIST_ROW + (artifactHasBody(item) ? '' : ' bg-background-tertiary-error'),
               'data-missing': artifactHasBody(item) ? '0' : '1',
             },
@@ -2056,7 +2112,7 @@ function Drawer({ task, state, onClose, onChanged }) {
                   ? h('span', { className: HINT }, '这条交付物还没有正文。')
                   : renderMarkdown(artifactBody(item)))
               : null,
-          )),
+          ))),
           artEdit === null ? null : h('div', { style: { marginTop: 8 } },
             h(MdField, {
               style: { width: '100%' }, rows: 8, value: artEdit.content,

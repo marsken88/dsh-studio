@@ -178,6 +178,9 @@ export     function RequirementsPage({ state, onOpenTask, onChanged, createSigna
       // ---- 功能点与可追溯矩阵：需求结构化之后，能查到「每条验收标准被谁做、被哪条用例验」
       const [matrix, setMatrix] = React.useState(null)
       const [matrixNote, setMatrixNote] = React.useState(null)
+      // 矩阵是整条需求的全部功能点，一屏十几行时先筛再编辑：按编号/标题/验收条件搜，或只看未覆盖。
+      const [matrixQuery, setMatrixQuery] = React.useState('')
+      const [matrixOnlyOpen, setMatrixOnlyOpen] = React.useState(false)
       const [pointForm, setPointForm] = React.useState(null)
       /* 需求矩阵里功能点描述是一整段 markdown，全渲染会把表格行撑到半屏高（一屏只看得下两三行）。
          默认只显示两行摘要，点「全文」再展开 —— 表格回到「一眼扫完」的用途。 */
@@ -1174,7 +1177,29 @@ export     function RequirementsPage({ state, onOpenTask, onChanged, createSigna
               /* 官方 Table：需求矩阵本来就是一张表（编号 / 功能点 / 覆盖 / 卡与用例 / 操作），
                  原来是一串 div 拼的功能点行。RAC 的 collection 组件不能被自定义组件包住，
                  所以直接用 table.tsx 的再导出。 */
-              h(Table, { size: 'sm', 'aria-label': '需求追溯矩阵' },
+              (() => {
+                const raw = matrix.points ?? []
+                const query = matrixQuery.trim().toLowerCase()
+                const points = raw.filter(point => {
+                  if (matrixOnlyOpen === true && point.covered === true) return false
+                  if (query === '') return true
+                  const hay = [point.id, point.title, ...(point.acceptance ?? []).map(item => String(item.text ?? ''))].join(' ').toLowerCase()
+                  return hay.includes(query)
+                })
+                return h(React.Fragment, null,
+                  h('div', { className: 'mb-2 flex min-w-0 flex-wrap items-center gap-2', 'data-matrix-filter': '' },
+                    h('div', { className: 'w-64 max-w-full' },
+                      h(TextField, { value: matrixQuery, placeholder: '按编号 / 功能点 / 验收条件筛…', 'aria-label': '筛功能点', onChange: event => setMatrixQuery(event.target.value) })),
+                    h('label', { className: 'flex cursor-pointer items-center gap-1 text-caption-1-regular text-text-secondary' },
+                      h(CheckField, { checked: matrixOnlyOpen, onChange: event => setMatrixOnlyOpen(event.target.checked) }),
+                      h('span', {}, '只看未覆盖')),
+                    h('span', { className: HINT, 'data-matrix-count': points.length }, `显示 ${points.length} / ${raw.length}`),
+                    matrixQuery !== '' || matrixOnlyOpen === true
+                      ? h(Button, { variant: 'ghost', size: 'xs', onClick: () => { setMatrixQuery(''); setMatrixOnlyOpen(false) } }, '清除筛选')
+                      : null),
+                  points.length === 0
+                    ? h(EmptyState, { title: '没有匹配的功能点' })
+                    : h(Table, { size: 'sm', 'aria-label': '需求追溯矩阵' },
                 h(TableHeader, null,
                   h(TableColumn, { id: 'code', isRowHeader: true }, '编号'),
                   h(TableColumn, { id: 'point' }, '功能点'),
@@ -1183,7 +1208,7 @@ export     function RequirementsPage({ state, onOpenTask, onChanged, createSigna
                   h(TableColumn, { id: 'actions' }, '操作'),
                 ),
                 h(TableBody, null,
-                  (matrix.points ?? []).map(point => h(TableRow, { key: point.id, id: point.id },
+                      points.map(point => h(TableRow, { key: point.id, id: point.id },
                     h(TableCell, null, h('span', { className: CODE }, point.id)),
                     h(TableCell, { className: 'align-top' },
                       h('b', null, point.title),
@@ -1230,7 +1255,9 @@ export     function RequirementsPage({ state, onOpenTask, onChanged, createSigna
                     ),
                   )),
                 ),
-              ),
+              )
+            )
+              })(),
               (matrix.loose ?? []).length === 0 ? null : h('div', { className: 'mt-3 flex min-w-0 flex-col gap-2 rounded-xl border border-dashed border-separator-border p-3' },
                 h('div', { className: HINT, style: { marginBottom: 8 } }, `还有 ${matrix.loose.length} 张卡没归到功能点，选一个挂上去，矩阵才算完整：`),
                 matrix.loose.map(card => h('div', { key: card.id, className: 'flex min-w-0 items-center gap-2' },

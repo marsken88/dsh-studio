@@ -993,6 +993,25 @@ html[data-dsh-theme="light"] [class*="rightbarCol"] { background: #fafafa !impor
       const [status, setStatus] = React.useState(null)
       const [error, setError] = React.useState(null)
       const [busy, setBusy] = React.useState(false)
+      /* 未保存提醒：设置页有 18 个分区，一大半是「改完点保存」。这里只跟踪**文本输入**
+         （下拉/开关在好几块里是即时保存的，不能算脏），保存按钮点过就清掉。
+         切分区时如果还脏，先确认再切，别让一页改动静默丢掉。 */
+      const [dirty, setDirty] = React.useState(false)
+      const markDirty = event => {
+        const target = event.target
+        const tag = target?.tagName
+        if (tag !== 'INPUT' && tag !== 'TEXTAREA') return
+        if (tag === 'INPUT' && ['checkbox', 'radio', 'file', 'range', 'color', 'search'].includes(String(target.type))) return
+        // 搜索/筛选框不是表单字段：在设置页里搜一下再切分区，不该弹「未保存」。
+        const label = `${target.getAttribute?.('placeholder') ?? ''} ${target.getAttribute?.('aria-label') ?? ''}`
+        if (/搜|筛/.test(label)) return
+        setDirty(true)
+      }
+      const clearDirtyOnSave = event => {
+        const button = event.target?.closest?.('button')
+        if (button === null || button === undefined) return
+        if (/^保存/.test(String(button.textContent ?? '').trim())) setDirty(false)
+      }
 
       const save = async () => {
         setBusy(true); setError(null); setStatus(null)
@@ -1028,7 +1047,10 @@ html[data-dsh-theme="light"] [class*="rightbarCol"] { background: #fafafa !impor
         if (typeof initialSection === 'string' && initialSection !== '') setSection(initialSection)
       }, [initialSection])
 
-      const pickSection = next => {
+      const pickSection = async next => {
+        if (next === section) return
+        if (dirty === true && !(await confirmDialog('这一页还有未保存的修改，切走就丢了。继续？', { title: '未保存的修改', danger: true, okText: '丢弃并切换' }))) return
+        setDirty(false)
         setSection(next)
         onSection?.(next)
       }
@@ -1130,11 +1152,23 @@ html[data-dsh-theme="light"] [class*="rightbarCol"] { background: #fafafa !impor
                   ? null
                   : h('span', { className: 'shrink-0 text-caption-1-regular tabular-nums text-text-tertiary' }, String(item.count))))),
         ),
-        h('div', { className: 'flex min-w-0 flex-col gap-4', 'data-settings-pane': section },
+        h('div', {
+          className: 'flex min-w-0 flex-col gap-4',
+          'data-settings-pane': section,
+          'data-settings-dirty': dirty ? '1' : '0',
+          onChange: markDirty,
+          onInput: markDirty,
+          onClick: clearDirtyOnSave,
+        },
           h('div', { className: 'flex flex-col gap-1' },
             h('div', { className: 'text-title-2-semibold text-text-primary' }, (PANE_META[section] ?? ['设置'])[0]),
             h('div', { className: 'text-caption-1-regular text-text-tertiary' }, (PANE_META[section] ?? ['', ''])[1]),
           ),
+          dirty
+            ? h('div', { className: 'flex flex-wrap items-center gap-2 rounded-xl bg-status-yellow-background px-3 py-2 text-caption-1-regular text-status-yellow-text', 'data-settings-dirty-banner': '' },
+              h('span', { className: 'font-medium' }, '有未保存的修改'),
+              h('span', null, '改完点本页的「保存」；切到别的分区会先问你'))
+            : null,
           paneFor(section)),
       )
     }

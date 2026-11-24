@@ -10,6 +10,7 @@
 //
 // 宿主代码（index.js / src）与 client.js 都换掉；重启 dsh 后才会加载。
 import { cp, mkdir, readFile, rm, stat } from 'node:fs/promises'
+import { execFileSync } from 'node:child_process'
 import { existsSync, realpathSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
@@ -59,6 +60,25 @@ const backup = join(homedir(), '.dsh', 'backups', `dsh-studio-${stamp}`)
 /* profile 里的插件目录可能已经不是拷贝，而是**指向仓库的符号链接/目录联接**（2026-11-20 就变成这样了）。
    那种情况下 src 和 dest 是同一个路径，cp 会抛 ERR_FS_CP_EINVAL("src and dest cannot be the same")。
    这时不需要同步——重启就够了；直接说清楚，别让人对着一堆堆栈猜。 */
+/* 从**工作树**里跑这条命令时，profile 很可能是指向主检出的目录联接：
+   那种情况下 src/dest 不是同一个路径，linked 判据不成立，脚本就会把工作树的文件
+   直接写进主检出的工作区（2026-11-24 真的踩过：主检出凭空多出一堆未提交改动）。
+   这里用 git 的 top-level 认「目标是不是另一个检出」，是就拒绝。 */
+const gitTop = dir => {
+  try {
+    return execFileSync('git', ['-C', dir, 'rev-parse', '--show-toplevel'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim()
+  } catch {
+    return ''
+  }
+}
+const pathKey = dir => resolve(dir).replace(/\\/g, '/').toLowerCase()
+const targetTop = gitTop(target)
+const rootTop = gitTop(root)
+if (targetTop !== '' && rootTop !== '' && pathKey(targetTop) !== pathKey(rootTop)) {
+  console.error(`✖ profile 指向的是另一个 git 检出，拒绝同步：\n  目标 ${targetTop}\n  当前 ${rootTop}\n  从工作树同步会覆盖那个检出的工作区。请在目标检出里运行，或等分支合并后再同步。`)
+  process.exit(1)
+}
+
 const linked = (() => {
   try {
     return realpathSync(target) === realpathSync(root)

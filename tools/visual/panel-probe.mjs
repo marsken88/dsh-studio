@@ -352,6 +352,20 @@ try {
   await clickExact('需求')
   check('③ 需求页矩阵渲染', await waitText('功能点与可追溯矩阵'))
   check('③ 覆盖率口径写出来了', (await page.evaluate(() => document.body.innerText)).includes('覆盖率按功能点算'))
+  const matrixFilter = await page.evaluate(() => document.querySelector('[data-matrix-filter] input') !== null)
+  check('③b 需求矩阵有筛选框', matrixFilter === true, matrixFilter ? '' : '没找到 [data-matrix-filter] input')
+  if (matrixFilter) {
+    const countBefore = await page.evaluate(() => document.querySelector('[data-matrix-count]')?.textContent ?? '')
+    await page.evaluate(() => {
+      const input = document.querySelector('[data-matrix-filter] input')
+      const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set
+      setter.call(input, '探针功能点 A')
+      input.dispatchEvent(new Event('input', { bubbles: true }))
+    })
+    await new Promise(resolve => setTimeout(resolve, 500))
+    const countAfter = await page.evaluate(() => document.querySelector('[data-matrix-count]')?.textContent ?? '')
+    check('③b 矩阵筛选真的收窄结果', /显示 1 \//.test(countAfter) && countBefore !== countAfter, `${countBefore} → ${countAfter}`)
+  }
 
   // ③b 需求页搜索与来源筛选是真的（以前只写 localStorage + dispatchEvent('resize')，列表不变）
   const typedQuery = await page.evaluate(() => {
@@ -509,6 +523,36 @@ try {
     JSON.stringify(escalation),
   )
 
+  /* ④g 未保存提醒：设置页有一大半是「改完点保存」，切分区前必须提示。
+     这里只改本地表单（不点保存），断言脏标记、横幅、切换确认三件事。 */
+  await clickExact('设置')
+  await clickExact('看板外观')
+  await new Promise(resolve => setTimeout(resolve, 600))
+  const typedDirty = await page.evaluate(() => {
+    const input = document.querySelector('[data-settings-pane] input')
+    if (input === null) return false
+    const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set
+    setter.call(input, '探针：未保存的标题改动')
+    input.dispatchEvent(new Event('input', { bubbles: true }))
+    return true
+  })
+  await new Promise(resolve => setTimeout(resolve, 300))
+  const dirtyState = await page.evaluate(() => ({
+    flag: document.querySelector('[data-settings-dirty]')?.getAttribute('data-settings-dirty') ?? '',
+    banner: document.querySelector('[data-settings-dirty-banner]') !== null,
+  }))
+  check('④g 文本输入会标出「未保存」', typedDirty === true && dirtyState.flag === '1' && dirtyState.banner === true, JSON.stringify(dirtyState))
+  await page.evaluate(() => [...document.querySelectorAll('[data-settings-nav-item]')]
+    .find(node => String(node.textContent ?? '').includes('专家'))?.click())
+  await new Promise(resolve => setTimeout(resolve, 600))
+  const askDiscard = await page.evaluate(() => document.body.innerText.includes('未保存的修改'))
+  check('④g 脏着切分区会先确认', askDiscard === true)
+  await page.evaluate(() => [...document.querySelectorAll('button')]
+    .find(node => String(node.textContent ?? '').includes('丢弃并切换'))?.click())
+  await new Promise(resolve => setTimeout(resolve, 700))
+  const switched = await page.evaluate(() => document.querySelector('[data-settings-pane]')?.getAttribute('data-settings-pane') ?? '')
+  check('④g 确认丢弃后切到专家', switched === 'experts', switched)
+
   // ⑤ 设置 → 技能库：使用读数
   const skillsNav = await clickExact('技能库')
   if (skillsNav === true) await new Promise(resolve => setTimeout(resolve, 800))
@@ -652,6 +696,11 @@ try {
       return { path: node?.getAttribute('data-diff-fulltext') ?? '', lines: node?.querySelectorAll('div').length ?? 0 }
     })
     check('⑦ 「全文」能读工作树里的文件内容（带行号）', fullClicked === true && fullOk === true, JSON.stringify(fullInfo))
+    const copyButtons = await page.evaluate(() => ({
+      path: document.querySelector('[data-diff-copy="path"]') !== null,
+      content: document.querySelector('[data-diff-copy="content"]') !== null,
+    }))
+    check('⑦ 可复制路径 / 内容', copyButtons.path === true && copyButtons.content === true, JSON.stringify(copyButtons))
     await page.screenshot({ path: join(outDir, 'drawer-diff-fulltext.png') })
   }
 

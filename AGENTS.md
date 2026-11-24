@@ -68,7 +68,7 @@ STUDIO_TOKEN=$(sudo journalctl -u dsh-web -n 50 | grep -o 'token=[A-Za-z0-9_-]*'
 > 只在 dependencies 里出现不会加载 —— profile 的插件树按 bundles 逐层合成，2026-11-19 我就这么白重启了一次。
 > 装完还要把 `index.js client.js package.json cordis.patch.yml locale src` 放进 `node_modules/@marsken/dsh-studio`
 > （Windows 无管理员权限建不了符号链接时直接拷），然后重启。**日常用 `npm run sync:profile` 做这一步**：
-> 它先把「仓库版本 → profile 版本」打出来再拷（2026-11-20 就是靠这一行才发现 desktop profile 里躺着 0.9.14 的拷贝，
+> **从工作树里跑会拒绝**：profile 若是指向另一个 git 检出的目录联接（本机 desktop profile 就是），脚本会先比 `git rev-parse --show-toplevel`，不一致直接退出——否则会把工作树文件写进主检出的工作区（2026-11-24 踩过）。它先把「仓库版本 → profile 版本」打出来再拷（2026-11-20 就是靠这一行才发现 desktop profile 里躺着 0.9.14 的拷贝，
 > `link:` 根本没建成链接，白重启了一次），目录整体替换，不会把删掉的模块留成旧文件。
 >
 > 目标机上那个老的 `deploy-all.sh` 只作兜底（它拷 `/tmp/` 下的两个文件和 `src/`）。日常用 `tools/deploy.mjs`，别再手工 scp 拼路径。`package.json`（包头、`engines`、`dsh.*`、`files`）、`cordis.patch.yml`、`locale/*.json` 由 `tools/deploy.mjs` 一起传（2026-11-22 起）；只有走 profile 的 `node_modules` 手工拷贝时才需要自己带。改动前先 `cp package.json /tmp/package.json.bak` 留退路。

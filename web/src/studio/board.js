@@ -68,7 +68,18 @@ function Board({ state, onOpen, onMove, onWip, onCreate }) {
   const [requirementFilter, setRequirementFilter] = React.useState('')
   const [hideEmpty, setHideEmpty] = React.useState(false)
   // 列多时默认给可读列宽、横向滚；打开这个把列压到一屏看全（记在本地）
-  const [fitWidth, setFitWidth] = React.useState(() => { try { return window.localStorage.getItem('studio.boardFit') === '1' } catch { return false } })
+  const [fitWidth, setFitWidth] = React.useState(() => {
+    try {
+      const saved = window.localStorage.getItem('studio.boardFit')
+      if (saved === '1' || saved === '0') return saved === '1'
+    } catch { /* 隐私模式读不到就按默认算 */ }
+    /* 没存过偏好：列多或屏窄时先压成一屏（默认 8 列在 1440 下会横向滚、第 8 列看不全）；
+       宽屏且列不多时保持可读列宽。用户勾/取消后记在本地，不再走这里。 */
+    const columnCount = Array.isArray(state?.statuses) ? state.statuses.length : 8
+    const width = typeof window === 'undefined' ? 0 : window.innerWidth
+    // 桌面宽屏才有意义：1280 以下压 8 列会把列压到 100px 出头，宁可横向滚。
+    return width >= 1280 && width < 1920 && columnCount * 240 + 120 > width
+  })
   const [onlyBlocked, setOnlyBlocked] = React.useState(false)
   const [onlyNoBody, setOnlyNoBody] = React.useState(false)
   // 每列当前渲染到第几张；点「显示更多」一页一页加。
