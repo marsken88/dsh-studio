@@ -157,6 +157,8 @@ studio_task_check          { id, itemId, note }         // 清单逐项勾，附
 
 用例列表本身是**紧凑卡片**：结果选择 / 标题 / 操作在顶部，接口定义、响应片段、执行步骤、功能点、记录默认**收起**，点「详情」才展开——35 条用例也能一屏扫完，不再被长接口和响应片段撑成一片。
 
+用例区顶部有筛选 chip（全部 / 未跑 / 不通过 / 跳过 / 通过）与标题搜索，列表默认**失败在前**；三层测试进度与验收清单排在用例之后，测试页不再常驻评论框，执行回执会粘在列表顶部。
+
 **同名空壳用例原地升级**：`studio_task_add_cases` 碰到卡上已有同名草稿（只有标题，含「（可执行）」这类后缀差异）时，会把断言补到原用例上（保留 id / 功能点 / 验收条件），**不会新增一条重复**；同名且已可执行的跳过。以前会并存，导致「15 条里 7 条永远跑不了的草稿」，需求级可执行覆盖被拖到 53%。
 | 缺陷/验收 | `studio_task_signoff` `studio_bug_duplicate` |
 | 版本 | `studio_release_list` `studio_release_get` `studio_release_save` `studio_release_publish` `studio_release_gray` |

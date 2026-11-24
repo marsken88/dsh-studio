@@ -325,6 +325,28 @@ try {
   await new Promise(resolve => setTimeout(resolve, 500))
   const deleteConfirm = await page.evaluate(() => [...document.querySelectorAll('[role="dialog"], [role="alertdialog"]')].some(node => String(node.textContent || '').includes('删除用例')))
   check('②c 删除用例先弹确认框', deleteConfirm === true)
+  const filterInfo = await page.evaluate(() => ({
+    chips: [...document.querySelectorAll('[data-case-filter-chip]')].map(node => node.textContent.trim()),
+    rows: document.querySelectorAll('[data-drawer-case-row]').length,
+    composer: document.querySelectorAll('[data-drawer-composer]').length,
+  }))
+  check('②c 用例筛选 chip 存在且测试页不显示评论框', filterInfo.chips.length >= 4 && filterInfo.chips.some(text => text.includes('未跑')) && filterInfo.composer === 0, JSON.stringify(filterInfo))
+  await page.evaluate(() => { document.querySelector('[data-case-filter-chip="pending"]')?.click() })
+  await new Promise(resolve => setTimeout(resolve, 400))
+  const pendingState = await page.evaluate(() => ({
+    rows: document.querySelectorAll('[data-drawer-case-row]').length,
+    empty: document.body.innerText.includes('没有匹配的用例'),
+  }))
+  check('②c 点「未跑」筛出 0 条并给空态', pendingState.rows === 0 && pendingState.empty === true, JSON.stringify(pendingState))
+  await page.evaluate(() => { document.querySelector('[data-case-filter-chip="all"]')?.click() })
+  await new Promise(resolve => setTimeout(resolve, 300))
+  const orderOk = await page.evaluate(() => {
+    const row = document.querySelector('[data-drawer-case-row]')
+    const tier = document.querySelector('[data-tier-row]')
+    if (row === null || tier === null) return null
+    return (row.compareDocumentPosition(tier) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0
+  })
+  check('②c 三层进度排在用例列表之后', orderOk === true)
   await page.keyboard.press('Escape')
   await new Promise(resolve => setTimeout(resolve, 300))
 

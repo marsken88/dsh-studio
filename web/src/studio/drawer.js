@@ -208,6 +208,9 @@ function Drawer({ task, state, onClose, onChanged }) {
   const [caseGen, setCaseGen] = React.useState({ busy: false, note: '' })
   /* 用例明细默认收起：接口/响应/步骤/功能点/记录一展开就是十几行，35 条用例滚不动。 */
   const [expandedCaseIds, setExpandedCaseIds] = React.useState(() => new Set())
+  /* 用例筛选：默认失败→未跑→跳过→通过，和用例库页一致。 */
+  const [caseFilter, setCaseFilter] = React.useState('all')
+  const [caseQuery, setCaseQuery] = React.useState('')
   const [codingDraft, setCodingDraft] = React.useState(null)
   const [reviewNote, setReviewNote] = React.useState('')
   const coding = task.coding ?? null
@@ -313,6 +316,15 @@ function Drawer({ task, state, onClose, onChanged }) {
   const caseFail = caseSum.fail
   const caseSkip = cases.filter(item => item.result === 'skip').length
   const casePending = Math.max(0, caseSum.total - casePass - caseFail - caseSkip)
+  const caseRank = { fail: 0, pending: 1, skip: 2, pass: 3 }
+  const caseQueryText = caseQuery.trim().toLowerCase()
+  const visibleCases = cases
+    .filter(item => {
+      if (caseFilter !== 'all' && item.result !== caseFilter) return false
+      if (caseQueryText === '') return true
+      return [item.title, item.expected, item.note].join(' ').toLowerCase().includes(caseQueryText)
+    })
+    .sort((a, b) => (caseRank[a.result] ?? 9) - (caseRank[b.result] ?? 9))
   const caseSummary = caseSum.total === 0
     ? ''
     : `${caseSum.total} 条 · 通过 ${casePass} · 不通过 ${caseFail}${casePending > 0 ? ` · 未跑 ${casePending}` : ''}${caseSkip > 0 ? ` · 跳过 ${caseSkip}` : ''}`
@@ -2211,14 +2223,29 @@ function Drawer({ task, state, onClose, onChanged }) {
             onClick: () => void runCases(undefined),
           }, caseRun.busy ? '运行中…' : [uiIcon(h, 'run'), ' 跑用例'])),
         h('div', { className: SECTION_BODY, 'data-scroll': '1' },
-          caseRun.note === '' ? null : h('div', { className: HINT }, caseRun.note),
+          caseRun.note === '' ? null : h('div', { className: HINT, style: { position: 'sticky', top: 0, zIndex: 5, background: 'inherit' }, 'data-run-note': '' }, caseRun.note),
+          h('div', { className: 'flex min-w-0 flex-wrap items-center gap-2', 'data-case-filter': '' },
+            ...[['all', '全部', caseSum.total], ['pending', '未跑', casePending], ['fail', '不通过', caseFail], ['skip', '跳过', caseSkip], ['pass', '通过', casePass]]
+              .map(([id, label, count]) => h(ChipField, {
+                key: id, variant: caseFilter === id ? 'soft' : 'gray', className: 'cursor-pointer',
+                'data-case-filter-chip': id,
+                onClick: () => setCaseFilter(id),
+              }, `${label} ${count}`)),
+            h('div', { className: 'w-56 max-w-full' },
+              h(TextField, {
+                value: caseQuery, placeholder: '筛标题 / 期望 / 记录', 'aria-label': '筛用例',
+                onChange: event => setCaseQuery(event.target.value),
+              })),
+            caseFilter === 'all' && caseQuery === '' ? null : h(Button, { variant: 'ghost', size: 'sm', onClick: () => { setCaseFilter('all'); setCaseQuery('') } }, '清除筛选'),
+          ),
           caseGen.note === '' ? null : h('div', { className: HINT }, caseGen.note),
-          testPlanBlock(),
           caseSum.total === 0
             ? h(EmptyState, { title: '还没有用例。', hint: '测试同学把用例登记在这里，逐条执行并回填结果。' })
             : parts === null
               ? h('div', { className: HINT }, '载入用例…')
-              : cases.map(item => h('div', {
+              : visibleCases.length === 0
+                ? h('div', { className: HINT }, '没有匹配的用例。')
+                : visibleCases.map(item => h('div', {
                 key: item.id,
                 'data-result': item.result,
                 'data-drawer-case-row': item.id,
@@ -2227,17 +2254,17 @@ function Drawer({ task, state, onClose, onChanged }) {
                 className: 'flex min-w-0 items-start gap-3 rounded-lg border border-separator-border border-l-4 bg-background-primary-default px-3 py-3 ' + (CASE_RESULT_RAIL[item.result] ?? ''),
               },
               h(SelectField, {
-                style: { width: 88, height: 28, fontSize: 12 }, value: item.result, disabled: busy,
+                size: 'sm', style: { width: 88 }, value: item.result, disabled: busy,
                 'aria-label': `用例结果：${item.title}`,
                 onChange: event => void setCaseResult(item, event.target.value),
               }, CASE_RESULTS.map(value => h('option', { key: value, value }, CASE_RESULT_LABEL[value]))),
               h('div', { className: GROW },
-                h('div', { className: 'truncate text-body-2-semibold text-text-primary', title: item.title }, item.title),
+                h('div', { className: 'line-clamp-2 text-body-2-semibold text-text-primary', title: item.title }, item.title),
                 h('div', { className: ROW, style: { gap: 8, alignItems: 'center', marginTop: 2 } },
                   h(ChipField, { variant: CASE_RESULT_CHIP[item.result] ?? 'neutral', 'data-case-result': item.result }, CASE_RESULT_LABEL[item.result] ?? item.result),
                   h(ChipField, { variant: 'soft' }, CASE_TYPE_LABEL[item.type ?? 'functional'] ?? '功能'),
                   h(SelectField, {
-                    style: { width: 108, height: 24, fontSize: 12 },
+                    size: 'sm', style: { width: 108 },
                     value: item.tier ?? '',
                     disabled: busy,
                     title: `${CASE_TIER_HINT[item.tierEffective ?? 'other'] ?? ''}（当前按${item.tier === '' || item.tier === undefined ? '断言推断' : '手动指定'}：${CASE_TIER_FULL[item.tierEffective ?? 'other'] ?? '其它'}）`,
@@ -2292,6 +2319,8 @@ function Drawer({ task, state, onClose, onChanged }) {
                       ),
                     ),
                 item.note === '' ? null : h('div', { className: ART_REF }, `记录：${item.note}${item.by ? ` — ${item.by}` : ''}`),
+                h('div', { className: 'flex justify-end' },
+                  h(Button, { variant: 'danger', size: 'sm', disabled: busy, title: '删除这条用例（先确认）', 'aria-label': '删除这条用例', onClick: () => void removeCase(item) }, '删除这条用例')),
               ) : null,
               ),
               h('div', { className: 'flex shrink-0 items-start gap-1' },
@@ -2320,7 +2349,6 @@ function Drawer({ task, state, onClose, onChanged }) {
                 'data-flaky': item.flaky === true ? '1' : '0',
                 onClick: () => void toggleFlaky(item),
               }, item.flaky === true ? '不稳' : '标不稳'),
-              h(Button, { variant: 'danger', size: 'sm', disabled: busy, 'aria-label': '删除这条用例', title: '删除这条用例', onClick: () => void removeCase(item) }, '×'),
               ))),
 
           h('div', { className: ROW },
@@ -2391,6 +2419,7 @@ function Drawer({ task, state, onClose, onChanged }) {
             }),
             h('div', { className: HINT }, '先登录取 token、再带 token 调业务接口时用；变量写成 {{data.token}} 放进 url 或 body。第一步失败后面不会跑。'),
           ),
+          testPlanBlock(),
         ),
       ),
       h(Section, { pane: 'overview', current: pane, id: 'meta' },
@@ -2499,7 +2528,7 @@ function Drawer({ task, state, onClose, onChanged }) {
         ),
       ),
       ),
-      h('div', { className: 'flex shrink-0 flex-col gap-2 border-t border-separator-border bg-background-primary-default px-5 pt-3 pb-4', 'data-drawer-foot': '' },
+      pane === 'discuss' ? h('div', { className: 'flex shrink-0 flex-col gap-2 border-t border-separator-border bg-background-primary-default px-5 pt-3 pb-4', 'data-drawer-foot': '' },
         h('div', { className: 'flex flex-wrap items-center gap-2', 'data-drawer-mention-bar': '' },
           h(Button, {
             variant: 'secondary', size: 'sm', disabled: busy,
@@ -2552,7 +2581,7 @@ function Drawer({ task, state, onClose, onChanged }) {
         notice !== null ? h('span', { className: OK_TEXT }, notice) : null,
         error !== null ? h('span', { className: ERR_TEXT }, error) : null,
         ),
-      ),
+      ) : null,
     ),
   )
 }
