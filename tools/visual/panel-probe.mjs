@@ -37,6 +37,9 @@ const argOf = (name, fallback) => {
 }
 const base = argOf('base', process.env.STUDIO_BASE ?? '')
 const keep = argv.includes('--keep')
+/* 目标机开了登录时，探针也要带身份：STUDIO_TOKEN = 登录拿到的会话令牌（/auth/login 返回的 token，
+   或浏览器 cookie `dsh-auth-*` 的值）。本机免登录的实例不用设。 */
+const studioToken = String(process.env.STUDIO_TOKEN ?? '').trim()
 if (base === '') {
   console.error('用法：node tools/visual/panel-probe.mjs --base http://127.0.0.1:<dsh 端口> [--keep]')
   process.exit(2)
@@ -68,7 +71,7 @@ if (CHROME === undefined) {
 const api = async (path, body) => {
   const res = await fetch(base + '/studio-api' + path, {
     method: body === undefined ? 'GET' : 'POST',
-    headers: { 'content-type': 'application/json' },
+    headers: { 'content-type': 'application/json', ...(studioToken === '' ? {} : { 'x-studio-session': studioToken }) },
     body: body === undefined ? undefined : JSON.stringify(body),
   })
   return { status: res.status, json: await res.json().catch(() => ({})) }
@@ -110,7 +113,10 @@ const server = createServer(async (req, res) => {
     try {
       const upstream = await fetch(base + url.pathname + url.search, {
         method: req.method,
-        headers: { 'content-type': req.headers['content-type'] ?? 'application/json' },
+        headers: {
+          'content-type': req.headers['content-type'] ?? 'application/json',
+          ...(studioToken === '' ? {} : { 'x-studio-session': studioToken }),
+        },
         body: req.method === 'GET' || req.method === 'HEAD' ? undefined : (chunks.length > 0 ? Buffer.concat(chunks) : undefined),
       })
       res.writeHead(upstream.status, { 'content-type': upstream.headers.get('content-type') ?? 'application/json' })
@@ -160,6 +166,17 @@ try {
   const card = await api('/task/create', { title: '（探针）看板卡片', type: 'dev', role: 'dev', status: 'dev', requirementId, pointId: 'p1' })
   taskId = card.json.task?.id ?? ''
   check('准备：造出需求与卡片', requirementId !== '' && taskId !== '')
+  /* 执行记录 + 评审结论：卡面要能看到「代码 N 文件 +A −D」「评审通过」两个 chip，
+     讨论区要能看到评审结论。以前走工具评审只写 coding.review.note，人翻卡片一个字都看不到。 */
+  await api('/task/coding', {
+    id: taskId,
+    coding: {
+      agent: '开发工程师（探针）', model: 'deepseek-v4.1-flash', branch: 'task/probe',
+      commits: [{ sha: 'abc1234', message: '探针提交', files: '2' }],
+      files: [{ path: 'src/probe.js', change: 'modified', additions: 3, deletions: 1 }],
+    },
+  })
+  await api('/task/coding', { id: taskId, action: 'review', status: 'approved', note: '探针评审：通过', by: '架构师（探针）' })
 
   browser = await puppeteer.launch({ executablePath: CHROME, headless: 'new', args: ['--no-sandbox'] })
   const page = await browser.newPage()
@@ -251,6 +268,42 @@ try {
     : { value: formRow.value, empty: normalizePointValue(formRow.value) === '', hint: formRow.text.includes('默认跟卡上的功能点') }
   check('② 新用例表单的功能点选择器默认继承卡（p1）', casePoint !== null && casePoint.value === 'p1', JSON.stringify(casePoint))
   check('② 选择器旁有「默认跟卡上的功能点」说明', casePoint?.hint === true)
+
+  /* ②a 卡面要看到「改了什么代码、评审过没过」：
+     研发干完活、架构评审完，人第一眼看的是卡片，而不是翻抽屉执行记录页签。 */
+  const chipInfo = await page.evaluate(() => {
+    const card = [...document.querySelectorAll('[data-kanban-card]')]
+      .find(node => String(node.textContent ?? '').includes('（探针）看板卡片'))
+    if (card === undefined) return null
+    const code = card.querySelector('[data-code]')
+    const review = card.querySelector('[data-coding-review]')
+    return {
+      codeText: String(code?.textContent ?? ''),
+      reviewText: String(review?.textContent ?? ''),
+      reviewState: review?.getAttribute('data-coding-review') ?? '',
+      reviewTitle: review?.getAttribute('title') ?? '',
+    }
+  })
+  check('②a 卡面显示代码改动规模', chipInfo !== null && /代码 1 文件/.test(chipInfo.codeText) && chipInfo.codeText.includes('+3') && chipInfo.codeText.includes('−1'), JSON.stringify(chipInfo?.codeText ?? null))
+  check('②a 卡面显示评审结论', chipInfo !== null && chipInfo.reviewState === 'approved' && chipInfo.reviewText.includes('评审通过'), JSON.stringify(chipInfo))
+  check('②a 评审 chip 悬停能看到评审人与意见', chipInfo !== null && chipInfo.reviewTitle.includes('架构师（探针）') && chipInfo.reviewTitle.includes('探针评审'))
+  const probeComments = await api('/task/comments', { id: taskId })
+  const commentBodies = (probeComments.json.comments ?? []).map(item => String(item.body ?? ''))
+  check('②a 评审结论自动补成评论（讨论区看得到）', commentBodies.some(body => body.includes('代码评审 · 通过') && body.includes('探针评审：通过')))
+
+  /* ②a2 执行记录 → 代码改动：真实 git diff 的入口。
+     探针卡没配代码目录，这里验两件事：区块在、而且说清了为什么读不到（不空着不报错）。 */
+  await page.evaluate(() => [...document.querySelectorAll('[role="tab"]')]
+    .find(node => String(node.textContent ?? '').trim().startsWith('执行记录'))?.click())
+  await page.waitForFunction(() => {
+    const node = document.querySelector('[data-drawer-diff]')
+    if (node === null) return false
+    return node.querySelector('[data-diff-range]') !== null || /没配代码目录|不是可用的 git 仓库|找不到基线分支/.test(String(node.textContent ?? ''))
+  }, { timeout: 8000, polling: 200 }).catch(() => {})
+  const diffSection = await page.evaluate(() => document.querySelector('[data-drawer-diff]')?.textContent ?? null)
+  check('②a2 执行记录里有「代码改动」区', diffSection !== null, diffSection === null ? '没找到 [data-drawer-diff]' : '')
+  check('②a2 读不到仓库时说清原因（不空着不报错）', diffSection !== null && /没配代码目录|不是可用的 git 仓库|找不到基线分支/.test(diffSection), String(diffSection ?? '').slice(0, 120))
+  await page.screenshot({ path: join(outDir, 'drawer-diff.png') })
 
   // ②b 交接契约：从抽屉写入 → 回读 /task/get（能创建的东西必须有能用的路径）
   await page.evaluate(() => [...document.querySelectorAll('[role="tab"]')]
@@ -508,6 +561,51 @@ try {
   check('⑥ 工作台块与块之间不贴在一起（间距 ≥ 8px）', layout.gaps.length === 0, layout.gaps.slice(0, 3).join(' / '))
   check('⑥ 工作台 KPI 不落单（没有一行只剩一张卡）', layout.orphan.length === 0, layout.orphan.join(' / '))
   await page.screenshot({ path: join(outDir, 'dashboard-layout.png') })
+
+  /* ⑦ 可选：打开一张**真卡**（已经跑过研发、有 worktree）看逐文件 diff。
+     探针自己造的卡没有仓库，只能验空态；真 diff 的渲染要靠这条（STUDIO_DIFF_CARD=标题片段）。 */
+  const diffCardTitle = String(process.env.STUDIO_DIFF_CARD ?? '').trim()
+  if (diffCardTitle !== '') {
+    await clickExact('看板')
+    const opened = await page.evaluate(title => {
+      const card = [...document.querySelectorAll('[data-kanban-card]')]
+        .find(node => String(node.textContent ?? '').includes(title))
+      if (card === undefined) return false
+      card.click()
+      return true
+    }, diffCardTitle)
+    check('⑦ 打开指定的真卡', opened === true, diffCardTitle)
+    await new Promise(resolve => setTimeout(resolve, 900))
+    const drawerTabs = await page.evaluate(() => [...document.querySelectorAll('[role="tab"]')].map(node => String(node.textContent ?? '').trim()))
+    check('⑦ 真卡的抽屉打开了', drawerTabs.some(label => label.includes('执行记录')), drawerTabs.join(' / ').slice(0, 160))
+    await page.evaluate(() => [...document.querySelectorAll('[role="tab"]')]
+      .find(node => String(node.textContent ?? '').trim().startsWith('执行记录'))?.click())
+    const rendered = await page.waitForFunction(() => {
+      const node = document.querySelector('[data-drawer-diff]')
+      if (node === null) return false
+      return node.querySelector('[data-diff-range]') !== null && node.querySelectorAll('[data-diff-file]').length > 0
+    }, { timeout: 20000, polling: 300 }).then(() => true).catch(() => false)
+    const diffInfo = await page.evaluate(() => {
+      const node = document.querySelector('[data-drawer-diff]')
+      return {
+        range: String(node?.querySelector('[data-diff-range]')?.textContent ?? ''),
+        totals: String(node?.querySelector('[data-diff-totals]')?.textContent ?? ''),
+        files: node?.querySelectorAll('[data-diff-file]').length ?? 0,
+        text: String(node?.textContent ?? '').slice(0, 200),
+      }
+    })
+    check('⑦ 真卡能看到逐文件 diff（分支 ← 基线 + 每个文件 +N −M）', rendered === true && diffInfo.files > 0, JSON.stringify(diffInfo))
+    const expanded = await page.evaluate(() => {
+      const row = document.querySelector('[data-drawer-diff] [data-diff-file] [role="button"]')
+      if (row === null) return false
+      row.click()
+      return true
+    })
+    await new Promise(resolve => setTimeout(resolve, 400))
+    const patchLines = await page.evaluate(() => document.querySelector('[data-drawer-diff] pre')?.querySelectorAll('div')?.length ?? 0)
+    check('⑦ 展开文件能看到逐行 patch', expanded === true && patchLines > 5, `patchLines=${patchLines}`)
+    await page.screenshot({ path: join(outDir, 'drawer-diff-real.png') })
+  }
 
   check('全程没有 pageerror / console 错误', errors.length === 0, errors.slice(0, 3).join(' | '))
 } finally {

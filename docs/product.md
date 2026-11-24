@@ -103,6 +103,7 @@ AI 是执行手，判定权在确定性规则和人手里。要变成 AI Native�
 | 19 | **多稿并定案** | 一卡多稿可对比；被配成设计闸门的列要「评审通过 **且** 已定案」才进开发；定案稿写进研发的派单提示词；老数据只有 `link` 时加载期归一成一稿，不许把已通过的卡挡回去 | ✅ 已做（0.9.24：`design.js` 的 `drafts` / `chosenId` + 抽屉「设计」页签；`tests/design-drafts.test.mjs` 8 条，含「重开 store 后迁移生效」与「派单提示词带上定案稿」） |
 | 20 | **交接契约** | 卡上有结构化 `handoff`（决策 / 假设 / 未决 / 风险 / 影响面）；抽屉「交接」页签可写；**派单提示词先读契约、再读最近评论**；清空保存 = 删除契约 | ✅ 已做（`src/host/handoff.js` + `studio_task_update.handoff` + 抽屉「交接」页签；`tests/handoff.test.mjs` 5 条，含 HTTP / 工具两个入口与提示词顺序；panel-probe 覆盖「页签五段可提交」） |
 | 21 | **发布审批进门禁** | 没人点过「审批通过」的版本不能发布：`releaseGate.blockers` 含「还没有发布审批」，`/release/publish` 直接拒绝 | ✅ 已做（2026-11-21：`src/host/release-model.js` 的 `releaseGate`；`tests/release-gate.test.mjs` 4 条，覆盖未审批 / 已审批 / 已发布 / 发布说明） |
+| 22 | **代码改动与评审可见** | 研发干完活，卡面就能看到「代码 N 文件 +A −D」与「评审通过 / 评审要改」；抽屉「执行记录 → 代码改动」给出**分支 vs 基线**的逐文件 patch 与「还有 N 个文件没提交」；**研发忘了登记执行记录**时，进「待评审」平台从 worktree 的 git 事实补一条（agent 标成「git 自动采集」，不覆盖自报）；代码评审结论（工具与面板两条路）一定补成讨论区里的评论 | ✅ 已做（2026-11-24：`src/host/task-diff.js` + 只读 `POST /task/diff` + 抽屉「代码改动」+ 生成式执行记录；`tests/task-diff.test.mjs` 14 条，真机 panel-probe ⑦ 用真卡验到逐文件 diff（9 文件 +800 −11）、e2e 验到自动采集与评论） |
 
 ## 5. 落地顺序
 

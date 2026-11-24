@@ -57,6 +57,16 @@ function Card({ task, onOpen, config, requirements, onPickRequirement, onPickPro
   const caseRun = caseSummaryOf(task)
   const artifactCount = (task.artifacts ?? []).length
   const noBody = artifactsWithoutBody(task).length
+  // 代码改动与评审结论：这是「研发干完活之后」人最先要看的两件事，以前只藏在抽屉的执行记录页签里。
+  const coding = task.coding ?? null
+  const codeFiles = Array.isArray(coding?.files) ? coding.files : []
+  const codeAdditions = codeFiles.reduce((sum, item) => sum + (Number(item.additions) || 0), 0)
+  const codeDeletions = codeFiles.reduce((sum, item) => sum + (Number(item.deletions) || 0), 0)
+  const reviewStatus = String(coding?.review?.status ?? '')
+  const reviewNote = String(coding?.review?.note ?? '').trim()
+  const reviewTitle = reviewStatus === 'approved'
+    ? `代码评审已通过${coding?.review?.by ? ` · ${coding.review.by}` : ''}${reviewNote === '' ? '' : `：${reviewNote.slice(0, 120)}`}`
+    : `代码评审要求修改${coding?.review?.by ? ` · ${coding.review.by}` : ''}${reviewNote === '' ? '' : `：${reviewNote.slice(0, 120)}`}`
   const overdue = task.dueAt > 0 && task.dueAt < Date.now() && task.status !== 'done'
   return h('div', {
     className: CARD,
@@ -142,6 +152,25 @@ function Card({ task, onOpen, config, requirements, onPickRequirement, onPickPro
       title: (task.design.spec.top ?? []).map(item => `${item.value} ×${item.count}${item.sample === '' ? '' : ` — ${item.sample}`}`).join('\\n') || '没有野值',
     }, task.design.spec.violations > 0 ? `规范 ${task.design.spec.violations} 处` : '规范达标'),
   task.type === 'bug' ? h(ChipField, { variant: 'rose', 'data-sev': task.severity ?? 'p2' }, `BUG ${String(task.severity || 'p2').toUpperCase()}`) : null,
+      // 改动的代码：卡面先给规模（多少文件、增删多少行），点开卡片能看逐行 diff。
+      codeFiles.length > 0 || (coding?.commits ?? []).length > 0
+        ? h(ChipField, {
+          variant: 'neutral',
+          'data-code': `${codeFiles.length}-${codeAdditions}-${codeDeletions}`,
+          title: [
+            `代码改动：${codeFiles.length} 个文件 +${codeAdditions} −${codeDeletions}`,
+            (coding?.commits ?? []).length > 0 ? `${coding.commits.length} 次提交` : '',
+            coding?.branch ? `分支 ${coding.branch}` : '',
+            '点开卡片 → 执行记录 → 代码改动，看逐行 diff',
+          ].filter(Boolean).join(' · '),
+        }, codeFiles.length > 0 ? `代码 ${codeFiles.length} 文件 +${codeAdditions} −${codeDeletions}` : `${coding.commits.length} 次提交`)
+        : null,
+      // 评审结论：审批人、结论与意见摘要都放进 title，卡面一眼看到「过没过」。
+      reviewStatus === 'approved'
+        ? h(ChipField, { variant: 'lime', 'data-coding-review': 'approved', title: reviewTitle }, '评审通过')
+        : reviewStatus === 'changes_requested'
+          ? h(ChipField, { variant: 'rose', 'data-coding-review': 'changes_requested', title: reviewTitle }, '评审要改')
+          : null,
       task.sla !== null && task.sla !== undefined && task.status !== 'done'
         ? h(ChipField, {
             variant: task.sla.state === 'overdue' ? 'rose' : task.sla.state === 'due_soon' ? 'yellow' : 'lime',

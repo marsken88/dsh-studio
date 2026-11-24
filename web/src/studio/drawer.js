@@ -164,6 +164,30 @@ function Drawer({ task, state, onClose, onChanged }) {
   const worktree = task.worktree ?? null
   const [worktreeMsg, setWorktreeMsg] = React.useState('')
   const [verify, setVerify] = React.useState({ busy: false, line: '', ok: null })
+  /* 代码改动：直接读仓库里的 git diff（只读路由，不推 revision）。
+     切到「执行记录」页签时按需加载；文件逐个折叠，点开看逐行 patch —— 人不用再自己去仓库敲 git diff。 */
+  const [diffView, setDiffView] = React.useState(null)
+  const [diffBusy, setDiffBusy] = React.useState(false)
+  const [diffError, setDiffError] = React.useState(null)
+  const [openDiff, setOpenDiff] = React.useState({})
+  const loadDiff = async () => {
+    if (diffBusy) return
+    setDiffBusy(true)
+    setDiffError(null)
+    try {
+      const out = await api('/task/diff', { id: task.id })
+      setDiffView(out ?? null)
+    } catch (cause) {
+      setDiffError(cause instanceof Error ? cause.message : String(cause))
+    } finally {
+      setDiffBusy(false)
+    }
+  }
+  React.useEffect(() => {
+    setDiffView(null)
+    setOpenDiff({})
+    setDiffError(null)
+  }, [task.id])
   // 项目检查：跑本地质量命令（npm run check 之类），结果由服务端写回卡片。
   const [qualityRun, setQualityRun] = React.useState({ busy: false, line: '' })
   const quality = task.quality ?? null
@@ -255,6 +279,13 @@ function Drawer({ task, state, onClose, onChanged }) {
     const node = bodyRef.current
     if (node !== null) node.scrollTop = 0
   }, [pane, task.id])
+  /* 第一次切到「执行记录」时自动读一次 git diff：否则要人先点一下「读取」才知道有这个功能。
+     已读过 / 正在读 / 上次报错都跳过，别每次轮询都去敲一遍 git；刷新有按钮。 */
+  React.useEffect(() => {
+    if (pane !== 'coding') return
+    if (diffView !== null || diffBusy || diffError !== null) return
+    void loadDiff()
+  }, [pane, task.id])
   const tabs = [
     { id: 'overview', label: '概览', hint: '标题、状态、负责人、阻塞原因与关键时间' },
     { id: 'content', label: '内容', hint: '需求正文与验收标准，支持 Markdown' },
@@ -263,7 +294,7 @@ function Drawer({ task, state, onClose, onChanged }) {
     { id: 'design', label: '设计', count: designDrafts.length > 0 ? designDrafts.length : '', hint: '多稿对比与定案' },
     { id: 'deliver', label: '交付物', count: artifacts.length > 0 ? artifacts.length : '', hint: '文档 / MR / 用例 / 报告；空的交付物会被准出拦下' },
     { id: 'test', label: '测试', count: caseSum.total > 0 ? `${casePass}/${caseSum.total}` : (checkSum.total > 0 ? `${doneCount}/${checkSum.total}` : ''), hint: '三层测试进度（单元/集成/端到端）、验收清单与执行记录；失败用例自动开缺陷' },
-    { id: 'coding', label: '执行记录', count: coding === null ? '' : (coding.review?.status === 'approved' ? '✓ 已评审' : ''), hint: 'AI 的分支、提交、改动文件；可以「核对代码事实」' },
+    { id: 'coding', label: '执行记录', count: coding === null ? '' : (coding.review?.status === 'approved' ? '✓ 已评审' : ''), hint: '代码改动（逐行 diff）、AI 的分支与提交、改动文件、评审结论；可以「核对代码事实」' },
     { id: 'discuss', label: '讨论', count: commentTotal > 0 ? commentTotal : '', hint: '评论；在评论里 @ 专家或专家团即派单' },
   ]
   const [draft, setDraft] = React.useState({ title: task.title, requirement: task.requirement, gitlabIssue: task.gitlabIssue, gitlabMR: task.gitlabMR?.url ?? '', pointId: task.pointId ?? '' })
@@ -1145,8 +1176,13 @@ function Drawer({ task, state, onClose, onChanged }) {
               collabQuality === null ? '项目检查未跑' : `项目检查${collabQuality.ok === true ? '通过' : '未过'}`,
             ].filter(Boolean).join(' · ')
             const review = String(collabCoding.review?.status ?? '')
-            if (review === 'approved') return roleRow('dev', '研发', 'ok', '实现已评审', bits)
-            if (review === 'changes_requested') return roleRow('dev', '研发', 'bad', '评审要改', `${bits}${collabCoding.review?.note ? ` · ${String(collabCoding.review.note).slice(0, 80)}` : ''}`)
+            /* 评审意见以前只在「执行记录」页签里，概览这里只写「实现已评审」四个字；
+               把评审人与意见摘要带出来，人不必再翻页签才知道架构师说了什么。 */
+            const reviewBy = String(collabCoding.review?.by ?? '').trim()
+            const reviewNote = String(collabCoding.review?.note ?? '').trim()
+            const reviewDetail = `${reviewBy === '' ? '' : ` · 评审人 ${reviewBy}`}${reviewNote === '' ? '' : ` · 评审意见：${reviewNote.slice(0, 80)}${reviewNote.length > 80 ? '…' : ''}`}`
+            if (review === 'approved') return roleRow('dev', '研发', 'ok', '实现已评审', `${bits}${reviewDetail}`)
+            if (review === 'changes_requested') return roleRow('dev', '研发', 'bad', '评审要改', `${bits}${reviewDetail}`)
             return roleRow('dev', '研发', 'warn', '实现待评审', bits)
           })(),
           (() => {
@@ -1481,6 +1517,80 @@ function Drawer({ task, state, onClose, onChanged }) {
           task.design?.spec == null ? null : h('div', { className: HINT, style: { marginTop: 8 } }, `规范体检：查了 ${task.design.spec.checked} 个元素，${task.design.spec.violations} 处野值`),
         ),
       ),
+      h(Section, { pane: 'coding', current: pane, id: 'diff' },
+        h(SectionHead, null, '代码改动（git diff）',
+          h('span', { className: HINT }, '直接读仓库里的真实改动：卡的分支对比基线。研发自报的文件清单是另一回事，这里不采信')),
+        h('div', { className: SECTION_BODY, 'data-drawer-diff': '' },
+          (() => {
+            if (diffBusy) return h('div', { className: HINT, 'data-diff-loading': '' }, '读取中…')
+            if (diffError !== null) {
+              return h('div', { className: ROW, style: { gap: 8, alignItems: 'center' } },
+                h('div', { className: ERR_TEXT }, `读不到代码改动：${diffError}`),
+                h(Button, { variant: 'ghost', size: 'sm', onClick: () => void loadDiff() }, '再试一次'))
+            }
+            if (diffView === null) {
+              return h('div', { className: ROW, style: { gap: 8, alignItems: 'center' } },
+                h(Button, { variant: 'secondary', size: 'sm', onClick: () => void loadDiff() }, '读取代码改动'),
+                h('span', { className: HINT }, '从卡的 worktree（或项目代码目录）读分支相对基线的改动'))
+            }
+            if (String(diffView.skipped ?? '') !== '') return h(EmptyState, { title: diffView.skipped })
+            if (diffView.ok !== true) return h(EmptyState, { title: '读不到代码改动' })
+            const files = Array.isArray(diffView.files) ? diffView.files : []
+            const totals = diffView.totals ?? { files: 0, additions: 0, deletions: 0 }
+            const uncommitted = diffView.uncommitted ?? { total: 0, files: [], additions: 0, deletions: 0 }
+            return h('div', { className: 'flex min-w-0 flex-col gap-2' },
+              h('div', { className: ROW, style: { gap: 8, alignItems: 'center' } },
+                h(ChipField, { variant: 'gray', 'data-diff-range': '1' }, `${diffView.branch || '(无分支)'} ← ${diffView.base}`),
+                h('span', { className: HINT, 'data-diff-totals': `${totals.files}-${totals.additions}-${totals.deletions}` },
+                  `${totals.files} 个文件 · +${totals.additions} −${totals.deletions}${diffView.truncated === true ? '（已截断）' : ''}`),
+                h(Button, { variant: 'ghost', size: 'sm', disabled: diffBusy, onClick: () => void loadDiff() }, '刷新')),
+              h('div', { className: HINT }, `仓库：${diffView.dir}`),
+              uncommitted.total > 0
+                ? h('div', { className: 'text-caption-1-regular text-status-yellow-text', 'data-diff-dirty': uncommitted.total },
+                  `还有 ${uncommitted.total} 个文件没提交（+${uncommitted.additions} −${uncommitted.deletions}）：这些改动不在分支上，评审和测试都看不到`)
+                : null,
+              files.length === 0
+                ? h('div', { className: HINT }, '这条分支相对基线没有代码改动。')
+                : h('div', { className: 'flex min-w-0 flex-col gap-1' }, files.map(item => {
+                  const open = openDiff[item.path] === true
+                  const toggle = () => setOpenDiff(previous => ({ ...previous, [item.path]: !open }))
+                  return h('div', { key: item.path, className: 'flex min-w-0 flex-col gap-1 rounded-lg border border-separator-border p-2', 'data-diff-file': item.path },
+                    h('div', {
+                      className: 'flex min-w-0 cursor-pointer flex-wrap items-center gap-2',
+                      role: 'button',
+                      tabIndex: 0,
+                      onClick: toggle,
+                      onKeyDown: event => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); toggle() } },
+                    },
+                      h('span', { className: 'font-mono text-caption-1-regular text-text-primary' }, item.path),
+                      h('span', { className: 'text-caption-1-regular text-state-success-text' }, `+${item.additions}`),
+                      h('span', { className: 'text-caption-1-regular text-text-error-primary' }, `−${item.deletions}`),
+                      item.binary === true ? h('span', { className: HINT }, '二进制') : null,
+                      h('span', { className: HINT }, open ? '收起' : '展开 diff')),
+                    open
+                      ? (item.patch === ''
+                        ? h('div', { className: HINT }, '没有可显示的 patch（二进制文件或改动太大）')
+                        : h('pre', { className: 'max-h-[420px] overflow-auto rounded-md bg-background-secondary-default p-2 text-caption-1-regular', style: { whiteSpace: 'pre-wrap', wordBreak: 'break-word', margin: 0 } },
+                          String(item.patch).split('\n').map((line, index) => h('div', {
+                            key: `d-${index}`,
+                            className: line.startsWith('+++') || line.startsWith('---')
+                              ? 'text-text-tertiary'
+                              : line.startsWith('+')
+                                ? 'text-state-success-text'
+                                : line.startsWith('-')
+                                  ? 'text-text-error-primary'
+                                  : line.startsWith('@@')
+                                    ? 'text-accent-600'
+                                    : 'text-text-secondary',
+                          }, line === '' ? ' ' : line))))
+                      : null,
+                  )
+                })),
+              diffView.omitted > 0 ? h('div', { className: HINT }, `还有 ${diffView.omitted} 个文件没展开（改动太多）`) : null,
+            )
+          })(),
+        ),
+      ),
       h(Section, { pane: 'coding', current: pane, id: 'skill' },
         h(SectionHead, null, '技能沉淀',
           h('span', { className: HINT }, '把这张卡上真实发生过的证据汇总成一条技能草稿（默认停用）')),
@@ -1643,7 +1753,10 @@ function Drawer({ task, state, onClose, onChanged }) {
                   `${item.path}${item.additions > 0 ? ` +${item.additions}` : ''}${item.deletions > 0 ? ` -${item.deletions}` : ''}`)),
                 coding.files.length > 12 ? h('span', { className: HINT }, `还有 ${coding.files.length - 12} 个`) : null,
               ),
-              coding.review.note === '' ? null : h('div', { className: NOTE_BOX }, `评审意见：${coding.review.note}`),
+              coding.review.note === '' && coding.review.status === 'pending'
+                ? null
+                : h('div', { className: NOTE_BOX, 'data-review-note': coding.review.status },
+                  `评审意见${coding.review.by === '' ? '' : `（${coding.review.by}${coding.review.at > 0 ? ` · ${fmtTime(coding.review.at)}` : ''}）`}：${coding.review.note === '' ? '（没有填写意见）' : coding.review.note}`),
               h('div', { className: ROW },
                 h(TextField, {
                   style: { flex: 1 }, value: reviewNote, placeholder: '评审意见（可选，写清文件/行为什么/怎么改）',

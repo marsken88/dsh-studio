@@ -131,6 +131,9 @@ export function isSelfReview(author, reviewer) {
   return a === b || a.includes(b) || b.includes(a)
 }
 
+/** 评审结论文案：评论标题、面板提示统一取这一份，别一处写「通过」一处写「已通过」。 */
+export const CODING_REVIEW_VERDICT = { approved: '通过', changes_requested: '要求修改', pending: '待定' }
+
 /** 评审结论怎么定：显式给了合法状态就按它，否则一律 pending。
  *
  *  以前工具与 HTTP 两条路都默认写成 approved —— "看一眼就算通过"，评审没有意义。

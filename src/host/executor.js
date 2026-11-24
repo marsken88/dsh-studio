@@ -20,6 +20,7 @@ import { larkUploadArgs } from './lark-upload.js'
 import { commandArgs } from './cmd-args.js'
 import { ensureKindFolder, ensureRequirementFolder } from './drive-sync.js'
 import { isStalled } from './dispatch-state.js'
+import { collectCodingFromWorktree } from './task-diff.js'
 import { RUN_LOG, parseMentions } from './dispatcher.js'
 import { appendTeamMemory } from './team-memory.js'
 import { pickRunner, registerRunner } from './runners.js'
@@ -125,6 +126,17 @@ export async function verifyCodingRecord(state, task) {
     dirty: dirty.slice(0, 10),
     ok: branchOk && missingCommits.length === 0 && missingFiles.length === 0,
   }
+}
+
+/**
+ * 研发没登记执行记录时，从 worktree 的 git 事实补一条（平台采集，不做推断）。
+ * 实现在 task-diff.js：那边同时管着「读什么算改动」的口径，避免两处各解析一遍 git 输出。
+ */
+export async function autoCollectCoding(store, taskId) {
+  return collectCodingFromWorktree(store, taskId, {
+    git: args => runCommand('git', args, 30_000),
+    commentTask,
+  })
 }
 
 /** 把核对结果写成一句人话。 */
@@ -1571,6 +1583,8 @@ export async function updateTask(store, id, patch) {
   }
   // 卡进「待评审」时自动核对一次代码事实：AI 说改了什么，仓库里得真有。
   if (moved !== null && moved.to === 'review') {
+    // 没登记执行记录就先从 git 补一条（否则「看不到改动的代码」永远修不好），再做事实核对。
+    await autoCollectCoding(store, id).catch(() => {})
     await autoVerifyCoding(store, id).catch(() => {})
   }
   // 版本号在上面那次 mutate 里已经 +1（不再额外写一次盘）。
