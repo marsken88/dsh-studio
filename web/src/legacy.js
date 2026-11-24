@@ -1074,6 +1074,7 @@ html[data-dsh-theme="light"] [class*="rightbarCol"] { background: #fafafa !impor
             },
           })
           setStatus('已保存')
+          setDirty(false)
           await onChanged()
         } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)) } finally { setBusy(false) }
       }
@@ -1116,7 +1117,7 @@ html[data-dsh-theme="light"] [class*="rightbarCol"] { background: #fafafa !impor
         health: ['集成健康', '飞书通知、GitLab、飞书云盘、代码隔离四条外部通道最近一次是成功还是失败。以前这些失败只写进日志，现在会在这里亮出来，坏了能看见、能补一次。'],
       }
 
-      const saveBar = h(SettingsSaveBar, { busy, status, error, onSave: save })
+      const saveBar = h(SettingsSaveBar, { busy, status, error, dirty, onSave: save })
 
       const nav = [
         { group: '团队' },

@@ -596,6 +596,13 @@ try {
     banner: document.querySelector('[data-settings-dirty-banner]') !== null,
   }))
   check('④g 文本输入会标出「未保存」', typedDirty === true && dirtyState.flag === '1' && dirtyState.banner === true, JSON.stringify(dirtyState))
+  const savebar = await page.evaluate(() => {
+    const node = document.querySelector('[data-settings-savebar]')
+    if (node === null) return null
+    const rect = node.getBoundingClientRect()
+    return { dirty: node.getAttribute('data-dirty'), text: String(node.textContent ?? ''), inView: rect.bottom > 0 && rect.top < window.innerHeight }
+  })
+  check('④g 保存条粘在视口内并标「未保存」', savebar !== null && savebar.dirty === '1' && savebar.text.includes('未保存') && savebar.inView === true, JSON.stringify(savebar))
   await page.evaluate(() => [...document.querySelectorAll('[data-settings-nav-item]')]
     .find(node => String(node.textContent ?? '').includes('专家'))?.click())
   await new Promise(resolve => setTimeout(resolve, 600))

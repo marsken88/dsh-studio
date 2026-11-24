@@ -103,7 +103,7 @@ flowchart LR
 | --- | --- |
 | ![settings-gates](https://raw.githubusercontent.com/marsken88/dsh-studio/main/docs/images/settings-gates.png) | ![settings-skills](https://raw.githubusercontent.com/marsken88/dsh-studio/main/docs/images/settings-skills.png) |
 
-设置页有**未保存提醒**：文本改过却没点保存时，页内会挂一条黄色提示，切到别的分区会先确认「丢弃并切换」——18 个分区里那些「改完点保存」的字段不会再静默丢。
+设置页有**未保存提醒**：文本改过却没点保存时，页内会挂一条黄色提示，切到别的分区会先确认「丢弃并切换」——18 个分区里那些「改完点保存」的字段不会再静默丢。页面级草稿（看板外观 / 角色与模型 / 自动派单）的**保存条粘在面板底部**，滚到哪都能直接点，并标「未保存」；其余分区是分区保存（抽屉 / 行内按钮）或即时保存的开关（一拨就生效），不强行合并——不同对象混成一个大草稿容易误保存。
 
 截图不是手截的：`npm run shots -- --base http://127.0.0.1:<dsh 端口>`（`tools/visual/capture.mjs`）
 会造一套**演示数据**（标题都带「演示·」）、用**真实 client.js** 渲染面板、逐页截图并断言没有「渲染失败」，

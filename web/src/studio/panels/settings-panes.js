@@ -39,11 +39,16 @@ export function SettingsField({ form, setForm, fieldKey, label, hint, type }) {
   )
 }
 
-/** 保存条：主按钮 + 结果/错误小字（原来复用同一个 saveBar 节点，这里保持节点语义）。 */
-export function SettingsSaveBar({ busy, status, error, onSave }) {
+/** 保存条：主按钮 + 结果/错误小字。粘在面板底部，滚到哪都能直接保存。 */
+export function SettingsSaveBar({ busy, status, error, dirty, onSave }) {
   const { h } = client()
-  return h('div', { className: ROW, 'data-settings-savebar': '' },
+  return h('div', {
+    className: 'sticky bottom-0 z-10 flex min-w-0 flex-wrap items-center gap-3 rounded-xl border border-separator-border bg-background-primary-default px-4 py-3 shadow-sm',
+    'data-settings-savebar': '',
+    'data-dirty': dirty === true ? '1' : '0',
+  },
     h(Button, { variant: 'primary', size: 'sm', 'data-action': 'save', disabled: busy, onClick: () => void onSave() }, busy ? '保存中…' : '保存'),
+    dirty === true ? h('span', { className: 'text-caption-1-medium text-text-secondary', 'data-savebar-dirty': '1' }, '未保存') : null,
     status !== null ? h('span', { className: OK }, status) : null,
     error !== null ? h('span', { className: ERR }, error) : null,
   )
