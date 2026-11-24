@@ -26,7 +26,7 @@ const ROW = 'flex min-w-0 flex-wrap items-center gap-2'
 const ACTIONS = 'flex flex-wrap items-center gap-2'
 const LISTROW = 'flex min-w-0 items-start justify-between gap-4 border-b border-separator-border py-3 last:border-b-0'
 const LISTROW_MAIN = 'flex min-w-0 flex-1 flex-col gap-1'
-const STATBOX = 'flex min-w-0 flex-col gap-0.5 rounded-lg border border-separator-border bg-background-primary-default px-3 py-2'
+const STATBOX = 'flex min-w-0 flex-col gap-1 rounded-lg border border-separator-border bg-background-primary-default px-3 py-2'
 const STATVALUE = 'text-title-2-semibold text-text-primary tabular-nums'
 const CODE = 'inline-flex items-center rounded-md border border-separator-border bg-background-secondary-default px-1 font-mono text-caption-1-regular text-text-secondary'
 const LINK = 'text-caption-1-medium text-accent-600 hover:underline'
@@ -1057,10 +1057,10 @@ export     function RequirementsPage({ state, onOpenTask, onChanged, createSigna
                 baseDiff.rows.slice(0, 400).map((row, index) => h('div', {
                   key: index,
                   className: row.kind === 'add'
-                    ? 'whitespace-pre-wrap rounded bg-background-tertiary-default px-2 py-0.5 text-status-lime-text'
+                    ? 'whitespace-pre-wrap rounded bg-background-tertiary-default px-2 py-1 text-status-lime-text'
                     : row.kind === 'del'
-                      ? 'whitespace-pre-wrap rounded bg-background-tertiary-error px-2 py-0.5 text-text-error-primary'
-                      : 'whitespace-pre-wrap px-2 py-0.5 text-text-tertiary',
+                      ? 'whitespace-pre-wrap rounded bg-background-tertiary-error px-2 py-1 text-text-error-primary'
+                      : 'whitespace-pre-wrap px-2 py-1 text-text-tertiary',
                   'data-kind': row.kind,
                 }, `${row.kind === 'add' ? '+' : row.kind === 'del' ? '−' : ' '} ${row.text}`)),
                 baseDiff.rows.length > 400 ? h('div', { className: HINT }, `（还有 ${baseDiff.rows.length - 400} 行未显示）`) : null,

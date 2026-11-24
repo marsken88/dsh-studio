@@ -15,7 +15,7 @@ const CTX_ROW = 'flex min-w-0 cursor-pointer items-center gap-3 border-t border-
 const CTX_DETAIL = 'flex min-w-0 flex-col gap-2 border-t border-dashed border-separator-border px-2 pb-3 pt-2'
 const CTX_STACK = { display: 'flex', height: 10, borderRadius: 5, overflow: 'hidden', background: 'var(--color-separator-border)', margin: '4px 0 10px' }
 const CTX_LEGEND = { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '4px 16px', fontSize: 12 }
-const CTX_CHIP = 'flex min-w-[84px] flex-col gap-0.5 rounded-lg border border-separator-border bg-background-primary-default px-3 py-2'
+const CTX_CHIP = 'flex min-w-[84px] flex-col gap-1 rounded-lg border border-separator-border bg-background-primary-default px-3 py-2'
 
 /* 页面级样式：全部走 BoardUI token + Tailwind 工具类（4px 档位）。 */
 /* [&>*]:shrink-0 —— 纵向 flex 默认会压缩子项：内容高于视口时每个分区被压扁，
@@ -269,7 +269,7 @@ export function AnalyticsPage({ state, onOpenTask, onFixPrices }) {
             `可执行覆盖 ${cases.rate === null || cases.rate === undefined ? '—' : pct(cases.rate)}（目标 ≥60%）· ${rows.length} 张卡的用例还没有可执行断言`),
           rows.map(row => h('button', {
             key: row.id,
-            className: 'flex w-full items-center gap-3 rounded-lg px-2 py-1.5 text-left hover:bg-background-primary-hover',
+            className: 'flex w-full items-center gap-3 rounded-lg px-2 py-2 text-left hover:bg-background-primary-hover',
             onClick: () => onOpenTask(row.id),
           },
             h('span', { className: 'font-mono text-caption-1-medium text-text-secondary' }, row.code || row.id),

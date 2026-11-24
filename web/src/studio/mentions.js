@@ -18,7 +18,7 @@ const TABS_WRAP = 'shrink-0 border-b border-separator-border p-2'
 const TAB_ON = 'flex-1 rounded-md bg-background-primary-default px-3 py-1 text-caption-1-medium text-text-primary shadow-sm'
 const TAB_OFF = 'flex-1 rounded-md px-3 py-1 text-caption-1-medium text-text-tertiary'
 const GROUP = 'sticky top-0 z-10 bg-background-primary-default px-5 pb-1 pt-3 text-caption-2-medium text-text-tertiary'
-const ITEM = 'flex h-10 w-full cursor-pointer items-center gap-2.5 px-5 text-left text-body-2-regular text-text-primary hover:bg-background-secondary-default data-[active="1"]:bg-background-secondary-default'
+const ITEM = 'flex h-10 w-full cursor-pointer items-center gap-2 px-5 text-left text-body-2-regular text-text-primary hover:bg-background-secondary-default data-[active="1"]:bg-background-secondary-default'
 const AVATAR = 'flex size-7 flex-none items-center justify-center rounded-full'
 /* 参考稿的头像是彩色圆形底。它的颜色按「角色」分：产品紫 / 架构蓝 / 研发绿 / 测试橙 / 团灰。
    用内联 hsl 而不是 Tailwind 调色板类——后者要看主题里有没有那几个 scale，缺了就是白底。 */

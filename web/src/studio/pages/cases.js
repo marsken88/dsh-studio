@@ -298,8 +298,8 @@ export function CasesPage({ state, onOpenTask, onOpenBoard }) {
           regressions.slice(0, 4).map(item => h('span', {
             key: String(item.at),
             className: (Number(item.failed) || 0) + (Number(item.failedCards) || 0) > 0
-              ? 'rounded-md bg-background-tertiary-error px-2 py-0.5 text-caption-1-regular text-text-error-primary'
-              : 'rounded-md bg-background-secondary-default px-2 py-0.5 text-caption-1-regular text-text-secondary',
+              ? 'rounded-md bg-background-tertiary-error px-2 py-1 text-caption-1-regular text-text-error-primary'
+              : 'rounded-md bg-background-secondary-default px-2 py-1 text-caption-1-regular text-text-secondary',
             'data-bad': (Number(item.failed) || 0) + (Number(item.failedCards) || 0) > 0 ? '1' : '0',
             title: `${new Date(item.at).toLocaleString('zh-CN')} · ${item.by || '人'}`,
           }, `${fmtTime(item.at)} ${item.by || ''} · ${item.cards} 卡 / ${item.total} 条 · 通过 ${item.passed} · 不通过 ${item.failed}${item.bugs > 0 ? ` · 缺陷 ${item.bugs}` : ''}`)),

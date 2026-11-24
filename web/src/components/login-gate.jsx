@@ -107,7 +107,7 @@ export function ShadcnLoginGate({ config, theme, message, onDone, onClose, overl
           </span>
           <div className="min-w-0">
             <div className="truncate text-[15px] font-semibold leading-tight text-text-primary">{title}</div>
-            <div className="text-[11px] leading-tight text-muted-foreground">需求与任务工作空间</div>
+            <div className="text-[12px] leading-tight text-muted-foreground">需求与任务工作空间</div>
           </div>
         </div>
       </div>
@@ -181,7 +181,7 @@ export function ShadcnLoginGate({ config, theme, message, onDone, onClose, overl
             </div>
           )}
           {ldapHint ? (
-            <div className="text-[11px] leading-relaxed text-muted-foreground">
+            <div className="text-[12px] leading-relaxed text-muted-foreground">
               连不上目录服务时，切到「本地超管」用平台账号进来；网络打通后再用域账号。
             </div>
           ) : null}
@@ -193,7 +193,7 @@ export function ShadcnLoginGate({ config, theme, message, onDone, onClose, overl
       </div>
 
       <div className="mt-4 flex flex-col items-stretch gap-2 border-t border-separator-border px-5 py-3">
-        <div className="truncate text-[11px] leading-relaxed text-muted-foreground" title={
+        <div className="truncate text-[12px] leading-relaxed text-muted-foreground" title={
           mode === 'ldap' ? `${config?.ldap?.url ?? '—'} · BASE ${config?.ldap?.baseDN ?? '—'}` : ''
         }>
           {mode === 'ldap'
@@ -201,7 +201,7 @@ export function ShadcnLoginGate({ config, theme, message, onDone, onClose, overl
             : '口令以 scrypt 哈希存在服务端，改密码在「设置 → 统一登录（LDAP）」'}
         </div>
         <div className="flex items-center justify-between">
-          <span className="text-[11px] text-muted-foreground">
+          <span className="text-[12px] text-muted-foreground">
             {mode === 'local' ? '回车即登录' : '账号是域账号，不是邮箱'}
           </span>
           {typeof onClose === 'function' ? (

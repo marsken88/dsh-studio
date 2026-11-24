@@ -21,7 +21,7 @@ const ROW = 'flex min-w-0 flex-wrap items-center gap-2'
 const ACTIONS = 'flex flex-wrap items-center gap-2'
 const LISTROW = 'flex min-w-0 items-start justify-between gap-4 border-b border-separator-border py-3 last:border-b-0'
 const LISTROW_MAIN = 'flex min-w-0 flex-1 flex-col gap-1'
-const STATBOX = 'flex min-w-0 flex-col gap-0.5 rounded-lg border border-separator-border bg-background-primary-default px-3 py-2'
+const STATBOX = 'flex min-w-0 flex-col gap-1 rounded-lg border border-separator-border bg-background-primary-default px-3 py-2'
 const STATVALUE = 'text-title-2-semibold text-text-primary tabular-nums'
 
 export function ReleasesPage({ state, onOpenTask }) {
