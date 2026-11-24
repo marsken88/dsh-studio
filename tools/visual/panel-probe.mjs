@@ -347,6 +347,12 @@ try {
     return (row.compareDocumentPosition(tier) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0
   })
   check('②c 三层进度排在用例列表之后', orderOk === true)
+  const tierBox = await page.evaluate(() => {
+    const node = document.querySelector('[data-test-plan]')
+    if (node === null) return null
+    return { open: node.open === true, summary: String(node.querySelector('summary')?.textContent ?? '').replace(/\s+/g, ' ').slice(0, 100) }
+  })
+  check('②c 三层块默认收起成一行摘要', tierBox !== null && tierBox.open === false && /单元/.test(tierBox.summary), JSON.stringify(tierBox))
   const caseEditOpened = await page.evaluate(() => {
     const button = [...document.querySelectorAll('button')].find(node => String(node.textContent ?? '').trim() === '改定义')
     if (button === undefined) return false

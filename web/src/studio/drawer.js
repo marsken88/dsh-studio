@@ -395,8 +395,10 @@ function Drawer({ task, state, onClose, onChanged }) {
     }).catch(() => { if (alive) setParts({ cases: [], checklist: [], testRuns: [], testPlan: null, plan: null }) })
     return () => { alive = false }
   }, [task.id, task.updatedAt, caseSum.total, caseSum.pass, caseSum.fail, checkSum.total, checkSum.done])
-  const [pane, setPane] = React.useState('overview')
-  React.useEffect(() => { setPane('overview') }, [task.id])
+  /* 打开卡默认落在最该干活的页：待测试 → 测试，待评审 → 执行记录，其余回概览。 */
+  const initialPaneFor = status => status === 'test' ? 'test' : status === 'review' ? 'coding' : status === 'accept' ? 'test' : 'overview'
+  const [pane, setPane] = React.useState(() => initialPaneFor(task.status))
+  React.useEffect(() => { setPane(initialPaneFor(task.status)) }, [task.id])
   // 切页签时把内容滚回顶部，否则从长页面切到「讨论」会停在中间，看起来像只显示了半截。
   React.useEffect(() => {
     const node = bodyRef.current
@@ -1126,16 +1128,20 @@ function Drawer({ task, state, onClose, onChanged }) {
     const required = testPlanTiers.filter(row => CASE_TIERS.includes(row.tier) && row.tier !== 'other')
     if (required.length === 0) return null
     const gapSet = new Set(testPlanGaps.map(gap => gap.tier))
-    return h('div', { className: PANEL, 'data-test-plan': '' },
-      h('div', { className: PANEL_HEAD },
-        h('div', { className: GROW },
-          h('div', { className: PANEL_LINE }, '三层测试进度'),
-          h('div', { className: HINT }, '单元 / 集成 / 端到端：每条线要么有能跑的用例，要么写明为什么验不了（门禁按这个判定）'),
-        ),
+    return h('details', { className: PANEL, 'data-test-plan': '' },
+      h('summary', { className: 'flex cursor-pointer list-none flex-wrap items-center gap-2 border-b border-separator-border px-4 py-3 [&::-webkit-details-marker]:hidden', 'data-test-plan-summary': '' },
+        h('span', { className: 'text-body-2-semibold text-text-primary' }, '三层测试'),
+        required.map(row => h(ChipField, {
+          key: row.tier,
+          variant: row.applicable === false ? 'neutral' : (row.fail > 0 ? 'rose' : (row.executable === 0 ? 'yellow' : 'lime')),
+          title: `${CASE_TIER_FULL[row.tier]}：通过 ${row.pass}/${row.total}，可执行 ${row.executable}`,
+        }, `${CASE_TIER_LABEL[row.tier]} ${row.pass}/${row.total}`)),
         testPlanGaps.length === 0
           ? h(ChipField, { variant: 'lime', 'data-test-gap': '0' }, '三条线齐全')
           : h(ChipField, { variant: 'yellow', 'data-test-gap': testPlanGaps.map(gap => gap.tier).join(',') }, `缺 ${testPlanGaps.map(gap => CASE_TIER_LABEL[gap.tier] ?? gap.tier).join('/')}`),
+        h('span', { className: 'ml-auto text-caption-1-regular text-text-tertiary' }, '展开明细'),
       ),
+      h('div', { className: 'flex min-w-0 flex-col gap-2 p-4' },
       required.map(row => h('div', {
         key: row.tier,
         className: LIST_LINE,
@@ -1189,6 +1195,7 @@ function Drawer({ task, state, onClose, onChanged }) {
           testRuns.length > 1 ? h('span', { className: HINT }, `共 ${testRuns.length} 次`) : null,
         )
       })(),
+      ),
     )
   }
 
@@ -2288,6 +2295,7 @@ function Drawer({ task, state, onClose, onChanged }) {
           }, caseRun.busy ? '运行中…' : [uiIcon(h, 'run'), ' 跑用例'])),
         h('div', { className: SECTION_BODY, 'data-scroll': '1' },
           caseEditBlock(),
+          caseRun.busy ? h('div', { className: 'sticky top-0 z-10 rounded-lg bg-background-primary-default px-2 py-1 text-caption-1-regular text-text-secondary', 'data-case-running': '' }, '正在跑用例…') : null,
           caseRun.note === '' ? null : h('div', { className: HINT, style: { position: 'sticky', top: 0, zIndex: 5, background: 'inherit' }, 'data-run-note': '' }, caseRun.note),
           h('div', { className: 'flex min-w-0 flex-wrap items-center gap-2', 'data-case-filter': '' },
             ...[['all', '全部', caseSum.total], ['pending', '未跑', casePending], ['fail', '不通过', caseFail], ['skip', '跳过', caseSkip], ['pass', '通过', casePass]]
@@ -2364,7 +2372,7 @@ function Drawer({ task, state, onClose, onChanged }) {
                 if (item.http != null) return h('div', { className: ART_REF }, `接口：${item.http.method} ${item.http.url} → 期望 ${item.http.expectStatus}${item.http.expectContains ? ` 且含 «${item.http.expectContains}»` : ''}`)
                 return null
               })(),
-                item.lastRun == null ? null : h('div', { className: ART_REF }, `${item.lastRun.ok ? '通过' : '不通过'} 最近执行：${item.lastRun.status === 0 ? item.lastRun.error : `${item.lastRun.status} · ${item.lastRun.ms}ms`}（${new Date(item.lastRun.at).toLocaleString('zh-CN')}）`),
+                item.lastRun == null ? null : h('div', { className: ART_REF }, `${item.lastRun.ok ? '通过' : '不通过'} 最近执行：${item.lastRun.status === 0 ? item.lastRun.error : `${item.lastRun.status} · ${item.lastRun.ms}ms`}（${fmtTime(item.lastRun.at)}）`),
                 item.lastRun?.response ? h('div', { className: NOTE_BOX }, `响应片段：${String(item.lastRun.response).slice(0, 400)}${String(item.lastRun.response).length > 400 ? '…' : ''}`) : null,
                 (item.lastRun?.steps ?? []).length === 0 ? null : h('div', { className: ART_REF }, `步骤：${item.lastRun.steps.map(step => `${step.ok ? '' : '失败 · '}${step.method} ${step.url}${step.status === 0 ? '' : ` → ${step.status}`}`).join('；')}`),
                 (item.http?.steps ?? []).length === 0 ? null : h(ChipField, { variant: 'soft' }, `多步 ${item.http.steps.length}`),
