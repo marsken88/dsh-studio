@@ -309,6 +309,16 @@ try {
   await new Promise(resolve => setTimeout(resolve, 800))
   const staleChip = await page.evaluate(() => document.querySelector('[data-drawer-case-row] [data-stale="1"]')?.textContent ?? '')
   check('②c 文档改版后的通过用例标「需复跑」', staleChip.includes('需复跑'), staleChip)
+  const caseList = await page.evaluate(() => ({
+    rows: document.querySelectorAll('[data-drawer-case-row]').length,
+    details: document.querySelectorAll('[data-case-details]').length,
+    expandable: document.querySelector('[data-case-expand]') !== null,
+  }))
+  check('②c 用例默认是紧凑卡片（明细收起 + 有详情按钮）', caseList.rows > 0 && caseList.details === 0 && caseList.expandable === true, JSON.stringify(caseList))
+  await page.evaluate(() => { document.querySelector('[data-case-expand]')?.click() })
+  await new Promise(resolve => setTimeout(resolve, 400))
+  const openedDetails = await page.evaluate(() => document.querySelectorAll('[data-case-details]').length)
+  check('②c 点「详情」展开这条用例的明细', openedDetails === 1, String(openedDetails))
 
   /* ②a2 执行记录 → 代码改动：真实 git diff 的入口。
      探针卡没配代码目录，这里验两件事：区块在、而且说清了为什么读不到（不空着不报错）。 */

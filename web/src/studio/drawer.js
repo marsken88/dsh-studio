@@ -204,6 +204,8 @@ function Drawer({ task, state, onClose, onChanged }) {
   const [newCase, setNewCase] = React.useState({ title: '', expected: '', steps: '', stepsText: '', type: 'functional', tier: '', priority: 'p2', preconditions: '', pointId: task.pointId ?? '' })
   const [caseRun, setCaseRun] = React.useState({ busy: false, note: '' })
   const [caseGen, setCaseGen] = React.useState({ busy: false, note: '' })
+  /* 用例明细默认收起：接口/响应/步骤/功能点/记录一展开就是十几行，35 条用例滚不动。 */
+  const [expandedCaseIds, setExpandedCaseIds] = React.useState(() => new Set())
   const [codingDraft, setCodingDraft] = React.useState(null)
   const [reviewNote, setReviewNote] = React.useState('')
   const coding = task.coding ?? null
@@ -2210,18 +2212,21 @@ function Drawer({ task, state, onClose, onChanged }) {
                 key: item.id,
                 'data-result': item.result,
                 'data-drawer-case-row': item.id,
-                className: LIST_ROW + ' ' + (CASE_RESULT_RAIL[item.result] ?? ''),
+                /* 每条用例一张小卡片：结果选择在左、标题与操作在顶部、明细在下面。
+                   以前是 items-center 的列表行，操作按钮垂直居中在一堆长文本中间，看着很乱。 */
+                className: 'flex min-w-0 items-start gap-3 rounded-lg border border-separator-border border-l-2 bg-background-primary-default px-3 py-3 ' + (CASE_RESULT_RAIL[item.result] ?? ''),
               },
               h(SelectField, {
-                style: { width: 84, height: 22, fontSize: 11 }, value: item.result, disabled: busy,
+                style: { width: 88, height: 28, fontSize: 12 }, value: item.result, disabled: busy,
+                'aria-label': `用例结果：${item.title}`,
                 onChange: event => void setCaseResult(item, event.target.value),
               }, CASE_RESULTS.map(value => h('option', { key: value, value }, CASE_RESULT_LABEL[value]))),
               h('div', { className: GROW },
-                h('div', { className: ART_TITLE }, item.title),
+                h('div', { className: 'truncate text-body-2-semibold text-text-primary', title: item.title }, item.title),
                 h('div', { className: ROW, style: { gap: 8, alignItems: 'center', marginTop: 2 } },
                   h(ChipField, { variant: 'soft' }, CASE_TYPE_LABEL[item.type ?? 'functional'] ?? '功能'),
                   h(SelectField, {
-                    style: { width: 84, height: 22, fontSize: 11 },
+                    style: { width: 108, height: 24, fontSize: 12 },
                     value: item.tier ?? '',
                     disabled: busy,
                     title: `${CASE_TIER_HINT[item.tierEffective ?? 'other'] ?? ''}（当前按${item.tier === '' || item.tier === undefined ? '断言推断' : '手动指定'}：${CASE_TIER_FULL[item.tierEffective ?? 'other'] ?? '其它'}）`,
@@ -2239,6 +2244,7 @@ function Drawer({ task, state, onClose, onChanged }) {
                   (item.steps ?? []).length === 0 ? null : h('span', { className: HINT }, `步骤 ${item.steps.length} 条`),
                 ),
                 item.expected === '' ? null : h('div', { className: ART_REF }, `期望：${item.expected}`),
+              expandedCaseIds.has(item.id) === true ? h('div', { className: 'flex min-w-0 flex-col gap-1', 'data-case-details': '' },
               // 四种可执行用例各显示自己的定义。以前这里是一个三元链，db 那条永远走不到。
               (() => {
                 if (item.browser != null) {
@@ -2275,7 +2281,21 @@ function Drawer({ task, state, onClose, onChanged }) {
                       ),
                     ),
                 item.note === '' ? null : h('div', { className: ART_REF }, `记录：${item.note}${item.by ? ` — ${item.by}` : ''}`),
+              ) : null,
               ),
+              h('div', { className: 'flex shrink-0 items-start gap-1' },
+              h(Button, {
+                variant: 'ghost', size: 'sm',
+                'data-case-expand': item.id,
+                'aria-expanded': expandedCaseIds.has(item.id),
+                title: '展开/收起这条用例的接口定义、响应、步骤与功能点',
+                onClick: () => setExpandedCaseIds(previous => {
+                  const next = new Set(previous)
+                  if (next.has(item.id)) next.delete(item.id)
+                  else next.add(item.id)
+                  return next
+                }),
+              }, expandedCaseIds.has(item.id) ? '收起' : '详情'),
               (item.http == null && item.shell == null && item.db == null && item.browser == null)
                 ? null
                 : h(Button, { variant: 'ghost', size: 'sm', disabled: busy, title: '改这条用例的定义（地址 / 命令 / SQL / 断言）；lastRun 与历史保留', onClick: () => void editCaseDefinition(item) }, '改定义'),
@@ -2290,7 +2310,8 @@ function Drawer({ task, state, onClose, onChanged }) {
                 onClick: () => void toggleFlaky(item),
               }, item.flaky === true ? '不稳' : '标不稳'),
               h(Button, { variant: 'ghost', size: 'sm', disabled: busy, 'aria-label': '删除这条用例', onClick: () => void removeCase(item) }, '×'),
-            )),
+              ))),
+
           h('div', { className: ROW },
             h(TextField, {
               style: { flex: 1 }, value: newCase.title, placeholder: '用例：做什么，例如 用错误密码连续登录 5 次',
