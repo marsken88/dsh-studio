@@ -16,7 +16,7 @@ import {
   text,
 } from '../domain.js'
 import { backendCoverageWarning, discoveryGaps, frontendOnlyWarning, vaguePointsWarning } from '../discovery.js'
-import { casesOfTasks, impactSummary } from '../impact.js'
+import { caseNeedsRerun, casesOfTasks, impactSummary, requirementDocUpdatedAt } from '../impact.js'
 import {
   ensureReqFolder,
   mutateReqDoc,
@@ -482,10 +482,15 @@ export async function handleRequirementRoute({ method, route, req, res, store, u
   const tasks = (snapshot.tasks ?? []).filter(task => task.requirementId === id)
   const summary = impactSummary(tasks)
   const cases = casesOfTasks(tasks, 60)
+  /* 文档改版后「通过过但没复跑」的用例：只标出来，不改结果。 */
+  const docUpdatedAt = requirementDocUpdatedAt(requirement)
+  const markedCases = cases.map(item => ({ ...item, stale: caseNeedsRerun(item, docUpdatedAt) }))
+  summary.staleCases = markedCases.filter(item => item.stale === true).length
+  summary.docUpdatedAt = docUpdatedAt
   host.sendJson(res, 200, {
     ok: true,
     summary,
-    cases,
+    cases: markedCases,
     cards: tasks.map(task => ({ id: task.id, code: task.code ?? '', title: task.title ?? '', status: task.status ?? '' })),
   })
   return true

@@ -1150,7 +1150,7 @@ export     function RequirementsPage({ state, onOpenTask, onChanged, createSigna
             h(Button, { variant: 'secondary', size: 'sm', disabled: impactBusy || currentForDeps === null, onClick: () => void loadImpact() }, impactBusy ? '计算中…' : '算一下影响面'),
             impact === null
               ? h('span', { className: HINT }, '还没算过')
-              : h('span', { className: HINT }, `卡 ${impact.summary.cards} · 用例 ${impact.summary.cases}（能自动跑 ${impact.summary.runnable}）· 失败 ${impact.summary.failing}`),
+              : h('span', { className: HINT }, `卡 ${impact.summary.cards} · 用例 ${impact.summary.cases}（能自动跑 ${impact.summary.runnable}）· 失败 ${impact.summary.failing}${impact.summary.staleCases > 0 ? ` · 需复跑 ${impact.summary.staleCases}` : ''}`),
           ),
           impact === null || impact.cards.length === 0
             ? null
@@ -1169,7 +1169,7 @@ export     function RequirementsPage({ state, onOpenTask, onChanged, createSigna
             ? h('div', { className: HINT, style: { padding: '8px 0' } }, '还没有功能点。点「＋ 加功能点」把需求拆成可交付、可验证的条目。')
             : h('div', { className: 'mt-2 flex min-w-0 flex-col gap-2' },
               h('div', { className: 'text-caption-1-regular text-text-secondary' },
-                `功能点 ${matrix.summary.points} · 已覆盖 ${matrix.summary.coveredPoints}${matrix.summary.pointsWithoutCases > 0 ? `（${matrix.summary.pointsWithoutCases} 条还没有用例，覆盖率 ${matrix.summary.coverageRate}%）` : ''} · 卡 ${matrix.summary.cards}（未归点 ${matrix.summary.looseCards}）· 用例 ${matrix.summary.cases}（通过 ${matrix.summary.pass}${matrix.summary.fail > 0 ? `，失败 ${matrix.summary.fail}` : ''}）· 通过率 ${matrix.summary.passRate}%`,
+                `功能点 ${matrix.summary.points} · 已覆盖 ${matrix.summary.coveredPoints}${matrix.summary.pointsWithoutCases > 0 ? `（${matrix.summary.pointsWithoutCases} 条还没有用例，覆盖率 ${matrix.summary.coverageRate}%）` : ''} · 卡 ${matrix.summary.cards}（未归点 ${matrix.summary.looseCards}）· 用例 ${matrix.summary.cases}（通过 ${matrix.summary.pass}${matrix.summary.fail > 0 ? `，失败 ${matrix.summary.fail}` : ''}${matrix.summary.staleCases > 0 ? `，需复跑 ${matrix.summary.staleCases}` : ''}）· 通过率 ${matrix.summary.passRate}%`,
               ),
               /* 口径写明白：不然读者会自己推断成"一卡一点，覆盖率有天花板"（issue #9 第 5 条的真事） */
               h('div', { className: HINT, style: { marginBottom: 8 } },
@@ -1245,6 +1245,7 @@ export     function RequirementsPage({ state, onOpenTask, onChanged, createSigna
                         `卡 ${point.cards.length}${point.cards.length === 0 ? '（还没人做）' : '：' + point.cards.map(card => card.code || card.id).join('、')}`,
                         ` · 用例 ${point.cases.total}（通过 ${point.cases.pass}${point.cases.fail > 0 ? `，失败 ${point.cases.fail}` : ''}${point.cases.pending > 0 ? `，没跑 ${point.cases.pending}` : ''}）`,
                         point.acceptance.length === 0 ? '' : ` · 验收条件 ${point.acceptance.filter(item => item.covered).length}/${point.acceptance.length}`,
+                        (point.cases.stale ?? 0) > 0 ? ` · 需复跑 ${point.cases.stale}` : '',
                       ),
                     ),
                     h(TableCell, null,

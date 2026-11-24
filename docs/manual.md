@@ -168,7 +168,7 @@ studio_task_check          { id, itemId, note }         // 清单逐项勾，附
 | --- | --- | --- |
 | 改状态 | 直接写库 / 伪造 `coding` 记录 | `studio_task_update`（会过门禁） |
 | 拆卡 | 手工 `task_create` 一张张建，忘了挂 `pointId` | `studio_requirement_split`（自动挂点、清单继承验收条件） |
-| 跑用例 | 自己判断「应该没问题」 | `studio_test_run`（平台真发请求，失败自动开缺陷卡） |
+| 跑用例 | 自己判断「应该没问题」 | `studio_test_run`（平台真发请求，失败自动开缺陷卡；需求文档改版后，之前通过过、但最后一次执行早于文档更新的用例会标「需复跑」（矩阵 / 抽屉测试页 / 影响面都能看到，只标不改）） |
 | 交付物 | 只在评论里说「已完成」 | `studio_task_artifact` 登记（正文进云盘，可被下一个人打开） |
 | 遇到别人的卡 | 直接改别的专家的卡 | 评论里 `@专家名` 交给对方 |
 | 不知道做什么 | 猜 | `studio_task_list` + `studio_task_get`，看不明白就问人 |

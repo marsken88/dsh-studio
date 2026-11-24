@@ -296,6 +296,8 @@ function Drawer({ task, state, onClose, onChanged }) {
   const caseSum = caseSummaryOf(task)
   const checkSum = checkSummaryOf(task)
   const cases = parts !== null && Array.isArray(parts.cases) ? parts.cases : (Array.isArray(task.cases) ? task.cases : [])
+  // 需求文档改版后，之前通过过的用例要复跑（服务端按文档更新时间算好 stale，界面只显示）
+  const staleCases = cases.filter(item => item.stale === true).length
   /* 三层测试：服务端算好的分层进度与缺口（parts.plan），以及最近几次执行批次。
      界面不自己重算一遍口径 —— 门禁读的也是服务端这一份。 */
   const testPlanTiers = parts !== null && parts.plan !== null && parts.plan !== undefined && Array.isArray(parts.plan.tiers) ? parts.plan.tiers : []
@@ -2183,7 +2185,7 @@ function Drawer({ task, state, onClose, onChanged }) {
         h(SectionHead, null, '测试用例',
           h('span', { className: HINT }, caseSum.total === 0
             ? '测试同学把用例登记在这里，逐条执行并回填结果'
-            : caseSummary),
+            : `${caseSummary}${staleCases > 0 ? ` · 需复跑 ${staleCases}` : ''}`),
           h(Button, {
             variant: 'ghost', size: 'sm',
             disabled: caseGen.busy,
@@ -2230,6 +2232,9 @@ function Drawer({ task, state, onClose, onChanged }) {
                     CASE_TIERS.map(value => h('option', { key: value, value }, CASE_TIER_LABEL[value])),
                   ),
                   h(ChipField, { variant: 'soft', 'data-pri': item.priority ?? 'p2' }, String(item.priority ?? 'p2').toUpperCase()),
+                  item.stale === true
+                    ? h(ChipField, { variant: 'yellow', 'data-stale': '1', title: '需求文档更新后还没复跑：这条结果可能是旧口径' }, '需复跑')
+                    : null,
                   String(item.preconditions ?? '') === '' ? null : h('span', { className: HINT }, `前置：${item.preconditions}`),
                   (item.steps ?? []).length === 0 ? null : h('span', { className: HINT }, `步骤 ${item.steps.length} 条`),
                 ),

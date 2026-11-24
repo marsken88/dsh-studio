@@ -104,6 +104,7 @@ AI 是执行手，判定权在确定性规则和人手里。要变成 AI Native�
 | 20 | **交接契约** | 卡上有结构化 `handoff`（决策 / 假设 / 未决 / 风险 / 影响面）；抽屉「交接」页签可写；**派单提示词先读契约、再读最近评论**；清空保存 = 删除契约 | ✅ 已做（`src/host/handoff.js` + `studio_task_update.handoff` + 抽屉「交接」页签；`tests/handoff.test.mjs` 5 条，含 HTTP / 工具两个入口与提示词顺序；panel-probe 覆盖「页签五段可提交」） |
 | 21 | **发布审批进门禁** | 没人点过「审批通过」的版本不能发布：`releaseGate.blockers` 含「还没有发布审批」，`/release/publish` 直接拒绝 | ✅ 已做（2026-11-21：`src/host/release-model.js` 的 `releaseGate`；`tests/release-gate.test.mjs` 4 条，覆盖未审批 / 已审批 / 已发布 / 发布说明） |
 | 22 | **代码改动与评审可见** | 研发干完活，卡面就能看到「代码 N 文件 +A −D」与「评审通过 / 评审要改」；抽屉「执行记录 → 代码改动」用 BoardUI 树形视图按目录列出改动文件（新增/修改/删除标记），点文件看**分支 vs 基线**的逐行 patch（或切「全文」读工作树里的文件本体），并提示「还有 N 个文件没提交」；**研发忘了登记执行记录**时，进「待评审」平台从 worktree 的 git 事实补一条（agent 标成「git 自动采集」，不覆盖自报）；代码评审结论（工具与面板两条路）一定补成讨论区里的评论 | ✅ 已做（2026-11-24：`src/host/task-diff.js` + 只读 `POST /task/diff` + 抽屉「代码改动」+ 生成式执行记录；`tests/task-diff.test.mjs` 14 条，真机 panel-probe ⑦ 用真卡验到逐文件 diff（9 文件 +800 −11）、e2e 验到自动采集与评论） |
+| 23 | **文档改版后用例复跑** | PRD / 验收标准文档更新时间晚于用例最后一次通过执行 → 该用例在矩阵、抽屉测试页、影响面三处都标「需复跑」；**只标不改**（结果与状态不动，避免自动把通过改成待执行） | ✅ 已做（2026-11-24：`impact.js` 的 `requirementDocUpdatedAt` / `caseNeedsRerun` + `/task/parts`、`requirementMatrix`、`/requirement/impact`；`tests/acceptance.test.mjs` 2 条 + panel-probe ②c/③b） |
 
 ## 5. 落地顺序
 

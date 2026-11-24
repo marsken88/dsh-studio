@@ -166,11 +166,20 @@ try {
     },
   })
   requirementId = requirement.json.requirement?.id ?? ''
+  await api('/requirement/doc', { id: requirementId, action: 'add', doc: { kind: 'prd', title: '（探针）PRD', content: '探针正文', at: Date.now() } })
   const card = await api('/task/create', { title: '（探针）看板卡片', type: 'dev', role: 'dev', status: 'dev', requirementId, pointId: 'p1' })
   taskId = card.json.task?.id ?? ''
   check('准备：造出需求与卡片', requirementId !== '' && taskId !== '')
   /* 执行记录 + 评审结论：卡面要能看到「代码 N 文件 +A −D」「评审通过」两个 chip，
      讨论区要能看到评审结论。以前走工具评审只写 coding.review.note，人翻卡片一个字都看不到。 */
+  await api('/task/case', {
+    id: taskId, action: 'add', by: '测试（探针）',
+    cases: [{
+      title: '（探针）文档改版后需复跑', result: 'pass', lastRun: { at: 1000 },
+      // 必须带可执行断言，否则 pass 会被降级成 pending（不能拿「手标的通过」当证据）
+      http: { method: 'GET', url: '/state', expectStatus: 200 },
+    }],
+  })
   await api('/task/coding', {
     id: taskId,
     coding: {
@@ -294,6 +303,13 @@ try {
   const commentBodies = (probeComments.json.comments ?? []).map(item => String(item.body ?? ''))
   check('②a 评审结论自动补成评论（讨论区看得到）', commentBodies.some(body => body.includes('代码评审 · 通过') && body.includes('探针评审：通过')))
 
+  /* ②c 文档改版 → 通过过的用例要复跑（只标不改） */
+  await page.evaluate(() => [...document.querySelectorAll('[role="tab"]')]
+    .find(node => String(node.textContent ?? '').trim().startsWith('测试'))?.click())
+  await new Promise(resolve => setTimeout(resolve, 800))
+  const staleChip = await page.evaluate(() => document.querySelector('[data-drawer-case-row] [data-stale="1"]')?.textContent ?? '')
+  check('②c 文档改版后的通过用例标「需复跑」', staleChip.includes('需复跑'), staleChip)
+
   /* ②a2 执行记录 → 代码改动：真实 git diff 的入口。
      探针卡没配代码目录，这里验两件事：区块在、而且说清了为什么读不到（不空着不报错）。 */
   await page.evaluate(() => [...document.querySelectorAll('[role="tab"]')]
@@ -352,6 +368,7 @@ try {
   await clickExact('需求')
   check('③ 需求页矩阵渲染', await waitText('功能点与可追溯矩阵'))
   check('③ 覆盖率口径写出来了', (await page.evaluate(() => document.body.innerText)).includes('覆盖率按功能点算'))
+  check('③b 需求矩阵汇总有「需复跑 1」', /需复跑\s*1/.test(await page.evaluate(() => document.body.innerText)))
   const matrixFilter = await page.evaluate(() => document.querySelector('[data-matrix-filter] input') !== null)
   check('③b 需求矩阵有筛选框', matrixFilter === true, matrixFilter ? '' : '没找到 [data-matrix-filter] input')
   if (matrixFilter) {
