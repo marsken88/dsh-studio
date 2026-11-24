@@ -2542,12 +2542,38 @@ function Drawer({ task, state, onClose, onChanged }) {
             : bugs.map(item => `${item.code || item.id}（${(state.statuses ?? []).find(entry => entry.id === item.status)?.label ?? item.status}）`).join('、')
         })()),
         h('dt', {}, '飞书会话'), h('dd', {}, task.feishuThread === '' || task.feishuThread === undefined ? '未关联' : task.feishuThread),
-        h('dt', {}, '状态历史'), h('dd', {}, task.history.map(item => {
-          const label = (state.statuses ?? []).find(entry => entry.id === item.status)?.label ?? item.status
-          const tail = item.note === undefined || item.note === '' ? '' : `（${item.note}）`
-          return `${label} · ${fmtTime(item.at)}${tail}`
-        }).join(' → ') || '无'),
       ),
+      (() => {
+        const history = Array.isArray(task.history) ? [...task.history].reverse() : []
+        if (history.length === 0) return h('div', { className: 'mt-3 ' + HINT, 'data-status-history': '' }, '状态历史：无')
+        const row = (item, index) => {
+          const label = (state.statuses ?? []).find(entry => entry.id === item.status)?.label ?? String(item.status ?? '')
+          return h('li', {
+            key: String(item.at ?? 0) + '-' + index,
+            className: 'flex min-w-0 items-start gap-2 border-b border-separator-border pb-2 last:border-b-0 last:pb-0',
+            'data-history-row': '',
+          },
+            h('span', { className: 'w-[86px] shrink-0 text-caption-1-regular text-text-tertiary tabular-nums' }, fmtTime(item.at)),
+            h('div', { className: 'flex min-w-0 flex-1 flex-col gap-0.5' },
+              h('div', { className: 'flex min-w-0 flex-wrap items-center gap-2' },
+                h(ChipField, { variant: 'soft' }, label),
+                item.by ? h('span', { className: HINT }, String(item.by)) : null),
+              (item.note === undefined || item.note === '') ? null : h('div', { className: 'break-words text-caption-1-regular text-text-secondary' }, String(item.note)),
+            ),
+          )
+        }
+        const recent = history.slice(0, 5)
+        const rest = history.slice(5)
+        return h('div', { className: 'mt-3 flex min-w-0 flex-col gap-2', 'data-status-history': '' },
+          h('div', { className: 'flex min-w-0 flex-wrap items-center justify-between gap-2' },
+            h('div', { className: 'text-caption-2-medium text-text-secondary' }, `状态历史（${history.length}）`),
+            h('span', { className: HINT }, '最新的在最上面')),
+          h('ol', { className: 'flex min-w-0 flex-col gap-2' }, recent.map(row)),
+          rest.length === 0 ? null : h('details', { className: 'rounded-lg border border-separator-border px-3 py-2', 'data-history-rest': '' },
+            h('summary', { className: 'cursor-pointer text-caption-1-regular text-text-secondary' }, `展开其余 ${rest.length} 条`),
+            h('ol', { className: 'mt-2 flex min-w-0 flex-col gap-2' }, rest.map(row))),
+        )
+      })(),
       ),
       h(Section, { pane: 'discuss', current: pane, id: 'comments' },
         h(SectionHead, null, `评论（${commentTotal}）`, h('span', { className: HINT }, '最新的在最上面')),

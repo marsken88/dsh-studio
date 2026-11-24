@@ -764,6 +764,12 @@ try {
     await new Promise(resolve => setTimeout(resolve, 900))
     const drawerTabs = await page.evaluate(() => [...document.querySelectorAll('[role="tab"]')].map(node => String(node.textContent ?? '').trim()))
     check('⑦ 真卡的抽屉打开了', drawerTabs.some(label => label.includes('执行记录')), drawerTabs.join(' / ').slice(0, 160))
+  const historyBox = await page.evaluate(() => {
+    const box = document.querySelector('[data-status-history]')
+    if (box === null) return null
+    return { rows: box.querySelectorAll('[data-history-row]').length, text: String(box.textContent ?? '').replace(/\s+/g, ' ').slice(0, 80) }
+  })
+  check('⑦ 状态历史按行展示（不再是一整串箭头）', historyBox !== null && historyBox.rows > 0 && historyBox.text.includes('状态历史'), JSON.stringify(historyBox))
     await page.evaluate(() => [...document.querySelectorAll('[role="tab"]')]
       .find(node => String(node.textContent ?? '').trim().startsWith('执行记录'))?.click())
     const rendered = await page.waitForFunction(() => {
