@@ -20,7 +20,7 @@ const LABEL = 'text-caption-1-medium text-text-secondary'
 const SECTION = 'flex min-w-0 flex-col gap-3 rounded-xl border border-separator-border bg-background-primary-default p-4'
 const SECTION_HEAD = 'flex min-w-0 flex-wrap items-center gap-2'
 const SECTION_TITLE = 'text-title-2-semibold text-text-primary'
-const SECTION_BODY = 'flex min-w-0 flex-col gap-2'
+const SECTION_BODY = 'flex min-w-0 flex-col gap-3'
 const ACTIONS = 'flex flex-wrap items-center gap-2'
 const PANEL = 'flex min-w-0 flex-col gap-2 rounded-xl border border-separator-border bg-background-primary-default p-3'
 const PANEL_HEAD = 'flex min-w-0 items-start gap-2'
@@ -1254,7 +1254,7 @@ function Drawer({ task, state, onClose, onChanged }) {
     },
       h('div', { className: 'flex shrink-0 items-start gap-2 border-b border-separator-border px-5 pt-4 pb-3' },
         h('div', { className: GROW },
-          h('div', { className: 'text-title-2-semibold break-words text-text-primary' }, task.title),
+          h('div', { className: 'text-title-1-semibold break-words text-text-primary' }, task.title),
           h('div', { className: 'mt-1 ' + HINT }, `${task.id} · ${columnLabel}${assignee === '' ? '' : ` · ${assignee}`} · 更新 ${fmtTime(task.updatedAt)}`),
         ),
         h(Button, { variant: 'ghost', size: 'sm', disabled: busy, title: '定案 + 评审通过才能进开发', onClick: () => setPane('design') }, '设计：' + (DESIGN_LABEL[task.design?.status] ?? '未登记') + (designDrafts.length > 0 ? `（${designDrafts.length} 稿）` : '')),
@@ -2394,8 +2394,17 @@ function Drawer({ task, state, onClose, onChanged }) {
                         ((state.requirements ?? []).find(entry => entry.id === task.requirementId)?.points ?? []).map(point => h('option', { key: point.id, value: point.id }, `${point.id} ${point.title}`)),
                       ),
                     ),
-                item.note === '' ? null : h('div', { className: ART_REF }, `记录：${item.note}${item.by ? ` — ${item.by}` : ''}`),
-                h('div', { className: 'flex justify-end' },
+                item.note === '' ? null : h('div', { className: 'md-content min-w-0 text-caption-1-regular text-text-secondary', 'data-case-note': '' },
+                  h('span', { className: HINT }, '记录：'),
+                  renderMarkdown(item.note),
+                  item.by ? h('span', { className: HINT }, ` — ${item.by}`) : null),
+                h('div', { className: 'flex justify-end gap-2' },
+                  h(Button, {
+                    variant: 'ghost', size: 'sm', disabled: busy,
+                    title: '标记为不稳定用例：失败时不自动开缺陷',
+                    'data-flaky': item.flaky === true ? '1' : '0',
+                    onClick: () => void toggleFlaky(item),
+                  }, item.flaky === true ? '恢复稳定' : '标记不稳定'),
                   h(Button, { variant: 'danger', size: 'sm', disabled: busy, title: '删除这条用例（先确认）', 'aria-label': '删除这条用例', onClick: () => void removeCase(item) }, '删除这条用例')),
               ) : null,
               ),
@@ -2418,13 +2427,6 @@ function Drawer({ task, state, onClose, onChanged }) {
               (item.http == null && item.shell == null && item.db == null && item.browser == null)
                 ? null
                 : h(Button, { variant: 'ghost', size: 'sm', disabled: caseRun.busy, title: '跑这条用例', 'aria-label': '跑这条用例', onClick: () => void runCases(item.id) }, uiIcon(h, 'run')),
-              h(Button, {
-                variant: 'ghost', size: 'sm',
-                disabled: busy,
-                title: '标记为不稳定用例：失败时不自动开缺陷',
-                'data-flaky': item.flaky === true ? '1' : '0',
-                onClick: () => void toggleFlaky(item),
-              }, item.flaky === true ? '不稳' : '标不稳'),
               ))),
 
           h('div', { className: ROW },
