@@ -211,6 +211,9 @@ function Drawer({ task, state, onClose, onChanged }) {
   /* 用例筛选：默认失败→未跑→跳过→通过，和用例库页一致。 */
   const [caseFilter, setCaseFilter] = React.useState('all')
   const [caseQuery, setCaseQuery] = React.useState('')
+  /* 改定义：一个表单，不再连弹 4 个 prompt。 */
+  const [caseEdit, setCaseEdit] = React.useState(null)
+  const [caseBugMap, setCaseBugMap] = React.useState({})
   const [codingDraft, setCodingDraft] = React.useState(null)
   const [reviewNote, setReviewNote] = React.useState('')
   const coding = task.coding ?? null
@@ -642,51 +645,49 @@ function Drawer({ task, state, onClose, onChanged }) {
       await onChanged()
     } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)) } finally { setBusy(false) }
   }
-  const editCaseDefinition = async (item) => {
+  const editCaseDefinition = item => {
     if (item.http != null) {
-      const method = await promptDialog('HTTP 方法', { title: '改接口用例', defaultValue: item.http.method ?? 'GET' })
-      if (method === null) return
-      const path = await promptDialog('地址（相对测试环境 baseUrl，或完整 http(s) 地址）', { title: '改接口用例', defaultValue: item.http.url ?? '' })
-      if (path === null) return
-      const status = await promptDialog('期望状态码', { title: '改接口用例', defaultValue: String(item.http.expectStatus ?? 200) })
-      if (status === null) return
-      const contains = await promptDialog('响应里应包含什么（可留空）', { title: '改接口用例', defaultValue: item.http.expectContains ?? '' })
-      if (contains === null) return
-      await saveCaseDefinition(item, { http: { ...item.http, method: String(method).trim().toUpperCase(), url: String(path).trim(), expectStatus: Number(status), expectContains: String(contains).trim() } })
+      setCaseEdit({ id: item.id, title: item.title, kind: 'http', method: item.http.method ?? 'GET', url: item.http.url ?? '', expectStatus: String(item.http.expectStatus ?? 200), expectContains: item.http.expectContains ?? '' })
       return
     }
     if (item.shell != null) {
-      const command = await promptDialog('shell 命令', { title: '改 shell 用例', defaultValue: item.shell.command ?? '' })
-      if (command === null) return
-      const contains = await promptDialog('期望输出里包含什么（可留空）', { title: '改 shell 用例', defaultValue: item.shell.expectContains ?? '' })
-      if (contains === null) return
-      await saveCaseDefinition(item, { shell: { ...item.shell, command: String(command).trim(), expectContains: String(contains).trim() } })
+      setCaseEdit({ id: item.id, title: item.title, kind: 'shell', command: item.shell.command ?? '', expectContains: item.shell.expectContains ?? '' })
       return
     }
     if (item.db != null) {
-      const file = await promptDialog('SQLite 库文件路径', { title: '改数据库用例', defaultValue: item.db.file ?? '' })
-      if (file === null) return
-      const sql = await promptDialog('SQL 语句', { title: '改数据库用例', defaultValue: item.db.sql ?? '' })
-      if (sql === null) return
-      const column = await promptDialog('断言首行的哪一列（留空就只看能不能执行）', { title: '改数据库用例', defaultValue: item.db.expectColumn ?? '' })
-      if (column === null) return
-      const expect = await promptDialog('这一列的期望值（可留空）', { title: '改数据库用例', defaultValue: item.db.expectValue ?? '' })
-      if (expect === null) return
-      await saveCaseDefinition(item, { db: { ...item.db, file: String(file).trim(), sql: String(sql).trim(), expectColumn: String(column).trim(), expectValue: String(expect).trim() === '' ? null : String(expect).trim() } })
+      setCaseEdit({ id: item.id, title: item.title, kind: 'db', file: item.db.file ?? '', sql: item.db.sql ?? '', expectColumn: item.db.expectColumn ?? '', expectValue: item.db.expectValue ?? '' })
       return
     }
     if (item.browser != null) {
-      const url = await promptDialog('页面地址（相对 baseUrl 或完整 http(s)）', { title: '改浏览器用例', defaultValue: item.browser.url ?? '/' })
-      if (url === null) return
-      const text = await promptDialog('页面上应该出现的文字（可留空）', { title: '改浏览器用例', defaultValue: item.browser.expectText ?? '' })
-      if (text === null) return
-      const selector = await promptDialog('页面上应该存在的元素选择器（可留空）', { title: '改浏览器用例', defaultValue: item.browser.expectSelector ?? '' })
-      if (selector === null) return
-      const expectText = String(text).trim()
-      const expectSelector = String(selector).trim()
-      await saveCaseDefinition(item, { browser: { ...item.browser, url: String(url).trim(), expectText: expectText === '' ? undefined : expectText, expectSelector: expectSelector === '' ? undefined : expectSelector } })
+      setCaseEdit({ id: item.id, title: item.title, kind: 'browser', url: item.browser.url ?? '/', expectText: item.browser.expectText ?? '', expectSelector: item.browser.expectSelector ?? '' })
     }
   }
+
+  const saveCaseEdit = async () => {
+    if (caseEdit === null) return
+    const item = cases.find(entry => entry.id === caseEdit.id)
+    if (item === undefined) { setCaseEdit(null); return }
+    const text = value => String(value ?? '').trim()
+    let patch = null
+    if (caseEdit.kind === 'http') {
+      if (text(caseEdit.url) === '') { setError('接口地址不能为空'); return }
+      patch = { http: { ...item.http, method: text(caseEdit.method).toUpperCase() || 'GET', url: text(caseEdit.url), expectStatus: Number(caseEdit.expectStatus) || 200, expectContains: text(caseEdit.expectContains) } }
+    } else if (caseEdit.kind === 'shell') {
+      if (text(caseEdit.command) === '') { setError('shell 命令不能为空'); return }
+      patch = { shell: { ...item.shell, command: text(caseEdit.command), expectContains: text(caseEdit.expectContains) } }
+    } else if (caseEdit.kind === 'db') {
+      if (text(caseEdit.file) === '' || text(caseEdit.sql) === '') { setError('库文件与 SQL 都不能为空'); return }
+      patch = { db: { ...item.db, file: text(caseEdit.file), sql: text(caseEdit.sql), expectColumn: text(caseEdit.expectColumn), expectValue: text(caseEdit.expectValue) === '' ? null : text(caseEdit.expectValue) } }
+    } else if (caseEdit.kind === 'browser') {
+      if (text(caseEdit.url) === '') { setError('页面地址不能为空'); return }
+      patch = { browser: { ...item.browser, url: text(caseEdit.url), expectText: text(caseEdit.expectText) === '' ? undefined : text(caseEdit.expectText), expectSelector: text(caseEdit.expectSelector) === '' ? undefined : text(caseEdit.expectSelector) } }
+    }
+    if (patch !== null) {
+      await saveCaseDefinition(item, patch)
+      setCaseEdit(null)
+    }
+  }
+
   const addCase = async () => {
     const title = newCase.title.trim()
     if (title === '') return
@@ -731,6 +732,9 @@ function Drawer({ task, state, onClose, onChanged }) {
       const body = Array.isArray(caseId) ? { caseIds: caseId } : (caseId === undefined ? {} : { caseId })
       const out = await api('/task/case/run', { id: task.id, ...body, by: '我在界面里跑的' })
       const run = out?.run ?? {}
+      const bugMap = {}
+      for (const item of out?.bugs ?? []) { if (String(item.bug ?? '') !== '') bugMap[item.caseId] = item.bug }
+      if (Object.keys(bugMap).length > 0) setCaseBugMap(previous => ({ ...previous, ...bugMap }))
       const made = (out?.bugs ?? []).filter(item => item.created === true).length
       const parts = [`跑了 ${run.total ?? 0} 条：通过 ${run.passed ?? 0}，不通过 ${run.failed ?? 0}`]
       if (made > 0) parts.push(`自动开缺陷 ${made} 张`)
@@ -1053,6 +1057,66 @@ function Drawer({ task, state, onClose, onChanged }) {
 
   /* 三层测试进度块：单元 / 集成 / 端到端各一行（通过/总数、可执行数、缺口或理由），
      每行可以「跑这一层」或标记「不适用 + 理由」。数字来自服务端 parts.plan，界面不重算口径。 */
+  /* 改定义：接口 / shell / 数据库 / 浏览器各一组字段，一次保存。 */
+  const caseEditBlock = () => {
+    if (caseEdit === null) return null
+    const line = (label, node) => h('label', { className: 'flex min-w-0 flex-col gap-1' },
+      h('span', { className: 'text-caption-2-medium text-text-secondary' }, label),
+      node,
+    )
+    const textField = (key, label, placeholder) => line(label, h(TextField, {
+      value: caseEdit[key] ?? '', placeholder,
+      onChange: event => setCaseEdit({ ...caseEdit, [key]: event.target.value }),
+    }))
+    let fields = null
+    if (caseEdit.kind === 'http') {
+      fields = h(React.Fragment, null,
+        line('HTTP 方法', h(SelectField, {
+          value: caseEdit.method, size: 'sm',
+          'aria-label': 'HTTP 方法',
+          onChange: event => setCaseEdit({ ...caseEdit, method: event.target.value }),
+        }, ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD'].map(method => h('option', { key: method, value: method }, method)))),
+        textField('url', '地址（相对测试环境 baseUrl，或完整 http(s)）', '/api/points/available'),
+        textField('expectStatus', '期望状态码', '200'),
+        textField('expectContains', '响应里应包含什么（可留空）', '\"availablePoints\"'),
+      )
+    } else if (caseEdit.kind === 'shell') {
+      fields = h(React.Fragment, null,
+        line('shell 命令', h(TextAreaField, {
+          rows: 3, value: caseEdit.command ?? '',
+          onChange: event => setCaseEdit({ ...caseEdit, command: event.target.value }),
+        })),
+        textField('expectContains', '期望输出里包含什么（可留空）', 'ok'),
+      )
+    } else if (caseEdit.kind === 'db') {
+      fields = h(React.Fragment, null,
+        textField('file', 'SQLite 库文件路径', 'server/data.sqlite'),
+        line('SQL 语句', h(TextAreaField, {
+          rows: 3, value: caseEdit.sql ?? '',
+          onChange: event => setCaseEdit({ ...caseEdit, sql: event.target.value }),
+        })),
+        textField('expectColumn', '断言首行的哪一列（可留空）', 'count'),
+        textField('expectValue', '这一列的期望值（可留空）', '1'),
+      )
+    } else {
+      fields = h(React.Fragment, null,
+        textField('url', '页面地址（相对 baseUrl 或完整 http(s)）', '/'),
+        textField('expectText', '页面上应该出现的文字（可留空）', '订单管理'),
+        textField('expectSelector', '应该存在的元素选择器（可留空）', '#root'),
+      )
+    }
+    return h('div', { className: 'flex min-w-0 flex-col gap-3 rounded-xl border border-separator-border bg-background-secondary-default p-3', 'data-case-edit': '' },
+      h('div', { className: 'flex items-center justify-between gap-2' },
+        h('div', { className: 'text-body-2-semibold text-text-primary' }, '编辑用例：' + caseEdit.title),
+        h(Button, { variant: 'ghost', size: 'sm', onClick: () => setCaseEdit(null) }, '取消'),
+      ),
+      fields,
+      h('div', { className: 'flex justify-end' },
+        h(Button, { variant: 'primary', size: 'sm', disabled: busy, onClick: () => void saveCaseEdit() }, busy ? '保存中…' : '保存定义'),
+      ),
+    )
+  }
+
   const testPlanBlock = () => {
     if (testPlanTiers.length === 0) return null
     /* 产品/设计卡不受三层闸门约束：没有用例也没有测试计划时不显示这个块，
@@ -2223,6 +2287,7 @@ function Drawer({ task, state, onClose, onChanged }) {
             onClick: () => void runCases(undefined),
           }, caseRun.busy ? '运行中…' : [uiIcon(h, 'run'), ' 跑用例'])),
         h('div', { className: SECTION_BODY, 'data-scroll': '1' },
+          caseEditBlock(),
           caseRun.note === '' ? null : h('div', { className: HINT, style: { position: 'sticky', top: 0, zIndex: 5, background: 'inherit' }, 'data-run-note': '' }, caseRun.note),
           h('div', { className: 'flex min-w-0 flex-wrap items-center gap-2', 'data-case-filter': '' },
             ...[['all', '全部', caseSum.total], ['pending', '未跑', casePending], ['fail', '不通过', caseFail], ['skip', '跳过', caseSkip], ['pass', '通过', casePass]]
@@ -2277,6 +2342,9 @@ function Drawer({ task, state, onClose, onChanged }) {
                   h(ChipField, { variant: 'soft', 'data-pri': item.priority ?? 'p2' }, String(item.priority ?? 'p2').toUpperCase()),
                   item.stale === true
                     ? h(ChipField, { variant: 'yellow', 'data-stale': '1', title: '需求文档更新后还没复跑：这条结果可能是旧口径' }, '需复跑')
+                    : null,
+                  caseBugMap[item.id] !== undefined
+                    ? h(ChipField, { variant: 'rose', 'data-case-bug': caseBugMap[item.id], title: '这条用例失败后自动开的缺陷' }, '缺陷 ' + caseBugMap[item.id])
                     : null,
                   String(item.preconditions ?? '') === '' ? null : h('span', { className: HINT }, `前置：${item.preconditions}`),
                   (item.steps ?? []).length === 0 ? null : h('span', { className: HINT }, `步骤 ${item.steps.length} 条`),

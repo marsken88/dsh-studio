@@ -347,6 +347,23 @@ try {
     return (row.compareDocumentPosition(tier) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0
   })
   check('②c 三层进度排在用例列表之后', orderOk === true)
+  const caseEditOpened = await page.evaluate(() => {
+    const button = [...document.querySelectorAll('button')].find(node => String(node.textContent ?? '').trim() === '改定义')
+    if (button === undefined) return false
+    button.click()
+    return true
+  })
+  await new Promise(resolve => setTimeout(resolve, 400))
+  const editForm = await page.evaluate(() => {
+    const form = document.querySelector('[data-case-edit]')
+    return form === null ? null : { inputs: form.querySelectorAll('input, textarea, select').length, text: String(form.textContent ?? '').slice(0, 80) }
+  })
+  check('②c 改定义用一个表单（不是连环 prompt）', caseEditOpened === true && editForm !== null && editForm.inputs >= 3, JSON.stringify(editForm))
+  await page.evaluate(() => {
+    const button = [...document.querySelectorAll('[data-case-edit] button')].find(node => String(node.textContent ?? '').trim() === '取消')
+    button?.click()
+  })
+  await new Promise(resolve => setTimeout(resolve, 300))
   await page.keyboard.press('Escape')
   await new Promise(resolve => setTimeout(resolve, 300))
 
