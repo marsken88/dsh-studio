@@ -1437,7 +1437,7 @@ function Drawer({ task, state, onClose, onChanged }) {
                 }),
                 h(Button, { variant: 'primary', size: 'sm', disabled: busy, onClick: () => void signOff('sign') }, '签字确认'))
             : h('div', { className: 'flex min-w-0 flex-wrap items-center justify-between gap-2 rounded-xl bg-background-secondary-default p-3 text-caption-1-regular text-text-primary', 'data-drawer-signoff': '' },
-                h('span', { className: 'min-w-0 break-words' }, `${task.signoff.by} 于 ${new Date(task.signoff.at).toLocaleString()} 签字：${task.signoff.note}`),
+                h('span', { className: 'min-w-0 break-words' }, `${task.signoff.by} 于 ${fmtTime(task.signoff.at)} 签字：${task.signoff.note}`),
                 h(Button, { variant: 'ghost', size: 'sm', onClick: () => void signOff('clear') }, '取消签字')),
         ),
       ),
@@ -2357,7 +2357,9 @@ function Drawer({ task, state, onClose, onChanged }) {
                   String(item.preconditions ?? '') === '' ? null : h('span', { className: HINT }, `前置：${item.preconditions}`),
                   (item.steps ?? []).length === 0 ? null : h('span', { className: HINT }, `步骤 ${item.steps.length} 条`),
                 ),
-                item.expected === '' ? null : h('div', { className: ART_REF }, `期望：${item.expected}`),
+                item.expected === '' ? null : h('div', { className: 'md-content min-w-0 text-caption-1-regular text-text-secondary', 'data-case-expected': '' },
+                  h('span', { className: HINT }, '期望：'),
+                  renderMarkdown(item.expected)),
               expandedCaseIds.has(item.id) === true ? h('div', { className: 'flex min-w-0 flex-col gap-1', 'data-case-details': '' },
               // 四种可执行用例各显示自己的定义。以前这里是一个三元链，db 那条永远走不到。
               (() => {
