@@ -185,6 +185,11 @@ export     function RequirementsPage({ state, onOpenTask, onChanged, createSigna
       /* 需求矩阵里功能点描述是一整段 markdown，全渲染会把表格行撑到半屏高（一屏只看得下两三行）。
          默认只显示两行摘要，点「全文」再展开 —— 表格回到「一眼扫完」的用途。 */
       const [openPointIds, setOpenPointIds] = React.useState(() => new Set())
+      /* 矩阵编辑：勾选多个功能点批量覆盖验收条件；编辑表单在表格上方就地展开（不再在页面底部）。 */
+      const [selectedPointIds, setSelectedPointIds] = React.useState(() => new Set())
+      const [bulkAcceptance, setBulkAcceptance] = React.useState(null)
+      const [pointFormTick, setPointFormTick] = React.useState(0)
+      const pointFormRef = React.useRef(null)
       // ---- 需求准出与验收签字
       const [reqSign, setReqSign] = React.useState('')
       const [reqNote, setReqNote] = React.useState(null)
@@ -282,6 +287,37 @@ export     function RequirementsPage({ state, onOpenTask, onChanged, createSigna
         await savePoints([...existing, entry])
       }
 
+      const openPointForm = point => {
+        setPointForm(point)
+        setPointFormTick(tick => tick + 1)
+      }
+
+      /* 表格上方就地展开：点「编辑」后滚动过去，不用再翻到页面底部找表单。 */
+      React.useEffect(() => {
+        if (pointForm === null) return
+        const node = pointFormRef.current
+        if (node !== null && typeof node.scrollIntoView === 'function') node.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
+      }, [pointFormTick])
+
+      /* 批量覆盖验收条件：一行一条，替换所选功能点的全部条件。
+         id 按位置复用（前 N 条保留原 id），尽量少打断已挂条件的用例；删掉的条件仍会变成「未挂条件」。 */
+      const applyBulkAcceptance = async () => {
+        if (current === null || bulkAcceptance === null) return
+        const texts = String(bulkAcceptance.text ?? '').split('\n').map(line => line.trim()).filter(line => line !== '')
+        if (texts.length === 0) { setMatrixNote('批量验收条件至少要写一条'); return }
+        const ids = new Set(selectedPointIds)
+        if (ids.size === 0) { setMatrixNote('先勾选要改的功能点'); return }
+        if (!(await confirmDialog(`用这 ${texts.length} 条验收条件替换所选 ${ids.size} 个功能点的全部条件？已挂在这些条件下的用例会变成「未挂条件」。`, { title: '批量设置验收条件', danger: true, okText: '替换' }))) return
+        const next = (current.points ?? []).map(point => {
+          if (!ids.has(point.id)) return point
+          const oldIds = (point.acceptance ?? []).map(item => item.id)
+          return { ...point, acceptance: texts.map((text, index) => ({ id: oldIds[index] ?? `a${index + 1}`, text, done: false })) }
+        })
+        await savePoints(next)
+        setSelectedPointIds(new Set())
+        setBulkAcceptance(null)
+      }
+
       const removePoint = async (pointId) => {
         if (current === null) return
         if (!(await confirmDialog('删除这个功能点？挂在上面的卡会变成「未归功能点」。', { title: '删除功能点', danger: true, okText: '删除' }))) return
@@ -298,6 +334,8 @@ export     function RequirementsPage({ state, onOpenTask, onChanged, createSigna
       }
 
       const current = requirements.find(item => item.id === selected) ?? null
+      // 换一条需求就把批量选择清掉，避免把上一条需求的功能点 id 带过来。
+      React.useEffect(() => { setSelectedPointIds(new Set()); setBulkAcceptance(null) }, [selected])
       const tasksOf = id => state.tasks.filter(task => task.requirementId === id)
       const statusLabel = id => (state.statuses.find(column => column.id === id)?.label ?? id)
 
@@ -1177,6 +1215,61 @@ export     function RequirementsPage({ state, onOpenTask, onChanged, createSigna
               /* 官方 Table：需求矩阵本来就是一张表（编号 / 功能点 / 覆盖 / 卡与用例 / 操作），
                  原来是一串 div 拼的功能点行。RAC 的 collection 组件不能被自定义组件包住，
                  所以直接用 table.tsx 的再导出。 */
+              /* 勾选 + 批量覆盖验收条件 */
+              h('div', { className: 'mb-2 flex min-w-0 flex-wrap items-center gap-2', 'data-point-bulk': '' },
+                h('span', { className: HINT }, `已选 ${selectedPointIds.size} 个功能点`),
+                h(Button, { variant: 'secondary', size: 'sm', disabled: selectedPointIds.size === 0, onClick: () => setBulkAcceptance({ text: '' }) }, '批量设验收条件'),
+                selectedPointIds.size === 0 ? null : h(Button, { variant: 'ghost', size: 'xs', onClick: () => setSelectedPointIds(new Set()) }, '清除选择')),
+              bulkAcceptance === null ? null : h('div', { className: `${PANEL} mb-2`, 'data-point-bulk-form': '' },
+                h('div', { className: PANEL_HEAD }, `批量设置验收条件（已选 ${selectedPointIds.size} 个）`),
+                h('div', { className: PANEL_BODY },
+                  h('div', { className: HINT }, '一行一条，会替换所选功能点的全部验收条件；已挂在这些条件下的用例会变成「未挂条件」。'),
+                  h(TextAreaField, { rows: 4, value: bulkAcceptance.text, 'aria-label': '批量验收条件', onChange: event => setBulkAcceptance({ text: event.target.value }) }),
+                  h('div', { className: ROW, style: { justifyContent: 'flex-end', gap: 8 } },
+                    h(Button, { variant: 'secondary', size: 'sm', onClick: () => setBulkAcceptance(null) }, '取消'),
+                    h(Button, { variant: 'primary', size: 'sm', onClick: () => void applyBulkAcceptance() }, '替换验收条件'),
+                  ),
+                ),
+              ),
+          pointForm === null ? null : h('div', { className: `${PANEL} mb-2`, ref: pointFormRef, 'data-point-form': '' },
+            h('div', { className: PANEL_HEAD }, pointForm.id === undefined ? '新增功能点' : `编辑功能点 ${pointForm.id}`),
+            h('div', { className: PANEL_BODY },
+              h('div', { className: FIELD },
+                h('div', { className: LABEL }, '功能点标题'),
+                h(TextField, { value: pointForm.title, placeholder: '例如 结算页展示可用积分', onChange: event => setPointForm({ ...pointForm, title: event.target.value }) }),
+              ),
+              h('div', { className: FIELD },
+                h('div', { className: LABEL }, '说明'),
+                h(MdField, { rows: 3, value: pointForm.description ?? '', onChange: event => setPointForm({ ...pointForm, description: event.target.value }) }),
+              ),
+              h('div', { className: FIELD },
+                h('div', { className: LABEL }, '验收条件（一行一条，做成什么样算完成）'),
+                h(TextAreaField, { rows: 4, value: pointForm.acceptanceText ?? '', onChange: event => setPointForm({ ...pointForm, acceptanceText: event.target.value }) }),
+              ),
+              h('div', { className: ROW, style: { gap: 12 } },
+                h('div', { className: FIELD, style: { flex: '0 0 150px' } },
+                  h('div', { className: LABEL }, '优先级'),
+                  h(Select, {
+                    className: 'w-full', value: pointForm.priority, options: pointPriorityOptions,
+                    'aria-label': '功能点优先级',
+                    onChange: event => setPointForm({ ...pointForm, priority: event.target.value }),
+                  }),
+                ),
+                h('div', { className: FIELD, style: { flex: '0 0 150px' } },
+                  h('div', { className: LABEL }, '状态'),
+                  h(Select, {
+                    className: 'w-full', value: pointForm.status, options: pointStatusOptions,
+                    'aria-label': '功能点状态',
+                    onChange: event => setPointForm({ ...pointForm, status: event.target.value }),
+                  }),
+                ),
+              ),
+              h('div', { className: ROW, style: { justifyContent: 'flex-end', gap: 8 } },
+                h(Button, { variant: 'secondary', size: 'sm', onClick: () => setPointForm(null) }, '取消'),
+                h(Button, { variant: 'primary', size: 'sm', onClick: () => void savePoint() }, '保存功能点'),
+              ),
+            ),
+          ),
               (() => {
                 const raw = matrix.points ?? []
                 const query = matrixQuery.trim().toLowerCase()
@@ -1201,6 +1294,24 @@ export     function RequirementsPage({ state, onOpenTask, onChanged, createSigna
                     ? h(EmptyState, { title: '没有匹配的功能点' })
                     : h(Table, { size: 'sm', 'aria-label': '需求追溯矩阵' },
                 h(TableHeader, null,
+                  /* 表头不放 Checkbox：RAC 的 Table 会把表头里的勾选框当成 selection 列、要求 slot="selection"。
+                     放一个纯文本按钮做全选/清空，行内勾选照旧。 */
+                  h(TableColumn, { id: 'pick' },
+                    h(Button, {
+                      variant: 'ghost', size: 'xs',
+                      'aria-label': points.length > 0 && points.every(point => selectedPointIds.has(point.id)) ? '清空功能点选择' : '全选功能点',
+                      onClick: () => {
+                        const all = points.length > 0 && points.every(point => selectedPointIds.has(point.id))
+                        setSelectedPointIds(previous => {
+                          const nextSet = new Set(previous)
+                          for (const point of points) {
+                            if (all) nextSet.delete(point.id)
+                            else nextSet.add(point.id)
+                          }
+                          return nextSet
+                        })
+                      },
+                    }, points.length > 0 && points.every(point => selectedPointIds.has(point.id)) ? '清空' : '全选')),
                   h(TableColumn, { id: 'code', isRowHeader: true }, '编号'),
                   h(TableColumn, { id: 'point' }, '功能点'),
                   h(TableColumn, { id: 'covered' }, '覆盖'),
@@ -1209,6 +1320,22 @@ export     function RequirementsPage({ state, onOpenTask, onChanged, createSigna
                 ),
                 h(TableBody, null,
                       points.map(point => h(TableRow, { key: point.id, id: point.id },
+                    h(TableCell, null,
+                      // Checkbox 适配层不透传 data-*，钩子挂在外层 span 上（探针按它勾选）。
+                      h('span', { 'data-point-pick': point.id },
+                        h(CheckField, {
+                          checked: selectedPointIds.has(point.id),
+                          'aria-label': `选择功能点 ${point.id}`,
+                          onChange: event => {
+                            const checked = event.target.checked === true
+                            setSelectedPointIds(previous => {
+                              const next = new Set(previous)
+                              if (checked) next.add(point.id)
+                              else next.delete(point.id)
+                              return next
+                            })
+                          },
+                        }))),
                     h(TableCell, null, h('span', { className: CODE }, point.id)),
                     h(TableCell, { className: 'align-top' },
                       h('b', null, point.title),
@@ -1250,7 +1377,15 @@ export     function RequirementsPage({ state, onOpenTask, onChanged, createSigna
                     ),
                     h(TableCell, null,
                       h('div', { className: ACTIONS },
-                        h(Button, { variant: 'ghost', size: 'sm', onClick: () => setPointForm({ ...point, acceptanceText: (point.acceptance ?? []).map(item => item.text).join('\n') }) }, '编辑'),
+                        h(Button, {
+                          variant: 'ghost', size: 'sm',
+                          'data-point-edit': point.id,
+                          onClick: () => {
+                            const editing = pointForm !== null && pointForm.id === point.id
+                            if (editing) setPointForm(null)
+                            else openPointForm({ ...point, acceptanceText: (point.acceptance ?? []).map(item => item.text).join('\n') })
+                          },
+                        }, pointForm !== null && pointForm.id === point.id ? '编辑中' : '编辑'),
                         h(Button, { variant: 'destructive', size: 'sm', onClick: () => void removePoint(point.id) }, '删除'),
                       ),
                     ),
@@ -1283,45 +1418,6 @@ export     function RequirementsPage({ state, onOpenTask, onChanged, createSigna
             h(Button, { variant: 'ghost', size: 'sm', onClick: () => { if (current !== null) void loadMatrix(current.id) } }, '刷新矩阵'),
             splitNote === null ? null : h('span', { className: HINT }, splitNote),
             matrixNote === null ? null : h('span', { className: HINT }, matrixNote),
-          ),
-          pointForm === null ? null : h('div', { className: `${PANEL} mt-3` },
-            h('div', { className: PANEL_HEAD }, pointForm.id === undefined ? '新增功能点' : `编辑功能点 ${pointForm.id}`),
-            h('div', { className: PANEL_BODY },
-              h('div', { className: FIELD },
-                h('div', { className: LABEL }, '功能点标题'),
-                h(TextField, { value: pointForm.title, placeholder: '例如 结算页展示可用积分', onChange: event => setPointForm({ ...pointForm, title: event.target.value }) }),
-              ),
-              h('div', { className: FIELD },
-                h('div', { className: LABEL }, '说明'),
-                h(MdField, { rows: 3, value: pointForm.description ?? '', onChange: event => setPointForm({ ...pointForm, description: event.target.value }) }),
-              ),
-              h('div', { className: FIELD },
-                h('div', { className: LABEL }, '验收条件（一行一条，做成什么样算完成）'),
-                h(TextAreaField, { rows: 4, value: pointForm.acceptanceText ?? '', onChange: event => setPointForm({ ...pointForm, acceptanceText: event.target.value }) }),
-              ),
-              h('div', { className: ROW, style: { gap: 12 } },
-                h('div', { className: FIELD, style: { flex: '0 0 150px' } },
-                  h('div', { className: LABEL }, '优先级'),
-                  h(Select, {
-                    className: 'w-full', value: pointForm.priority, options: pointPriorityOptions,
-                    'aria-label': '功能点优先级',
-                    onChange: event => setPointForm({ ...pointForm, priority: event.target.value }),
-                  }),
-                ),
-                h('div', { className: FIELD, style: { flex: '0 0 150px' } },
-                  h('div', { className: LABEL }, '状态'),
-                  h(Select, {
-                    className: 'w-full', value: pointForm.status, options: pointStatusOptions,
-                    'aria-label': '功能点状态',
-                    onChange: event => setPointForm({ ...pointForm, status: event.target.value }),
-                  }),
-                ),
-              ),
-              h('div', { className: ROW, style: { justifyContent: 'flex-end', gap: 8 } },
-                h(Button, { variant: 'secondary', size: 'sm', onClick: () => setPointForm(null) }, '取消'),
-                h(Button, { variant: 'primary', size: 'sm', onClick: () => void savePoint() }, '保存功能点'),
-              ),
-            ),
           ),
           h('div', { className: 'grid grid-cols-2 gap-2 sm:grid-cols-4 xl:grid-cols-7' },
             h('div', { className: STATBOX }, h('b', { className: STATVALUE }, `${done}/${tasks.length}`), h('span', { className: LABEL }, '卡已完成')),

@@ -384,6 +384,43 @@ try {
     check('③b 矩阵筛选真的收窄结果', /显示 1 \//.test(countAfter) && countBefore !== countAfter, `${countBefore} → ${countAfter}`)
   }
 
+  /* ③c 矩阵行内编辑 + 批量覆盖验收条件 */
+  const pickedPoint = await page.evaluate(() => {
+    const host = document.querySelector('[data-point-pick]')
+    const input = host?.querySelector('input')
+    if (input !== null && input !== undefined) { input.click(); return true }
+    if (host === null || host === undefined) return false
+    host.click()
+    return true
+  })
+  await new Promise(resolve => setTimeout(resolve, 400))
+  let bulkText = await page.evaluate(() => document.querySelector('[data-point-bulk]')?.textContent ?? '')
+  // 行内勾选没生效时退回「全选」按钮，保证批量入口本身被测到
+  if (!bulkText.includes('已选 1')) {
+    await clickExact('全选')
+    bulkText = await page.evaluate(() => document.querySelector('[data-point-bulk]')?.textContent ?? '')
+  }
+  check('③c 勾选功能点后批量条出现', pickedPoint === true && bulkText.includes('已选 1'), bulkText)
+  const bulkOpened = await clickExact('批量设验收条件')
+  const bulkForm = await page.evaluate(() => document.querySelector('[data-point-bulk-form]') !== null)
+  check('③c 批量验收条件表单能打开', bulkOpened === true && bulkForm === true)
+  await clickExact('取消')
+  const editOpened = await page.evaluate(() => {
+    const button = document.querySelector('[data-point-edit]')
+    if (button === null || button === undefined) return false
+    button.click()
+    return true
+  })
+  await new Promise(resolve => setTimeout(resolve, 700))
+  const formPos = await page.evaluate(() => {
+    const form = document.querySelector('[data-point-form]')
+    const table = document.querySelector('[aria-label="需求追溯矩阵"]')
+    if (form === null || table === null) return null
+    return { formTop: Math.round(form.getBoundingClientRect().top), tableTop: Math.round(table.getBoundingClientRect().top) }
+  })
+  check('③c 编辑表单在矩阵表格上方（就地）', editOpened === true && formPos !== null && formPos.formTop < formPos.tableTop, JSON.stringify(formPos))
+  await clickExact('取消')
+
   // ③b 需求页搜索与来源筛选是真的（以前只写 localStorage + dispatchEvent('resize')，列表不变）
   const typedQuery = await page.evaluate(() => {
     const input = [...document.querySelectorAll('[data-dsh-studio] input')].find(node => String(node.placeholder ?? '').includes('搜编号'))
