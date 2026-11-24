@@ -164,7 +164,9 @@ export async function handleReleasesRoute({ method, route, req, res, store, url 
     await store.mutate(state => {
       const found = state.releases.find(item => item.id === id)
       if (found === undefined) throw new Error('版本不存在')
-      gate = host.releaseGate(state, found)
+      /* 审批动作只看「除了审批之外」的门禁：否则「没审批 → 不许审批」死锁（2026-11-24 e2e 自检抓到，
+         面板上的审批按钮也永远灰着）。 */
+      gate = host.releaseGate(state, found, { ignoreApproval: true })
       if (!gate.ready) throw new Error(`门禁没过：${gate.blockers.join('；')}`)
       found.status = 'approved'
       found.approveBy = by
@@ -181,6 +183,7 @@ export async function handleReleasesRoute({ method, route, req, res, store, url 
       }].slice(-200)
       found.updatedAt = Date.now()
       release = { ...found }
+      gate = host.releaseGate(state, found)
     })
     host.sendJson(res, 200, { ok: true, release, gate, state: host.publicState(store) })
     return true

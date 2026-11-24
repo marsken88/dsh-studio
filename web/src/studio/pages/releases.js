@@ -257,7 +257,12 @@ export function ReleasesPage({ state, onOpenTask }) {
             h('div', { className: 'flex flex-wrap items-center justify-between gap-2' },
               h('div', { className: ACTIONS },
                 h(Button, { variant: 'ghost', size: 'sm', disabled: busy, onClick: () => void act('/release/notes', { id: form.id }, '发布说明已生成') }, '生成发布说明'),
-                h(Button, { variant: 'secondary', size: 'sm', disabled: busy || !gate?.ready, onClick: () => void act('/release/approve', { id: form.id, by: '人' }, '已审批，可以发布了') }, '审批通过'),
+                h(Button, {
+                  variant: 'secondary', size: 'sm',
+                  disabled: busy || gate?.approvable !== true,
+                  title: gate?.approvable === true ? '把审批结论记到版本上（发布还要求卡 / 用例 / 冒烟都过）' : `先把其它门禁清掉再审批：${(gate?.blockers ?? []).filter(item => item !== '还没有发布审批：先在版本上点「审批通过」并写结论').slice(0, 3).join('；') || '门禁数据还没加载'}`,
+                  onClick: () => void act('/release/approve', { id: form.id, by: '人' }, '已审批，可以发布了'),
+                }, '审批通过'),
               ),
               h('div', { className: ACTIONS },
               h(Button, {

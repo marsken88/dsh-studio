@@ -1720,7 +1720,7 @@ function Drawer({ task, state, onClose, onChanged }) {
                     },
                       h('option', { value: '' }, '全部改动'),
                       diffView.commits.map(item => h('option', { key: item.sha, value: item.sha }, `${item.sha} ${String(item.subject).slice(0, 24)}`)))),
-                allFiles.length > 6
+                allFiles.length > 6 || diffQuery !== ''
                   ? h('div', { className: 'w-40 max-w-full', 'data-diff-filter': '' },
                     h(TextField, { value: diffQuery, placeholder: '筛文件路径…', 'aria-label': '筛文件', onChange: event => {
                       const value = event.target.value
@@ -2067,7 +2067,7 @@ function Drawer({ task, state, onClose, onChanged }) {
           artifacts.length === 0
             ? h(EmptyState, { title: '还没有交付物。', hint: '文档、MR、用例、报告——交付要有东西，不只是一句「做完了」。' })
             : h(React.Fragment, null,
-              artifacts.length > 5
+              artifacts.length > 5 || artifactQuery !== ''
                 ? h('div', { className: ROW, 'data-artifact-filter': '' },
                   h('div', { className: 'w-64 max-w-full' },
                     h(TextField, { value: artifactQuery, placeholder: '按标题 / 类型 / 链接筛…', 'aria-label': '筛交付物', onChange: event => setArtifactQuery(event.target.value) })),

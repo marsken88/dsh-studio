@@ -57,6 +57,17 @@ const browser = await puppeteer.launch({
   defaultViewport: { width: 1600, height: 1000 },
 })
 const page = await browser.newPage()
+/* 宿主登录也可能只认 cookie（?token= 是 agent 面板的入口）。STUDIO_COOKIE 支持
+   「name=value; name2=value2」，在做登录的实例上跑探针时用（值从浏览器 cookie 里取）。 */
+const cookieSpec = String(process.env.STUDIO_COOKIE ?? "").trim()
+if (cookieSpec !== "") {
+  const origin = new URL(baseUrl)
+  const parsed = cookieSpec.split(";").map(part => part.trim()).filter(Boolean).map(part => {
+    const at = part.indexOf("=")
+    return at > 0 ? { name: part.slice(0, at), value: part.slice(at + 1), domain: origin.hostname, path: "/" } : null
+  }).filter(Boolean)
+  if (parsed.length > 0) await page.setCookie(...parsed)
+}
 const errors = []
 const HOST_NOISE = /client-modules: duplicate factory registration for "@deepseek-ai\//
 page.on('pageerror', error => { if (!HOST_NOISE.test(String(error))) errors.push(String(error).slice(0, 200)) })
