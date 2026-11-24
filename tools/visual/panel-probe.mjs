@@ -583,28 +583,58 @@ try {
     const rendered = await page.waitForFunction(() => {
       const node = document.querySelector('[data-drawer-diff]')
       if (node === null) return false
-      return node.querySelector('[data-diff-range]') !== null && node.querySelectorAll('[data-diff-file]').length > 0
+      return node.querySelector('[data-diff-tree] [role="row"]') !== null
+        && node.querySelectorAll('[data-diff-file]').length > 0
+        && node.querySelector('[data-diff-content]') !== null
     }, { timeout: 20000, polling: 300 }).then(() => true).catch(() => false)
     const diffInfo = await page.evaluate(() => {
       const node = document.querySelector('[data-drawer-diff]')
       return {
         range: String(node?.querySelector('[data-diff-range]')?.textContent ?? ''),
         totals: String(node?.querySelector('[data-diff-totals]')?.textContent ?? ''),
+        rows: node?.querySelectorAll('[data-diff-tree] [role="row"]').length ?? 0,
         files: node?.querySelectorAll('[data-diff-file]').length ?? 0,
-        text: String(node?.textContent ?? '').slice(0, 200),
+        marks: [...(node?.querySelectorAll('[data-diff-tree] [data-change]') ?? [])].map(el => String(el.textContent ?? '')).slice(0, 6),
+        selected: node?.querySelector('[data-diff-content]')?.getAttribute('data-diff-content') ?? '',
       }
     })
-    check('⑦ 真卡能看到逐文件 diff（分支 ← 基线 + 每个文件 +N −M）', rendered === true && diffInfo.files > 0, JSON.stringify(diffInfo))
-    const expanded = await page.evaluate(() => {
-      const row = document.querySelector('[data-drawer-diff] [data-diff-file] [role="button"]')
-      if (row === null) return false
-      row.click()
+    check('⑦ 真卡能看到文件树（目录分组 + 新增/修改标记）', rendered === true && diffInfo.files > 0 && diffInfo.rows > diffInfo.files && diffInfo.marks.length > 0, JSON.stringify(diffInfo))
+    // 点第 2 个文件：选中态与下面的内容区都要跟着换
+    const picked = await page.evaluate(() => {
+      const rows = [...document.querySelectorAll('[data-drawer-diff] [data-diff-file]')]
+      const target = rows[1]
+      if (target === undefined) return ''
+      target.click()
+      return target.getAttribute('data-diff-file') ?? ''
+    })
+    await new Promise(resolve => setTimeout(resolve, 500))
+    const content = await page.evaluate(() => {
+      const node = document.querySelector('[data-diff-content]')
+      return {
+        path: node?.getAttribute('data-diff-content') ?? '',
+        lines: node?.querySelectorAll('pre > div').length ?? 0,
+      }
+    })
+    check('⑦ 选一个文件能看到它的逐行改动内容', picked !== '' && content.path === picked && content.lines > 5, JSON.stringify({ picked, content }))
+    await page.screenshot({ path: join(outDir, 'drawer-diff-real.png') })
+    // 「全文」：切到工作树里的文件本体（带行号），验的是能真的读出来
+    const fullClicked = await page.evaluate(() => {
+      const button = [...document.querySelectorAll('[data-diff-content] button')]
+        .find(node => (node.textContent ?? '').trim() === '全文')
+      if (button === undefined) return false
+      button.click()
       return true
     })
-    await new Promise(resolve => setTimeout(resolve, 400))
-    const patchLines = await page.evaluate(() => document.querySelector('[data-drawer-diff] pre')?.querySelectorAll('div')?.length ?? 0)
-    check('⑦ 展开文件能看到逐行 patch', expanded === true && patchLines > 5, `patchLines=${patchLines}`)
-    await page.screenshot({ path: join(outDir, 'drawer-diff-real.png') })
+    const fullOk = await page.waitForFunction(path => {
+      const node = document.querySelector('[data-diff-fulltext]')
+      return node !== null && node.getAttribute('data-diff-fulltext') === path && node.querySelectorAll('div').length > 5
+    }, { timeout: 10000, polling: 200 }, picked).then(() => true).catch(() => false)
+    const fullInfo = await page.evaluate(() => {
+      const node = document.querySelector('[data-diff-fulltext]')
+      return { path: node?.getAttribute('data-diff-fulltext') ?? '', lines: node?.querySelectorAll('div').length ?? 0 }
+    })
+    check('⑦ 「全文」能读工作树里的文件内容（带行号）', fullClicked === true && fullOk === true, JSON.stringify(fullInfo))
+    await page.screenshot({ path: join(outDir, 'drawer-diff-fulltext.png') })
   }
 
   check('全程没有 pageerror / console 错误', errors.length === 0, errors.slice(0, 3).join(' | '))

@@ -101,6 +101,31 @@ export function parseStatusList(text) {
   return rows
 }
 
+/** git diff --name-status → [{ path, change }]：A 新增 / M 修改 / D 删除 / R 改名 / C 复制。 */
+export function parseNameStatus(text) {
+  const rows = []
+  for (const line of String(text ?? '').split(/\r?\n/)) {
+    if (line.trim() === '') continue
+    const parts = line.split('\t')
+    if (parts.length < 2) continue
+    const code = String(parts[0] ?? '').trim().toUpperCase()
+    // 改名/复制是 `R100<TAB>old<TAB>new`：面板要的是新路径
+    const path = String(parts[parts.length - 1] ?? '').trim()
+    if (path === '') continue
+    const change = code.startsWith('A')
+      ? 'added'
+      : code.startsWith('D')
+        ? 'deleted'
+        : code.startsWith('R')
+          ? 'renamed'
+          : code.startsWith('C')
+            ? 'copied'
+            : 'modified'
+    rows.push({ path, change })
+  }
+  return rows
+}
+
 /** 把一个文件的 patch 截到面板能安全渲染的长度（按字节 + 行数两道闸）。 */
 export function boundPatch(patch, limits = {}) {
   const cfg = { ...DIFF_LIMITS, ...(limits ?? {}) }
@@ -118,11 +143,12 @@ export function boundPatch(patch, limits = {}) {
   return { patch: text, truncated }
 }
 
-/** numstat + 统一 diff → 面板形状（文件、逐文件 patch、总数、被省略的数量）。 */
-export function buildDiffView({ numstat, patch, limits } = {}) {
+/** numstat + 统一 diff + name-status → 面板形状（文件、逐文件 patch、改动类型、总数、被省略的数量）。 */
+export function buildDiffView({ numstat, patch, nameStatus, limits } = {}) {
   const cfg = { ...DIFF_LIMITS, ...(limits ?? {}) }
   const rows = parseNumstat(numstat)
   const chunks = splitPatch(patch)
+  const changes = new Map(parseNameStatus(nameStatus).map(row => [row.path, row.change]))
   const files = []
   let budget = Math.max(0, Number(cfg.totalBytes) || 0)
   let omitted = 0
@@ -142,6 +168,7 @@ export function buildDiffView({ numstat, patch, limits } = {}) {
     if (bounded.truncated || text.length < bounded.patch.length) truncated = true
     files.push({
       path: row.path,
+      change: changes.get(row.path) ?? 'modified',
       additions: row.additions,
       deletions: row.deletions,
       binary: row.binary,

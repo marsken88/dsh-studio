@@ -8,6 +8,8 @@ import { buildDiffView, parseStatusList } from '../task-diff.js'
 import { parseMentions } from '../dispatcher.js'
 import { mergeGateFor } from '../merge-gate.js'
 import { rejectUnknownFields } from '../route-contract.js'
+import { readFile, stat } from 'node:fs/promises'
+import { resolve, sep } from 'node:path'
 const INJECTED = ["applyConfig","commentTask","deleteProjectFolder","ensureWorktree","getDispatcher","mergeMergeRequest","publicState","publishMergeGate","readJsonBody","removeWorktree","sendJson","serviceOf","upsertById","workProjectOf"]
 let host = {
   applyConfig: () => {},
@@ -191,7 +193,9 @@ if (method === 'POST' && route === '/task/diff') {
     return true
   }
   const patch = await git('diff', '--unified=3', `${base}...HEAD`)
-  const view = buildDiffView({ numstat: numstat.stdout, patch: patch.ok === true ? patch.stdout : '' })
+  // 改动类型（新增 / 修改 / 删除 / 改名）：面板的树形视图用它标每个文件。
+  const nameStatus = patch.ok === true ? await git('diff', '--name-status', `${base}...HEAD`) : { ok: false, stdout: '' }
+  const view = buildDiffView({ numstat: numstat.stdout, patch: patch.ok === true ? patch.stdout : '', nameStatus: nameStatus.stdout })
   // 还没提交的改动单独报：研发说「改完了」但忘了提交时，代码其实不在分支上。
   const status = await git('status', '--porcelain')
   const dirty = parseStatusList(status.stdout)
@@ -212,6 +216,65 @@ if (method === 'POST' && route === '/task/diff') {
       deletions: dirtyTotals.deletions,
     },
   })
+  return true
+}
+if (method === 'POST' && route === '/task/file') {
+  /* 看某个文件的**全文**（面板「改动 / 全文」里的全文）：只读仓库里的文件，越界一律拒绝。
+     只读路由：不推 revision、不记审计。读不到（已删除 / 新文件不在工作区）如实说原因。 */
+  req.__studioReadOnly = true
+  const body = await host.readJsonBody(req)
+  const id = String(body.id ?? '')
+  const wanted = String(body.path ?? '').trim()
+  const snapshot = store.snapshot()
+  const task = snapshot.tasks.find(entry => entry.id === id)
+  if (task === undefined) throw new Error(`no task ${id}`)
+  if (wanted === '') {
+    host.sendJson(res, 200, { ok: true, skipped: '没给文件路径' })
+    return true
+  }
+  const config = snapshot.config
+  const worktree = task.worktree ?? null
+  const service = host.serviceOf(config, task)
+  const project = host.workProjectOf(config, task)
+  const dir = String(worktree?.path ?? '').trim()
+    || String(service?.repoPath ?? '').trim()
+    || String(project?.repoPath ?? '').trim()
+  if (dir === '') {
+    host.sendJson(res, 200, { ok: true, skipped: '这张卡还没配代码目录：在项目或服务里填「本机代码目录」' })
+    return true
+  }
+  const base = resolve(dir)
+  const target = resolve(base, wanted)
+  // 只允许读这个仓库/工作树里面的文件：`../`、绝对路径都要拒绝。
+  if (target !== base && !target.startsWith(base + sep)) {
+    host.sendJson(res, 200, { ok: true, skipped: '只能看仓库目录里的文件' })
+    return true
+  }
+  try {
+    const info = await stat(target)
+    if (info.isFile() !== true) {
+      host.sendJson(res, 200, { ok: true, skipped: '这不是一个文件' })
+      return true
+    }
+    const LIMIT = 200_000
+    const buffer = await readFile(target)
+    const capped = buffer.subarray(0, LIMIT)
+    if (capped.includes(0)) {
+      host.sendJson(res, 200, { ok: true, path: wanted, binary: true, bytes: info.size })
+      return true
+    }
+    host.sendJson(res, 200, {
+      ok: true,
+      path: wanted,
+      content: capped.toString('utf8'),
+      bytes: info.size,
+      truncated: info.size > capped.length,
+      at: Date.now(),
+    })
+  } catch (error) {
+    const reason = String(error?.message ?? error)
+    host.sendJson(res, 200, { ok: true, skipped: /ENOENT/.test(reason) ? '这个文件不在工作区里（可能是新文件没落盘，或已删除）' : `读不到这个文件：${reason.slice(0, 120)}` })
+  }
   return true
 }
 if (method === 'POST' && route === '/task/agent/fail') {

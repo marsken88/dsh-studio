@@ -5,7 +5,7 @@ import { ARTIFACT_KINDS, ARTIFACT_KIND_LABEL, ARTIFACT_STATUS, ARTIFACT_STATUS_L
 import { artifactsWithoutBody, buildRoster, cardOwner, caseSummaryOf, checkSummaryOf, commentCountOf, filterRoster, fromDateInput, ownerLabel, toDateInput } from './roster.js'
 import { fmtTime } from './format.js'
 import { parseSteps } from './cases.js'
-import { Button } from '../boardui/index'
+import { Button, TreeView, TreeViewItem } from '../boardui/index'
 import { EmptyState } from '../boardui/empty-state'
 import { ProgressTrack } from '../components/base/progress/progress'
 
@@ -50,6 +50,54 @@ const COMMENT_ROLE_RAIL = {
 const EMPTY_BOX = 'flex min-w-0 flex-col gap-1 rounded-xl border border-separator-border bg-background-secondary-default p-3'
 
 const DESIGN_LABEL = { approved: '已通过', pending: '待评审', changes_requested: '要改' }
+
+/* 代码改动的文件树：git 只给扁平路径，这里拼成目录树，抽屉用 BoardUI TreeView 展示。
+   目录在前、同类按名字排序；节点 id 用完整路径（选中状态与 DOM 钩子都靠它）。 */
+const DIFF_CHANGE_LABEL = { added: '新增', modified: '修改', deleted: '删除', renamed: '改名', copied: '复制' }
+const DIFF_CHANGE_CLASS = {
+  added: 'text-state-success-text',
+  modified: 'text-accent-600',
+  deleted: 'text-text-error-primary',
+  renamed: 'text-status-purple-text',
+  copied: 'text-status-purple-text',
+}
+
+function buildDiffTree(files) {
+  const root = []
+  for (const file of files) {
+    const path = String(file.path ?? '')
+    const segments = path.split('/').filter(Boolean)
+    if (segments.length === 0) continue
+    let level = root
+    let prefix = ''
+    for (const segment of segments.slice(0, -1)) {
+      prefix = prefix === '' ? segment : `${prefix}/${segment}`
+      let node = level.find(item => item.kind === 'dir' && item.name === segment)
+      if (node === undefined) {
+        node = { kind: 'dir', id: prefix, name: segment, path: prefix, children: [] }
+        level.push(node)
+      }
+      level = node.children
+    }
+    level.push({ kind: 'file', id: path, name: segments[segments.length - 1], path, file })
+  }
+  const sort = nodes => {
+    nodes.sort((a, b) => (a.kind === b.kind ? a.name.localeCompare(b.name) : a.kind === 'dir' ? -1 : 1))
+    for (const node of nodes) if (node.kind === 'dir') sort(node.children)
+  }
+  sort(root)
+  return root
+}
+
+/** 默认把所有目录展开：改动文件大多两三层，收着反而要多点好几下。 */
+function diffDirIds(nodes, out = []) {
+  for (const node of nodes) {
+    if (node.kind !== 'dir') continue
+    out.push(node.id)
+    diffDirIds(node.children, out)
+  }
+  return out
+}
 
 /* 交接契约五段式：顺序与 src/host/handoff.js 的 HANDOFF_FIELDS 一致。
    标签在这里写死是为了不把 host 模块 import 进浏览器包（会多带一份纯函数）。 */
@@ -169,7 +217,25 @@ function Drawer({ task, state, onClose, onChanged }) {
   const [diffView, setDiffView] = React.useState(null)
   const [diffBusy, setDiffBusy] = React.useState(false)
   const [diffError, setDiffError] = React.useState(null)
-  const [openDiff, setOpenDiff] = React.useState({})
+  // 文件树里选中的那个文件：默认选第一个有改动的文件，打开就能看到内容。
+  const [diffPath, setDiffPath] = React.useState('')
+  // 右边内容区看「改动（patch）」还是「全文（工作树里的文件）」。
+  const [diffMode, setDiffMode] = React.useState('diff')
+  const [fileView, setFileView] = React.useState(null)
+  const loadFile = async path => {
+    setFileView({ path, busy: true, data: null, error: null })
+    try {
+      const out = await api('/task/file', { id: task.id, path })
+      setFileView({ path, busy: false, data: out ?? null, error: null })
+    } catch (cause) {
+      setFileView({ path, busy: false, data: null, error: cause instanceof Error ? cause.message : String(cause) })
+    }
+  }
+  const selectDiffFile = path => {
+    setDiffPath(path)
+    setFileView(null)
+    if (diffMode === 'file' && path !== '') void loadFile(path)
+  }
   const loadDiff = async () => {
     if (diffBusy) return
     setDiffBusy(true)
@@ -177,6 +243,8 @@ function Drawer({ task, state, onClose, onChanged }) {
     try {
       const out = await api('/task/diff', { id: task.id })
       setDiffView(out ?? null)
+      const files = Array.isArray(out?.files) ? out.files : []
+      setDiffPath(current => (files.some(item => item.path === current) ? current : (files[0]?.path ?? '')))
     } catch (cause) {
       setDiffError(cause instanceof Error ? cause.message : String(cause))
     } finally {
@@ -185,8 +253,10 @@ function Drawer({ task, state, onClose, onChanged }) {
   }
   React.useEffect(() => {
     setDiffView(null)
-    setOpenDiff({})
+    setDiffPath('')
     setDiffError(null)
+    setDiffMode('diff')
+    setFileView(null)
   }, [task.id])
   // 项目检查：跑本地质量命令（npm run check 之类），结果由服务端写回卡片。
   const [qualityRun, setQualityRun] = React.useState({ busy: false, line: '' })
@@ -1519,7 +1589,7 @@ function Drawer({ task, state, onClose, onChanged }) {
       ),
       h(Section, { pane: 'coding', current: pane, id: 'diff' },
         h(SectionHead, null, '代码改动（git diff）',
-          h('span', { className: HINT }, '直接读仓库里的真实改动：卡的分支对比基线。研发自报的文件清单是另一回事，这里不采信')),
+          h('span', { className: HINT }, '直接读仓库里的真实改动：卡的分支对比基线。左边文件树按目录分组，标了新增/修改/删除与行数')),
         h('div', { className: SECTION_BODY, 'data-drawer-diff': '' },
           (() => {
             if (diffBusy) return h('div', { className: HINT, 'data-diff-loading': '' }, '读取中…')
@@ -1538,6 +1608,55 @@ function Drawer({ task, state, onClose, onChanged }) {
             const files = Array.isArray(diffView.files) ? diffView.files : []
             const totals = diffView.totals ?? { files: 0, additions: 0, deletions: 0 }
             const uncommitted = diffView.uncommitted ?? { total: 0, files: [], additions: 0, deletions: 0 }
+            /* 文件树：目录分组 + 改动标记（新增/修改/删除）+ 行数；点一个文件在下面看它的 patch。 */
+            const tree = buildDiffTree(files)
+            const selected = files.find(item => item.path === diffPath) ?? null
+            const changeLabel = item => DIFF_CHANGE_LABEL[item.change] ?? '修改'
+            const changeClass = item => DIFF_CHANGE_CLASS[item.change] ?? ''
+            const renderNode = node => (node.kind === 'dir'
+              ? h(TreeViewItem, { key: node.id, id: node.id, label: node.name, textValue: node.path }, node.children.map(renderNode))
+              : h(TreeViewItem, {
+                key: node.id,
+                id: node.id,
+                label: node.name,
+                textValue: node.path,
+                'data-diff-file': node.path,
+                trailingContent: h('span', { className: 'flex items-center gap-1.5' },
+                  h('span', { className: changeClass(node.file), 'data-change': node.file.change }, changeLabel(node.file)),
+                  h('span', { className: 'text-state-success-text' }, `+${node.file.additions}`),
+                  h('span', { className: 'text-text-error-primary' }, `−${node.file.deletions}`)),
+              }))
+            const renderLine = (line, index) => h('div', {
+              key: `d-${index}`,
+              className: line.startsWith('+++') || line.startsWith('---')
+                ? 'text-text-tertiary'
+                : line.startsWith('+')
+                  ? 'text-state-success-text'
+                  : line.startsWith('-')
+                    ? 'text-text-error-primary'
+                    : line.startsWith('@@')
+                      ? 'text-accent-600'
+                      : 'text-text-secondary',
+            }, line === '' ? ' ' : line)
+            /* 「全文」：读工作树里的文件本体（只读、200KB 上限），带行号。 */
+            const renderFileView = item => {
+              if (fileView === null || fileView.path !== item.path) return h('div', { className: HINT }, '读取文件全文…')
+              if (fileView.busy === true) return h('div', { className: HINT, 'data-diff-fulltext-loading': '' }, '读取中…')
+              if (fileView.error !== null) return h('div', { className: ERR_TEXT }, `读不到全文：${fileView.error}`)
+              const data = fileView.data ?? {}
+              if (String(data.skipped ?? '') !== '') return h('div', { className: HINT }, data.skipped)
+              if (data.binary === true) return h('div', { className: HINT }, '二进制文件，不显示全文')
+              const text = String(data.content ?? '')
+              return h('pre', {
+                className: 'max-h-[420px] overflow-auto rounded-md bg-background-secondary-default p-2 text-caption-1-regular',
+                'data-diff-fulltext': item.path,
+                style: { whiteSpace: 'pre-wrap', wordBreak: 'break-word', margin: 0 },
+              },
+                text.split('\n').map((line, index) => h('div', { key: `f-${index}`, className: 'flex gap-2 text-text-secondary' },
+                  h('span', { className: 'shrink-0 select-none text-text-tertiary', style: { width: '3em', textAlign: 'right' } }, String(index + 1)),
+                  h('span', { className: 'min-w-0 whitespace-pre-wrap break-words' }, line === '' ? ' ' : line))),
+                data.truncated === true ? h('div', { className: HINT }, '文件太大，只显示前 200 KB') : null)
+            }
             return h('div', { className: 'flex min-w-0 flex-col gap-2' },
               h('div', { className: ROW, style: { gap: 8, alignItems: 'center' } },
                 h(ChipField, { variant: 'gray', 'data-diff-range': '1' }, `${diffView.branch || '(无分支)'} ← ${diffView.base}`),
@@ -1551,41 +1670,51 @@ function Drawer({ task, state, onClose, onChanged }) {
                 : null,
               files.length === 0
                 ? h('div', { className: HINT }, '这条分支相对基线没有代码改动。')
-                : h('div', { className: 'flex min-w-0 flex-col gap-1' }, files.map(item => {
-                  const open = openDiff[item.path] === true
-                  const toggle = () => setOpenDiff(previous => ({ ...previous, [item.path]: !open }))
-                  return h('div', { key: item.path, className: 'flex min-w-0 flex-col gap-1 rounded-lg border border-separator-border p-2', 'data-diff-file': item.path },
-                    h('div', {
-                      className: 'flex min-w-0 cursor-pointer flex-wrap items-center gap-2',
-                      role: 'button',
-                      tabIndex: 0,
-                      onClick: toggle,
-                      onKeyDown: event => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); toggle() } },
+                : h('div', { className: 'min-w-0', 'data-diff-tree': '' },
+                  h(TreeView, {
+                    // 刷新（at 变了）就重建：新出现的目录也要按默认全部展开，避免沿用旧的展开集合。
+                    key: `diff-tree-${diffView.at ?? ''}`,
+                    'aria-label': '改动的文件（按目录分组）',
+                    selectionMode: 'single',
+                    selectedKeys: diffPath === '' ? [] : [diffPath],
+                    defaultExpandedKeys: diffDirIds(tree),
+                    onSelectionChange: keys => {
+                      const next = Array.from(keys)
+                      selectDiffFile(next.length > 0 ? String(next[0]) : '')
                     },
-                      h('span', { className: 'font-mono text-caption-1-regular text-text-primary' }, item.path),
-                      h('span', { className: 'text-caption-1-regular text-state-success-text' }, `+${item.additions}`),
-                      h('span', { className: 'text-caption-1-regular text-text-error-primary' }, `−${item.deletions}`),
-                      item.binary === true ? h('span', { className: HINT }, '二进制') : null,
-                      h('span', { className: HINT }, open ? '收起' : '展开 diff')),
-                    open
-                      ? (item.patch === ''
+                    size: 'sm',
+                    showGuides: true,
+                    className: 'max-h-[280px] overflow-auto',
+                  }, tree.map(renderNode))),
+              files.length === 0
+                ? null
+                : (selected === null
+                  ? h('div', { className: HINT }, '在文件树里选一个文件，看它的改动内容。')
+                  : h('div', { className: 'flex min-w-0 flex-col gap-2', 'data-diff-content': selected.path },
+                    h('div', { className: 'flex min-w-0 flex-wrap items-center gap-2' },
+                      h('span', { className: 'font-mono text-caption-1-regular text-text-primary' }, selected.path),
+                      h('span', { className: changeClass(selected), 'data-change': selected.change }, changeLabel(selected)),
+                      h('span', { className: 'text-caption-1-regular text-state-success-text' }, `+${selected.additions}`),
+                      h('span', { className: 'text-caption-1-regular text-text-error-primary' }, `−${selected.deletions}`),
+                      selected.binary === true ? h('span', { className: HINT }, '二进制') : null,
+                      selected.truncated === true ? h('span', { className: HINT }, '已截断') : null,
+                      h('span', { className: GROW }),
+                      h(Button, { variant: diffMode === 'diff' ? 'secondary' : 'ghost', size: 'sm', 'data-diff-mode': 'diff', onClick: () => setDiffMode('diff') }, '改动'),
+                      h(Button, {
+                        variant: diffMode === 'file' ? 'secondary' : 'ghost',
+                        size: 'sm',
+                        'data-diff-mode': 'file',
+                        onClick: () => {
+                          setDiffMode('file')
+                          if (fileView === null || fileView.path !== selected.path) void loadFile(selected.path)
+                        },
+                      }, '全文')),
+                    diffMode === 'file'
+                      ? renderFileView(selected)
+                      : (selected.patch === ''
                         ? h('div', { className: HINT }, '没有可显示的 patch（二进制文件或改动太大）')
                         : h('pre', { className: 'max-h-[420px] overflow-auto rounded-md bg-background-secondary-default p-2 text-caption-1-regular', style: { whiteSpace: 'pre-wrap', wordBreak: 'break-word', margin: 0 } },
-                          String(item.patch).split('\n').map((line, index) => h('div', {
-                            key: `d-${index}`,
-                            className: line.startsWith('+++') || line.startsWith('---')
-                              ? 'text-text-tertiary'
-                              : line.startsWith('+')
-                                ? 'text-state-success-text'
-                                : line.startsWith('-')
-                                  ? 'text-text-error-primary'
-                                  : line.startsWith('@@')
-                                    ? 'text-accent-600'
-                                    : 'text-text-secondary',
-                          }, line === '' ? ' ' : line))))
-                      : null,
-                  )
-                })),
+                          String(selected.patch).split('\n').map(renderLine))))),
               diffView.omitted > 0 ? h('div', { className: HINT }, `还有 ${diffView.omitted} 个文件没展开（改动太多）`) : null,
             )
           })(),

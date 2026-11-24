@@ -13,6 +13,10 @@ import { SegmentedControl as BoarduiSegmented, SegmentedControlItem as BoarduiSe
 import { DatePicker as BoarduiDatePicker } from "../components/base/date-picker/date-picker";
 import { CalendarDate, parseDate } from "@internationalized/date";
 
+/* 树形视图（BoardUI tree-view）：文件树用。组件源码原样放在 components/base/tree-view，
+   只去掉了上游的 motion 展开动画（见该文件头注）。 */
+export { TreeView, TreeViewItem } from "../components/base/tree-view/tree-view";
+
 const VARIANT = {
   default: "primary",
   primary: "primary",

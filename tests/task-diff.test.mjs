@@ -15,7 +15,7 @@ import { publishNoteMentions } from '../src/host/mention-note.js'
 import { parseMentions } from '../src/host/dispatcher.js'
 import { configureCodingRoutes, handleCodingRoute } from '../src/host/routes/coding.js'
 import {
-  boundPatch, buildDiffView, collectCodingFromWorktree, diffSummaryLine, parseNumstat, parseStatusList, splitPatch,
+  boundPatch, buildDiffView, collectCodingFromWorktree, diffSummaryLine, parseNameStatus, parseNumstat, parseStatusList, splitPatch,
 } from '../src/host/task-diff.js'
 
 const NUMSTAT = [
@@ -63,17 +63,36 @@ test('splitPatch：按文件切开，key 是 b/ 侧路径', () => {
   assert.match(chunks.get('src/new.js'), /\+e/)
 })
 
+test('parseNameStatus：A/M/D/R 归一成面板的改动类型', () => {
+  const rows = parseNameStatus('A\tnew.js\nM\tsrc/a.js\nD\tgone.js\nR100\told.js\trenamed.js\n')
+  assert.deepEqual(rows, [
+    { path: 'new.js', change: 'added' },
+    { path: 'src/a.js', change: 'modified' },
+    { path: 'gone.js', change: 'deleted' },
+    { path: 'renamed.js', change: 'renamed' },
+  ])
+  assert.deepEqual(parseNameStatus(''), [])
+})
+
 test('buildDiffView：逐文件 patch + 总数 + 被省略的文件', () => {
-  const view = buildDiffView({ numstat: NUMSTAT, patch: PATCH, limits: { files: 2 } })
+  const view = buildDiffView({
+    numstat: NUMSTAT,
+    patch: PATCH,
+    nameStatus: 'M\tsrc/a.js\nA\tsrc/new.js\nD\tsrc/gone.js\nM\tassets/logo.png\n',
+    limits: { files: 2 },
+  })
   assert.equal(view.files.length, 2, '只展开前两个文件')
   assert.equal(view.omitted, 2, '剩下的文件要如实计数')
   assert.deepEqual(view.totals, { files: 4, additions: 17, deletions: 10 })
+  assert.equal(view.files[0].change, 'modified', '改动类型来自 git --name-status')
   assert.equal(view.files[0].patch.includes('+extra'), true)
+  assert.equal(view.files[1].change, 'deleted')
   assert.equal(view.files[1].patch, '', 'numstat 里有、patch 里没有的文件不编造内容')
   assert.equal(view.truncated, true)
   assert.equal(diffSummaryLine(view), '4 个文件 +17 −10（已截断）')
-  const full = buildDiffView({ numstat: NUMSTAT, patch: PATCH, limits: { files: 4 } })
+  const full = buildDiffView({ numstat: NUMSTAT, patch: PATCH, nameStatus: 'M\tsrc/a.js\nA\tsrc/new.js\n', limits: { files: 4 } })
   assert.equal(full.omitted, 0)
+  assert.equal(full.files.find(item => item.path === 'src/new.js').change, 'added')
   assert.equal(full.files.find(item => item.path === 'src/new.js').patch.includes('+e'), true)
 })
 
@@ -299,8 +318,11 @@ test('POST /task/diff：从真实 git 仓库读分支相对基线的改动', asy
     assert.deepEqual(payload.totals, { files: 2, additions: 2, deletions: 0 })
     const changed = payload.files.find(item => item.path === 'a.js')
     assert.ok(changed !== undefined)
+    assert.equal(changed.change, 'modified', '改动类型要带上，面板用它标文件树')
     assert.match(changed.patch, /\+line2/)
-    assert.equal(payload.files.find(item => item.path === 'b.js').additions, 1)
+    const added = payload.files.find(item => item.path === 'b.js')
+    assert.equal(added.additions, 1)
+    assert.equal(added.change, 'added')
     assert.equal(payload.uncommitted.total, 0, '提交干净时不该报未提交改动')
   } finally {
     store.db?.close?.()
@@ -332,6 +354,41 @@ test('POST /task/diff：没配代码目录 / 不是 git 仓库时返回原因，
     assert.equal(captured.status, 200)
     assert.equal(captured.payload.ok, true, '读不到仓库是「已知的空」，不是请求失败（面板才能画成空态而不是报错）')
     assert.match(String(captured.payload.skipped), /代码目录/)
+  } finally {
+    store.db?.close?.()
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('POST /task/file：读工作树里的文件全文；越界与缺失都如实拒绝', async () => {
+  const { dir, repo } = makeRepo()
+  const store = await makeDiffStore(dir)
+  try {
+    let captured = null
+    const configure = body => configureCodingRoutes({
+      readJsonBody: async () => body,
+      sendJson: (res, status, payload) => { captured = { status, payload } },
+      serviceOf: () => ({ repoPath: repo, baseBranch: 'main' }),
+      workProjectOf: () => ({ repoPath: repo, baseBranch: 'main' }),
+      publicState: () => ({}),
+      getDispatcher: () => undefined,
+    })
+    const call = async body => {
+      configure(body)
+      await handleCodingRoute({ method: 'POST', route: '/task/file', req: {}, res: {}, store, url: new URL('http://local/studio-api/task/file') })
+      return captured
+    }
+    const ok = await call({ id: 't-diff-1', path: 'a.js' })
+    assert.equal(ok.payload.ok, true)
+    assert.match(String(ok.payload.content), /line2/, '读到的是工作树里的文件本体')
+    assert.equal(ok.payload.truncated, false)
+    const escape = await call({ id: 't-diff-1', path: '../../outside.txt' })
+    assert.equal(escape.payload.ok, true, '越界是「已知拒绝」，不是请求失败')
+    assert.match(String(escape.payload.skipped), /仓库目录/)
+    const missing = await call({ id: 't-diff-1', path: 'nope.js' })
+    assert.match(String(missing.payload.skipped), /不在工作区/)
+    const empty = await call({ id: 't-diff-1', path: '' })
+    assert.match(String(empty.payload.skipped), /没给文件路径/)
   } finally {
     store.db?.close?.()
     rmSync(dir, { recursive: true, force: true })
