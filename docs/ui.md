@@ -1064,7 +1064,7 @@ node tools/visual/ui-audit.mjs --base ... --theme dark --only board,drawer
 4px 网格、字号档位、颜色 token 数量、emoji 是否当图标、圆角层级、首屏空白、网格落单、文字截断。
 它只出证据（截图 + `tmp/unslop-audit/metrics*.json`），不改代码，也不进发版闸门。
 
-四条结论（完整报告见 [`ui-audit-2026-11-22.md`](ui-audit-2026-11-22.md)）：
+四条结论（完整报告见 [`ui-audit-2026-11-22.md`](ui-audit-2026-11-22.md)；一天后的复审与修复见 [`ui-audit-2026-11-24.md`](ui-audit-2026-11-24.md)）：
 
 1. **字体从未落地**：`boardui/theme.css` 引用 `--font-inter`，但仓库没有 `@font-face`、没有字体资源，
    实测全部文本回落到 `ui-sans-serif`。要么自托管 Inter，要么把 token 改成系统字。

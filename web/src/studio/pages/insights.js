@@ -12,7 +12,6 @@ import { client } from '../context.js'
 import { StatCard } from '../../boardui/chart-card'
 import { TaskRow } from '../../boardui/task-list'
 import { Button } from '../../boardui/index'
-import { EmptyState } from '../../boardui/empty-state'
 
 /* [&>*]:shrink-0 —— 纵向 flex 默认会压缩子项：内容高于视口时每个分区被压扁，
    而分区自己 overflow-hidden，里面的内容就被裁掉（工作台出现「空条」的根因）。 */
@@ -22,7 +21,9 @@ const PANEL_HEAD = 'flex flex-wrap items-center gap-2 border-b border-separator-
 const PANEL_BODY = 'flex min-w-0 flex-col gap-3 p-4'
 const HINT = 'text-caption-1-regular text-text-tertiary'
 const LABEL = 'text-caption-1-medium text-text-secondary'
-const KPI_GRID = 'grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-5'
+/* 5 张卡：宽屏一排 5 张；窄一档时 2 列排不完，第 5 张横跨两列，
+   避免「2+2+1」最后一行只剩一张窄卡（unslop：KPI 不许落单）。 */
+const KPI_GRID = 'grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-5 sm:[&>*:last-child]:col-span-2 xl:[&>*:last-child]:col-span-1'
 
 export function DashboardPage({ state, onOpenTask, onOpenBoard, onOpenCases }) {
   const { h, React, api, toast } = client()
@@ -86,15 +87,24 @@ export function DashboardPage({ state, onOpenTask, onOpenBoard, onOpenCases }) {
   const flowCell = (label, value) => h('div', { className: 'flex min-w-0 flex-col gap-1' },
     h('div', { className: LABEL }, label),
     h('div', { className: 'text-title-2-semibold text-text-primary tabular-nums' }, String(value ?? 0)))
-  const block = (title, rows, empty, hint) => h('div', { className: PANEL },
-    h('div', { className: PANEL_HEAD },
-      h('span', null, title),
-      h('span', { className: HINT }, hint ?? '')),
-    h('div', { className: PANEL_BODY },
-      rows.length === 0
-        ? h(EmptyState, { title: empty })
-        : h('div', { className: 'flex min-w-0 flex-col' }, rows)),
-  )
+  /* 没有内容的区块收成一行：一块 150px 的空面板 × 六七块，首屏全在说「没有」。
+     有内容时仍然是完整面板（表格行要空间）。（unslop：首屏每一块都要讲一件事，不拿空白占版面） */
+  const block = (title, rows, empty, hint) => (rows.length === 0
+    ? h('div', {
+      className: 'flex min-w-0 flex-wrap items-center gap-2 rounded-xl border border-separator-border bg-background-secondary-default px-4 py-2',
+      'data-empty-block': title,
+      // 收成一行仍然是「空态」：pages 探针靠 data-empty-state 断言每个空分区都写出了原因。
+      'data-empty-state': '',
+    },
+      h('span', { className: 'text-caption-1-medium text-text-secondary' }, title),
+      h('span', { className: HINT }, empty))
+    : h('div', { className: PANEL },
+      h('div', { className: PANEL_HEAD },
+        h('span', null, title),
+        h('span', { className: HINT }, hint ?? '')),
+      h('div', { className: PANEL_BODY },
+        h('div', { className: 'flex min-w-0 flex-col' }, rows)),
+    ))
 
   return h('div', { className: PAGE, 'data-insights-page': '' },
     regressionLine,

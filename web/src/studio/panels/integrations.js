@@ -413,7 +413,7 @@ export function SkillsPanel({ config, onChanged }) {
   return h('div', { className: PANE, 'data-panel': 'integrations-skills' },
     listSection({
       h, hook: 'skills',
-      title: '技能库（skills-manager）',
+      title: '技能库',
       hint: data === null ? '读取中…' : `保存在 ${data.root}/<名字>/SKILL.md，所有专家都能用 skill 工具加载；专家也可以自己用 studio_skill_save 往这里加技能。支持上传 SKILL.md 或包含 SKILL.md 的 .zip 技能包。`,
       rows, addLabel: '新建技能',
       onAdd: () => { setNote(null); setDraft({ name: '', description: '', whenToUse: '', tags: '', projects: '', content: '# 什么时候用\n\n# 步骤\n\n1. \n', enabled: true, editing: false }) },

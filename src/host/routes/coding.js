@@ -8,7 +8,7 @@ import { buildDiffView, parseStatusList } from '../task-diff.js'
 import { parseMentions } from '../dispatcher.js'
 import { mergeGateFor } from '../merge-gate.js'
 import { rejectUnknownFields } from '../route-contract.js'
-import { readFile, stat } from 'node:fs/promises'
+import { readFile, realpath, stat } from 'node:fs/promises'
 import { resolve, sep } from 'node:path'
 const INJECTED = ["applyConfig","commentTask","deleteProjectFolder","ensureWorktree","getDispatcher","mergeMergeRequest","publicState","publishMergeGate","readJsonBody","removeWorktree","sendJson","serviceOf","upsertById","workProjectOf"]
 let host = {
@@ -254,6 +254,13 @@ if (method === 'POST' && route === '/task/file') {
     const info = await stat(target)
     if (info.isFile() !== true) {
       host.sendJson(res, 200, { ok: true, skipped: '这不是一个文件' })
+      return true
+    }
+    /* 符号链接也要拦住：仓库里放一个指向 /etc/passwd 的软链，字面路径仍在仓库内。 */
+    const real = await realpath(target)
+    const realBase = await realpath(base)
+    if (real !== realBase && !real.startsWith(realBase + sep)) {
+      host.sendJson(res, 200, { ok: true, skipped: '只能看仓库目录里的文件' })
       return true
     }
     const LIMIT = 200_000

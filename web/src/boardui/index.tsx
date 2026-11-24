@@ -24,6 +24,9 @@ const VARIANT = {
   outline: "secondary",
   ghost: "ghost",
   destructive: "danger",
+  // 调用点两种写法都有（`danger` 与 `destructive`）；以前 danger 没登记 → 落到 primary，
+  // 12 个「删除」按钮全变成主色蓝，危险操作在界面上没有视觉语言（unslop 体检 S6）。
+  danger: "danger",
   link: "ghost",
 } as const;
 

@@ -32,7 +32,9 @@ const CARD = [
 ].join(' ')
 const TITLE = 'line-clamp-2 text-body-2-semibold text-text-primary'
 const META = 'flex flex-wrap items-center gap-1 text-caption-1-regular text-text-tertiary'
-const FOOT = 'flex items-center gap-2 text-caption-1-regular text-text-tertiary'
+const FOOT = 'flex flex-wrap items-center gap-x-2 gap-y-1 text-caption-1-regular text-text-tertiary'
+/* 卡片底部的一项：**整项**换行，不让中文/分数在项内被拆开（以前 200px 列里「评论」「4/6」都会碎成两行）。 */
+const META_ITEM = 'inline-flex shrink-0 items-center gap-1 whitespace-nowrap tabular-nums'
 const DANGER = 'font-semibold text-text-error-primary'
 
 /* 所有者的角色色：与列头的角色色条同一套 token。 */
@@ -163,7 +165,7 @@ function Card({ task, onOpen, config, requirements, onPickRequirement, onPickPro
             coding?.branch ? `分支 ${coding.branch}` : '',
             '点开卡片 → 执行记录 → 代码改动，看逐行 diff',
           ].filter(Boolean).join(' · '),
-        }, codeFiles.length > 0 ? `代码 ${codeFiles.length} 文件 +${codeAdditions} −${codeDeletions}` : `${coding.commits.length} 次提交`)
+        }, codeFiles.length > 0 ? `代码 +${codeAdditions} −${codeDeletions}` : `${coding.commits.length} 次提交`)
         : null,
       // 评审结论：审批人、结论与意见摘要都放进 title，卡面一眼看到「过没过」。
       reviewStatus === 'approved'
@@ -202,11 +204,11 @@ function Card({ task, onOpen, config, requirements, onPickRequirement, onPickPro
       ? h('div', { className: 'rounded-md bg-status-yellow-background px-2 py-1 text-caption-1-regular text-status-yellow-text', 'data-stalled-line': '' }, 'AI 上次没有正常结束，这张卡不会再被自动派单 —— 需要手动「重新派单」')
       : null,
     h('div', { className: FOOT },
-      task.dueAt > 0 ? h('span', { className: overdue ? DANGER : undefined, 'data-overdue': overdue ? '1' : '0', 'data-due': '' }, `· ${fmtDate(task.dueAt)}${overdue ? ' 逾期' : ''}`) : null,
-      check.total > 0 ? h('span', { title: '验收清单' }, uiIcon(h, 'checks'), ` ${check.done}/${check.total}`) : null,
-      artifactCount > 0 ? h('span', { title: '已登记交付物' }, uiIcon(h, 'attach'), ` ${artifactCount}`) : null,
+      task.dueAt > 0 ? h('span', { className: `${META_ITEM}${overdue ? ' ' + DANGER : ''}`, 'data-overdue': overdue ? '1' : '0', 'data-due': '' }, `${fmtDate(task.dueAt)}${overdue ? ' 逾期' : ''}`) : null,
+      check.total > 0 ? h('span', { className: META_ITEM, title: '验收清单' }, uiIcon(h, 'checks'), ` ${check.done}/${check.total}`) : null,
+      artifactCount > 0 ? h('span', { className: META_ITEM, title: '已登记交付物' }, uiIcon(h, 'attach'), ` ${artifactCount}`) : null,
       caseRun.total > 0 ? h('span', {
-        className: caseRun.fail > 0 ? DANGER : undefined,
+        className: `${META_ITEM}${caseRun.fail > 0 ? ' ' + DANGER : ''}`,
         'data-case': '1',
         title: `测试用例：通过 ${caseRun.pass}/${caseRun.total}${caseRun.fail > 0 ? `，不通过 ${caseRun.fail}` : ''}${(() => {
           const tiers = task.caseTiers ?? {}
@@ -222,14 +224,14 @@ function Card({ task, onOpen, config, requirements, onPickRequirement, onPickPro
         const missing = ['unit', 'integration', 'e2e'].filter(tier => (tiers[tier]?.applicable !== false) && (tiers[tier]?.executable ?? 0) === 0)
         if (missing.length === 0 || (caseRun.total === 0 && (tiers.unit?.total ?? 0) + (tiers.integration?.total ?? 0) + (tiers.e2e?.total ?? 0) === 0)) return null
         return h('span', {
-          className: 'text-status-yellow-text',
+          className: `${META_ITEM} text-status-yellow-text`,
           'data-tier-gap': missing.join(','),
           title: `三条测试线还缺：${missing.map(tier => CASE_TIER_LABEL[tier]).join('、')}。补能跑的用例，或在大模型会话里用 studio_task_test_plan 写明这一层为什么不适用`,
-        }, '· 缺 ', missing.map(tier => CASE_TIER_LABEL[tier]).join('/'))
+        }, '缺 ', missing.map(tier => CASE_TIER_LABEL[tier]).join('/'))
       })(),
-      noBody > 0 ? h('span', { className: DANGER, 'data-nobody-warn': '1', title: `${noBody} 件交付物还没写正文，云盘文档里只有标题` }, statusDot(h, 'warn'), ' 缺正文') : null,
-      commentCountOf(task) > 0 ? h('span', {}, `· ${commentCountOf(task)} 评论`) : null,
-      h('span', { className: 'ml-auto tabular-nums' }, fmtTime(task.updatedAt)),
+      noBody > 0 ? h('span', { className: `${META_ITEM} ${DANGER}`, 'data-nobody-warn': '1', title: `${noBody} 件交付物还没写正文，云盘文档里只有标题` }, statusDot(h, 'warn'), ' 缺正文') : null,
+      commentCountOf(task) > 0 ? h('span', { className: META_ITEM }, `${commentCountOf(task)} 评论`) : null,
+      h('span', { className: 'ml-auto shrink-0 whitespace-nowrap tabular-nums' }, fmtTime(task.updatedAt)),
     ),
   )
 }

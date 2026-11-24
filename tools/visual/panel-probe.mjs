@@ -37,6 +37,9 @@ const argOf = (name, fallback) => {
 }
 const base = argOf('base', process.env.STUDIO_BASE ?? '')
 const keep = argv.includes('--keep')
+// 视口可调：真宿主里面板宽度不一定是 1400（窄侧栏/小窗口时排版会变）
+const viewportWidth = Math.max(375, Number(argOf('width', '1400')) || 1400)
+const viewportHeight = Math.max(600, Number(argOf('height', '1100')) || 1100)
 /* 目标机开了登录时，探针也要带身份：STUDIO_TOKEN = 登录拿到的会话令牌（/auth/login 返回的 token，
    或浏览器 cookie `dsh-auth-*` 的值）。本机免登录的实例不用设。 */
 const studioToken = String(process.env.STUDIO_TOKEN ?? '').trim()
@@ -180,7 +183,7 @@ try {
 
   browser = await puppeteer.launch({ executablePath: CHROME, headless: 'new', args: ['--no-sandbox'] })
   const page = await browser.newPage()
-  await page.setViewport({ width: 1400, height: 1100 })
+  await page.setViewport({ width: viewportWidth, height: viewportHeight })
   const errors = []
   page.on('pageerror', error => errors.push('pageerror: ' + String(error?.message ?? error)))
   page.on('console', message => { if (message.type() === 'error' && !/favicon|404/.test(message.text())) errors.push('console: ' + message.text().slice(0, 140)) })
@@ -284,7 +287,7 @@ try {
       reviewTitle: review?.getAttribute('title') ?? '',
     }
   })
-  check('②a 卡面显示代码改动规模', chipInfo !== null && /代码 1 文件/.test(chipInfo.codeText) && chipInfo.codeText.includes('+3') && chipInfo.codeText.includes('−1'), JSON.stringify(chipInfo?.codeText ?? null))
+  check('②a 卡面显示代码改动规模', chipInfo !== null && chipInfo.codeText.includes('代码 +3 −1'), JSON.stringify(chipInfo?.codeText ?? null))
   check('②a 卡面显示评审结论', chipInfo !== null && chipInfo.reviewState === 'approved' && chipInfo.reviewText.includes('评审通过'), JSON.stringify(chipInfo))
   check('②a 评审 chip 悬停能看到评审人与意见', chipInfo !== null && chipInfo.reviewTitle.includes('架构师（探针）') && chipInfo.reviewTitle.includes('探针评审'))
   const probeComments = await api('/task/comments', { id: taskId })
@@ -512,6 +515,12 @@ try {
   const skillText = await page.evaluate(() => document.body.innerText)
   check('⑤ 技能库面板能打开', skillsNav === true, skillsNav ? '' : '没找到「技能库」入口')
   check('⑤ 技能行有使用读数', skillText.includes('用上') || skillText.includes('还没被用上'))
+  /* 危险操作要有视觉语言：删除按钮必须是 danger（unslop 体检 S6 —— 以前 variant:'danger' 没登记，
+     12 个删除按钮全落成主色蓝，界面上看不出哪一步会删东西）。 */
+  const dangerButtons = await page.evaluate(() => [...document.querySelectorAll('button')]
+    .filter(node => (node.textContent ?? '').trim() === '删除')
+    .map(node => node.getAttribute('data-variant') ?? ''))
+  check('⑤ 删除按钮走 danger（不再是主色蓝）', dangerButtons.length === 0 || dangerButtons.every(value => value === 'danger'), JSON.stringify(dangerButtons.slice(0, 5)))
   await page.screenshot({ path: join(outDir, 'skills.png') })
 
   // ⑥ 工作台排版：块与块之间不许压在一起，KPI 不许落单（2026-11-20 真机踩过）
@@ -554,12 +563,21 @@ try {
       const byTop = new Map()
       for (const r of rects) byTop.set(Math.round(r.top), (byTop.get(Math.round(r.top)) ?? 0) + 1)
       const counts = [...byTop.values()]
-      if (counts.length > 1 && counts[counts.length - 1] === 1) orphan.push(`${rects.length} 张卡排成 ${counts.join('+')}`)
+      if (counts.length > 1 && counts[counts.length - 1] === 1) {
+        // 最后一行只有一张，但横跨整行（col-span）不算落单：那是刻意的收口卡，不是排歪了。
+        const lastTop = Math.max(...rects.map(r => Math.round(r.top)))
+        const lastRow = rects.filter(r => Math.round(r.top) === lastTop)
+        const gridWidth = grid.getBoundingClientRect().width
+        if (lastRow[0].width < gridWidth * 0.6) orphan.push(`${rects.length} 张卡排成 ${counts.join('+')}`)
+      }
     }
     return { gaps, orphan }
   })
   check('⑥ 工作台块与块之间不贴在一起（间距 ≥ 8px）', layout.gaps.length === 0, layout.gaps.slice(0, 3).join(' / '))
   check('⑥ 工作台 KPI 不落单（没有一行只剩一张卡）', layout.orphan.length === 0, layout.orphan.join(' / '))
+  /* 空分区不该各占 150px：没有内容的区块收成一行（unslop：首屏每一块都要讲一件事）。 */
+  const emptyBlocks = await page.evaluate(() => [...document.querySelectorAll('[data-empty-block]')].map(node => Math.round(node.getBoundingClientRect().height)))
+  check('⑥ 工作台空分区收成一行（不占大块空白）', emptyBlocks.every(height => height <= 64), JSON.stringify(emptyBlocks))
   await page.screenshot({ path: join(outDir, 'dashboard-layout.png') })
 
   /* ⑦ 可选：打开一张**真卡**（已经跑过研发、有 worktree）看逐文件 diff。

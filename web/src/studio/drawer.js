@@ -1614,7 +1614,7 @@ function Drawer({ task, state, onClose, onChanged }) {
             const changeLabel = item => DIFF_CHANGE_LABEL[item.change] ?? '修改'
             const changeClass = item => DIFF_CHANGE_CLASS[item.change] ?? ''
             const renderNode = node => (node.kind === 'dir'
-              ? h(TreeViewItem, { key: node.id, id: node.id, label: node.name, textValue: node.path }, node.children.map(renderNode))
+              ? h(TreeViewItem, { key: node.id, id: node.id, label: node.name, textValue: node.path, title: node.path }, node.children.map(renderNode))
               : h(TreeViewItem, {
                 key: node.id,
                 id: node.id,
@@ -1653,7 +1653,7 @@ function Drawer({ task, state, onClose, onChanged }) {
                 style: { whiteSpace: 'pre-wrap', wordBreak: 'break-word', margin: 0 },
               },
                 text.split('\n').map((line, index) => h('div', { key: `f-${index}`, className: 'flex gap-2 text-text-secondary' },
-                  h('span', { className: 'shrink-0 select-none text-text-tertiary', style: { width: '3em', textAlign: 'right' } }, String(index + 1)),
+                  h('span', { className: 'shrink-0 select-none tabular-nums text-text-tertiary', style: { minWidth: '3em', textAlign: 'right' } }, String(index + 1)),
                   h('span', { className: 'min-w-0 whitespace-pre-wrap break-words' }, line === '' ? ' ' : line))),
                 data.truncated === true ? h('div', { className: HINT }, '文件太大，只显示前 200 KB') : null)
             }
@@ -1684,7 +1684,9 @@ function Drawer({ task, state, onClose, onChanged }) {
                     },
                     size: 'sm',
                     showGuides: true,
-                    className: 'max-h-[280px] overflow-auto',
+                    // 跟随上游「树跟着内容长、滚动交给外层」：不再套一层 280px 内滚动。
+                    // 圆角与所在区块一致（上游默认 24px，套在 12px 的区块里会显得层级更深）。
+                    style: { borderRadius: 12 },
                   }, tree.map(renderNode))),
               files.length === 0
                 ? null

@@ -4,7 +4,7 @@
 //   3. 评审结论（工具这条路）必须补成评论进讨论区 —— 以前只有 HTTP 路由会补。
 import assert from 'node:assert/strict'
 import { spawnSync } from 'node:child_process'
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
@@ -389,6 +389,33 @@ test('POST /task/file：读工作树里的文件全文；越界与缺失都如�
     assert.match(String(missing.payload.skipped), /不在工作区/)
     const empty = await call({ id: 't-diff-1', path: '' })
     assert.match(String(empty.payload.skipped), /没给文件路径/)
+  } finally {
+    store.db?.close?.()
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('POST /task/file：符号链接指到仓库外也拒绝（字面路径在仓库内）', async t => {
+  const { dir, repo } = makeRepo()
+  const store = await makeDiffStore(dir)
+  const outside = join(dir, 'outside.txt')
+  writeFileSync(outside, 'secret')
+  let linked = true
+  try { symlinkSync(outside, join(repo, 'link.txt')) } catch { linked = false }
+  try {
+    if (!linked) { t.skip('当前环境不能创建符号链接'); return }
+    let captured = null
+    configureCodingRoutes({
+      readJsonBody: async () => ({ id: 't-diff-1', path: 'link.txt' }),
+      sendJson: (res, status, payload) => { captured = { status, payload } },
+      serviceOf: () => ({ repoPath: repo, baseBranch: 'main' }),
+      workProjectOf: () => ({ repoPath: repo, baseBranch: 'main' }),
+      publicState: () => ({}),
+      getDispatcher: () => undefined,
+    })
+    await handleCodingRoute({ method: 'POST', route: '/task/file', req: {}, res: {}, store, url: new URL('http://local/studio-api/task/file') })
+    assert.match(String(captured.payload.skipped), /仓库目录/)
+    assert.equal(captured.payload.content, undefined, '软链指向的内容不能被读出')
   } finally {
     store.db?.close?.()
     rmSync(dir, { recursive: true, force: true })
