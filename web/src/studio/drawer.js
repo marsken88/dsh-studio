@@ -199,6 +199,8 @@ function Drawer({ task, state, onClose, onChanged }) {
   const [artBodies, setArtBodies] = React.useState({})
   // 评论正文同样不随轮询下发（一条讨论动辄几百字），抽屉打开时按卡取一次。
   const [commentList, setCommentList] = React.useState(null)
+  /* 评论编辑：后端 /task/comment 支持 update/remove 并留历史，界面之前没有入口。 */
+  const [commentEdit, setCommentEdit] = React.useState(null)
   // 用例与验收清单的正文同样按需取，轮询只给计数。
   const [parts, setParts] = React.useState(null)
   React.useEffect(() => { setArtBodies({}); setArtRead(null); setArtEdit(null); setArtifactQuery('') }, [task.id])
@@ -378,7 +380,7 @@ function Drawer({ task, state, onClose, onChanged }) {
       if (alive) setCommentList(Array.isArray(json?.comments) ? json.comments : [])
     }).catch(() => { if (alive) setCommentList([]) })
     return () => { alive = false }
-  }, [task.id, commentTotal])
+  }, [task.id, commentTotal, task.updatedAt])
   // 用例、清单、执行批次与测试计划正文：抽屉打开（或卡片有任何写入）时取一次。
   // 以前空卡直接跳过请求，但「零用例 + 已声明某层不适用」也是要展示的状态，所以不再短路。
   React.useEffect(() => {
@@ -479,6 +481,26 @@ function Drawer({ task, state, onClose, onChanged }) {
       setComment('')
       if (told.length > 0) setError(null)
       setNotice(told.length > 0 ? `已通知 ${told.join('、')}` : null)
+      await onChanged()
+    } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)) } finally { setBusy(false) }
+  }
+  const startCommentEdit = item => setCommentEdit({ id: item.id, body: String(item.body ?? '') })
+  const saveCommentEdit = async () => {
+    if (commentEdit === null) return
+    const body = String(commentEdit.body ?? '').trim()
+    if (body === '') { setError('评论不能为空'); return }
+    setBusy(true); setError(null)
+    try {
+      await api('/task/comment', { id: task.id, action: 'update', commentId: commentEdit.id, body })
+      setCommentEdit(null)
+      await onChanged()
+    } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)) } finally { setBusy(false) }
+  }
+  const removeComment = async item => {
+    if (!(await confirmDialog('删除这条评论？删掉后不可恢复（历史里保留旧版）。', { title: '删除评论', danger: true, okText: '删除' }))) return
+    setBusy(true); setError(null)
+    try {
+      await api('/task/comment', { id: task.id, action: 'remove', commentId: item.id })
       await onChanged()
     } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)) } finally { setBusy(false) }
   }
@@ -2623,14 +2645,29 @@ function Drawer({ task, state, onClose, onChanged }) {
                     h('span', { className: 'text-body-2-semibold text-text-primary' }, who),
                     h('span', { className: 'rounded-full border border-separator-border px-2 text-caption-1-regular text-text-tertiary' }, human ? '我提出' : 'AI 回复'),
                     expert !== undefined && expert.domain !== '' ? h(ChipField, { variant: 'gray', 'data-role': expert.role }, expert.domain) : null,
-                    h('span', { className: 'ml-auto text-caption-1-regular text-text-tertiary' }, fmtTime(item.at)),
+                    h('div', { className: 'ml-auto flex items-center gap-1' },
+                      h('span', { className: 'text-caption-1-regular text-text-tertiary tabular-nums' }, fmtTime(item.at)),
+                      h(Button, { variant: 'ghost', size: 'xs', disabled: busy, title: '编辑这条评论', 'data-comment-edit': item.id, onClick: () => startCommentEdit(item) }, '编辑'),
+                      h(Button, { variant: 'ghost', size: 'xs', disabled: busy, title: '删除这条评论', 'data-comment-delete': item.id, onClick: () => void removeComment(item) }, '删除'),
+                    ),
                   ),
-                  h('div', {
-                    className: 'md-content min-w-0 rounded-xl border border-l-2 border-separator-border p-2 text-body-2-regular leading-relaxed '
-                      + (human ? 'bg-background-secondary-default ' : 'bg-background-primary-default ')
-                      + roleRail,
-                  },
-                    bodyNodes.length === 0 ? h('span', { className: HINT }, '（这条评论没有正文）') : bodyNodes),
+                  commentEdit !== null && commentEdit.id === item.id
+                    ? h('div', { className: 'flex min-w-0 flex-col gap-2' },
+                      h(TextAreaField, {
+                        rows: 3, value: commentEdit.body, 'aria-label': '编辑评论',
+                        onChange: event => setCommentEdit({ ...commentEdit, body: event.target.value }),
+                      }),
+                      h('div', { className: 'flex justify-end gap-2' },
+                        h(Button, { variant: 'ghost', size: 'sm', disabled: busy, onClick: () => setCommentEdit(null) }, '取消'),
+                        h(Button, { variant: 'primary', size: 'sm', disabled: busy || commentEdit.body.trim() === '', onClick: () => void saveCommentEdit() }, '保存'),
+                      ),
+                    )
+                    : h('div', {
+                      className: 'md-content min-w-0 rounded-xl border border-l-2 border-separator-border p-2 text-body-2-regular leading-relaxed '
+                        + (human ? 'bg-background-secondary-default ' : 'bg-background-primary-default ')
+                        + roleRail,
+                    },
+                      bodyNodes.length === 0 ? h('span', { className: HINT }, '（这条评论没有正文）') : bodyNodes),
                 ),
               )
             }),

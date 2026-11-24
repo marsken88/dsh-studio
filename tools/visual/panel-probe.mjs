@@ -387,6 +387,65 @@ try {
   check('②a2 读不到仓库时说清原因（不空着不报错）', diffSection !== null && /没配代码目录|不是可用的 git 仓库|找不到基线分支/.test(diffSection), String(diffSection ?? '').slice(0, 120))
   await page.screenshot({ path: join(outDir, 'drawer-diff.png') })
 
+  /* ②c2 评论：发送 → 编辑 → 删除（后端支持 update/remove，界面这轮补上入口） */
+  await page.evaluate(() => [...document.querySelectorAll('[role="tab"]')]
+    .find(node => String(node.textContent ?? '').trim().startsWith('讨论'))?.click())
+  await new Promise(resolve => setTimeout(resolve, 700))
+  const commented = await page.evaluate(() => {
+    const area = document.querySelector('[data-drawer-composer] textarea')
+    if (area === null) return false
+    const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value').set
+    setter.call(area, '（探针）可编辑的评论')
+    area.dispatchEvent(new Event('input', { bubbles: true }))
+    const button = [...document.querySelectorAll('[data-drawer-composer] button')].find(node => String(node.textContent ?? '').trim() === '发表评论')
+    button?.click()
+    return true
+  })
+  await new Promise(resolve => setTimeout(resolve, 900))
+  const commentSent = await page.evaluate(() => document.querySelector('[data-drawer-comments]')?.textContent?.includes('可编辑的评论') ?? false)
+  check('②c2 评论能发送', commented === true && commentSent === true)
+  const commentEditOpened = await page.evaluate(() => {
+    const row = [...document.querySelectorAll('[data-drawer-comment]')].find(node => String(node.textContent ?? '').includes('可编辑的评论'))
+    const button = row?.querySelector('[data-comment-edit]')
+    if (button === null || button === undefined) return false
+    button.click()
+    return true
+  })
+  await new Promise(resolve => setTimeout(resolve, 400))
+  const editArea = await page.evaluate(() => document.querySelector('[aria-label="编辑评论"]') !== null)
+  check('②c2 评论有编辑入口且能打开编辑框', commentEditOpened === true && editArea === true)
+  const commentSaved = await page.evaluate(() => {
+    const area = document.querySelector('[aria-label="编辑评论"]')
+    if (area === null) return false
+    const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value').set
+    setter.call(area, '（探针）评论已编辑')
+    area.dispatchEvent(new Event('input', { bubbles: true }))
+    const button = [...document.querySelectorAll('button')].find(node => String(node.textContent ?? '').trim() === '保存')
+    button?.click()
+    return true
+  })
+  await new Promise(resolve => setTimeout(resolve, 900))
+  const edited = await page.evaluate(() => document.querySelector('[data-drawer-comments]')?.textContent?.includes('评论已编辑') ?? false)
+  check('②c2 评论能保存修改', commentSaved === true && edited === true)
+  const deleteClicked = await page.evaluate(() => {
+    const row = [...document.querySelectorAll('[data-drawer-comment]')].find(node => String(node.textContent ?? '').includes('评论已编辑'))
+    const button = row?.querySelector('[data-comment-delete]')
+    if (button === null || button === undefined) return false
+    button.click()
+    return true
+  })
+  await new Promise(resolve => setTimeout(resolve, 500))
+  const deleteConfirmed = await page.evaluate(() => {
+    const dialog = [...document.querySelectorAll('[role="dialog"], [role="alertdialog"]')].find(node => String(node.textContent ?? '').includes('删除评论'))
+    const button = dialog === undefined ? undefined : [...dialog.querySelectorAll('button')].find(node => String(node.textContent ?? '').trim() === '删除')
+    if (button === undefined) return false
+    button.click()
+    return true
+  })
+  await new Promise(resolve => setTimeout(resolve, 900))
+  const gone = await page.evaluate(() => !(document.querySelector('[data-drawer-comments]')?.textContent?.includes('评论已编辑') ?? false))
+  check('②c2 评论能删除（先确认）', deleteClicked === true && deleteConfirmed === true && gone === true)
+
   // ②b 交接契约：从抽屉写入 → 回读 /task/get（能创建的东西必须有能用的路径）
   await page.evaluate(() => [...document.querySelectorAll('[role="tab"]')]
     .find(node => (node.textContent ?? '').trim() === '交接')?.click())
