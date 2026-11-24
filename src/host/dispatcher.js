@@ -9,7 +9,7 @@ import { planLine, testPlanSummary } from './test-plan.js'
 import { COLLABORATION_BRIEF, rolePlaybookFor } from './role-playbooks.js'
 import { emitEvent } from './events.js'
 import { loadTeamMemory, teamMemoryBlock } from './team-memory.js'
-import { STUDIO_WORKSPACE_TITLE, dispatchDirFor, projectContext } from './dispatch-cwd.js'
+import { STUDIO_WORKSPACE_TITLE, dispatchDirFor, projectContext, workspaceAttachPlan } from './dispatch-cwd.js'
 import { mkdir, rename, stat } from 'node:fs/promises'
 import { randomBytes } from 'node:crypto'
 import { homedir } from 'node:os'
@@ -18,6 +18,14 @@ import { join } from 'node:path'
 // 需要宿主能力的少数几处走 configureDispatcher() 注入，避免这里反过来依赖 index.js。
 
 let host = {}
+
+/* 挂进工作区的重试间隔：刚 create 的会话头部落盘有个先后，第一次读不到就等一会儿再试。 */
+const WORKSPACE_ATTACH_DELAYS = [0, 150, 400]
+
+/** setTimeout 的 promise 版（参数顺序固定，省得每处都写一遍 new Promise）。 */
+function sleep(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms))
+}
 
 export function configureDispatcher(services) {
   host = services ?? {}
@@ -440,6 +448,8 @@ export class Dispatcher {
     if (this.timer !== undefined) return
     // 上一次进程结束时正在跑的会话已经不在了，卡上的「AI 处理中」要跟着收掉。
     void this.reconcile()
+    // 老会话补挂工作区：以前只注册目录不 attach，这些会话永远停在侧栏「未分组」。
+    void this.healWorkspaceMembership().catch(error => { this.lastError = String(error?.message ?? error) })
     this.timer = setInterval(() => {
       this.tick().catch(error => { this.lastError = String(error?.message ?? error) })
     }, 5000)
@@ -817,8 +827,11 @@ export class Dispatcher {
       title = STUDIO_WORKSPACE_TITLE
     }
     await mkdir(dir, { recursive: true })
+    /* 注册目录（create）只保证这个路径在工作区列表里；会话要不要显示在它下面，
+       看的是工作区名单（sessionIds）。两件事分开做，缺了后者就只剩「未分组」。 */
+    let workspace
     try {
-      await ctx.workspaceRegistry.create(dir, title)
+      workspace = await ctx.workspaceRegistry.create(dir, title)
     } catch (error) {
       this.note(`workspace: ${error?.message ?? error}`)
     }
@@ -856,6 +869,9 @@ export class Dispatcher {
        create 撞到老会话又会静默 resume。于是「配 Flash、实际跑 Pro」能一直存在，
        直到有人去解会话日志才发现。这里每次派单前比一次，不一致就归档旧会话重建。 */
     handle = await this.guardModelDrift({ handle, sessionId, dir, agentOptions, task, openSession })
+    /* 会话落进了工作区目录还不够：DSH 之后不再按 cwd 自动归组，必须显式 attach，
+       否则侧栏里它仍然在「未分组」里躺着（这一条 2026-11-23 那轮只做了一半）。 */
+    await this.joinWorkspace({ workspace, dir, sessionId })
     agent = handle.agent
     // 沙箱档位：专家自己的设置优先，否则跟随全局。解析不出可用档位时落到
     // workspace-write（安全默认）——绝不因为「没配」而悄悄全开。
@@ -890,6 +906,84 @@ export class Dispatcher {
       this.note(`rename failed: ${error?.message ?? error}`)
     }
     return agent
+  }
+
+  /**
+   * 把一个刚建好的会话挂进它所属的工作区名单。
+   *
+   * 宿主的归组规则：`workspaceRegistry` 只在**首次初始化**时按会话头的 canonical cwd
+   * 做一次性 bootstrap；之后 `sessionIds` 是显式名单，只有 `attachSession()` 会往里加。
+   * 所以「会话跑在项目目录里」不自动等于「它显示在项目工作区下」—— 少了这一步，
+   * 派单会话会一直留在侧栏「未分组」里，人从侧栏看不出这张卡在改哪个仓库。
+   *
+   * 刚 create 出来的会话，头部可能还没落进持久化快照（attach 会读它校验 cwd），
+   * 所以给几次重试；仍然失败只记一行日志，不影响派单本身。
+   */
+  async joinWorkspace({ workspace, dir, sessionId }) {
+    const registry = this.ctx?.workspaceRegistry
+    let target = workspace
+    if (target === undefined && typeof registry?.resolveByPath === 'function') {
+      try { target = await registry.resolveByPath(dir) } catch (error) { this.note(`workspace lookup: ${error?.message ?? error}`) }
+    }
+    if (target === undefined || typeof target.attachSession !== 'function') return false
+    let last
+    for (const wait of WORKSPACE_ATTACH_DELAYS) {
+      if (wait > 0) await sleep(wait)
+      try {
+        await target.attachSession(sessionId)
+        return true
+      } catch (error) { last = error }
+    }
+    this.note(`会话没能挂进工作区（侧栏会显示「未分组」）：${last?.message ?? last}`)
+    return false
+  }
+
+  /**
+   * 开机自愈：把「cwd 就在某个已注册工作区里、却不在它的名单上」的老会话补挂进去。
+   *
+   * 以前只 `workspaceRegistry.create()` 了目录、没 attach，于是那些派单会话虽然跑在
+   * 正确的目录里，却一直停在「未分组」。只动 `studio-` 开头的会话：别人的会话不归我们管。
+   * @returns 实际补挂的数量（0 表示没有要修的）。
+   */
+  async healWorkspaceMembership() {
+    const registry = this.ctx?.workspaceRegistry
+    const persistence = this.ctx?.get?.('sessionPersistence')
+    if (typeof registry?.list !== 'function' || typeof persistence?.list !== 'function') return 0
+    const entities = new Map()
+    const workspaces = []
+    try {
+      for (const entity of registry.list()) {
+        entities.set(String(entity.id), entity)
+        workspaces.push({ id: entity.id, path: entity.path, sessionIds: entity.sessionIds })
+      }
+    } catch (error) {
+      this.note(`读工作区列表失败：${error?.message ?? error}`)
+      return 0
+    }
+    let sessions = []
+    try {
+      sessions = (await persistence.list())
+        .map(snapshot => snapshot?.header)
+        .filter(header => header !== undefined && String(header.id ?? '').startsWith('studio-'))
+        .map(header => ({ id: String(header.id), cwd: String(header.cwd ?? '') }))
+    } catch (error) {
+      this.note(`读会话头失败：${error?.message ?? error}`)
+      return 0
+    }
+    const plan = workspaceAttachPlan({ sessions, workspaces })
+    let attached = 0
+    for (const item of plan) {
+      const entity = entities.get(item.workspaceId)
+      if (entity === undefined) continue
+      try {
+        await entity.attachSession(item.sessionId)
+        attached += 1
+      } catch (error) {
+        this.note(`补挂 ${item.sessionId} 失败：${error?.message ?? error}`)
+      }
+    }
+    if (attached > 0) this.note(`把 ${attached} 个老派单会话补挂进工作区（它们原来在「未分组」里）`)
+    return attached
   }
 
   /**
