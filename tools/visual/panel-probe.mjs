@@ -748,6 +748,25 @@ try {
   check('⑥ 工作台空分区收成一行（不占大块空白）', emptyBlocks.every(height => height <= 64), JSON.stringify(emptyBlocks))
   await page.screenshot({ path: join(outDir, 'dashboard-layout.png') })
 
+  /* ⑥b 命令面板：⌘K / Ctrl+K 能开、能搜到卡 */
+  await page.keyboard.down('Control')
+  await page.keyboard.press('KeyK')
+  await page.keyboard.up('Control')
+  await page.waitForSelector('[data-palette]', { timeout: 5000 }).catch(() => {})
+  const paletteOpen = await page.evaluate(() => document.querySelector('[data-palette]') !== null)
+  let paletteHit = null
+  if (paletteOpen === true) {
+    await page.type('[data-palette-input]', 'BUG-041', { delay: 20 })
+    await new Promise(resolve => setTimeout(resolve, 500))
+    paletteHit = await page.evaluate(() => {
+      const items = [...document.querySelectorAll('[data-palette] [data-palette-item]')]
+      return { count: items.length, text: items.slice(0, 3).map(node => String(node.textContent ?? '').replace(/\s+/g, ' ').slice(0, 40)) }
+    })
+    await page.keyboard.press('Escape')
+    await new Promise(resolve => setTimeout(resolve, 300))
+  }
+  check('⑥b 命令面板能打开并搜到卡', paletteOpen === true && paletteHit !== null && paletteHit.count > 0 && paletteHit.text.some(text => text.includes('BUG-041')), JSON.stringify(paletteHit))
+
   /* ⑦ 可选：打开一张**真卡**（已经跑过研发、有 worktree）看逐文件 diff。
      探针自己造的卡没有仓库，只能验空态；真 diff 的渲染要靠这条（STUDIO_DIFF_CARD=标题片段）。 */
   const diffCardTitle = String(process.env.STUDIO_DIFF_CARD ?? '').trim()
