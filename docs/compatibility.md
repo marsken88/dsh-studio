@@ -29,6 +29,8 @@
 | `ctx.tools.register(tool)` ×47 | 全部 `studio_*` 工具（建卡、派单、门禁、发布…） | 工具消失；LLM 报 unknown tool |
 | `ctx.inject(['webServer'], ctx => ctx.webServer.register({ kind:'prefix', path:'/studio-api', handler }))` | 所有 HTTP 路由（135 条，含 `/suite/*`、`/coding/gitlab`、`/requirement/impact`、`/task/design`） | 前端全 404，面板空壳 |
 | `ctx.inject(['agents','sessionController','workspaceRegistry','permissionPresets','agentDefaultModel'], …)` | 派单引擎 `Dispatcher`：起会话、发指令、收 `agent/status` 事件 | 派单报「这一列还没人负责」或会话永远 idle |
+| `workspaceRegistry.create(dir, title)` + `workspace.attachSession(sessionId)`、`workspaceRegistry.list()` / `resolveByPath(dir)` | 派单会话落在哪个工作区：**`create` 只把目录登记进工作区列表，`attachSession` 才把会话放进它的名单**。宿主的成员资格是显式名单——只在注册表首次初始化时按会话头 cwd 归组一次，此后不再自动归组。启动时 `healWorkspaceMembership()` 读会话头把 `studio-*` 老会话按 cwd 补挂回去（候选由 `src/host/dispatch-cwd.js` 的 `workspaceAttachPlan` 算） | 只 create 不 attach：会话跑在项目目录里，侧栏却一直显示「未分组」（2026-11-23 那轮只修了 cwd，就是漏了这一步）。attach 失败只记一行「会话没能挂进工作区（侧栏会显示「未分组」）」，不影响派单 |
+| `ctx.get('sessionPersistence').list()` → `snapshot.header`（`id` / `cwd`） | 启动自愈时读所有已存会话的头部，决定哪些该补挂 | 服务缺失或改名时自愈直接跳过（返回 0），没有副作用；工作区列表读不出来时只记一行「读工作区列表失败」 |
 | `ctx.agents.create / resume / get / list / abort` | 一卡一会话（`studio-<taskId>-<expertId>`） | 会话起不来；`has no provider/model`；槽位泄漏 |
 | `ctx.agents.create({ agentOptions:{ provider, model }, setup })` + `agentPresets.resolve(id)` + `presets.mount(scope, id)` | 三件缺一不可，否则没有 shell/文件工具 | agent 只会说话、改不了代码 |
 | `agent.inject()` + `agent.followup(text, { source:{ kind:'user' } })` | 真正驱动一轮 | 会话建好立刻 idle，卡片没有讨论 |

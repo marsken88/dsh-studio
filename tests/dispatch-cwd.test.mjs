@@ -7,7 +7,7 @@ import assert from 'node:assert/strict'
 import { join } from 'node:path'
 import test from 'node:test'
 
-import { STUDIO_WORKSPACE_TITLE, dispatchDirFor, projectContext, worktreeBaseFor } from '../src/host/dispatch-cwd.js'
+import { STUDIO_WORKSPACE_TITLE, dispatchDirFor, pathKey, projectContext, workspaceAttachPlan, worktreeBaseFor } from '../src/host/dispatch-cwd.js'
 
 const CONFIG = {
   agents: { workspaceDir: '/tmp/ws', worktreeRoot: '' },
@@ -83,3 +83,37 @@ test('worktree 根：显式配置优先，否则建在仓库内 .agents/worktree
   assert.equal(worktreeBaseFor(CONFIG, '/repos/order'), join('/repos/order', '.agents', 'worktrees'))
   assert.equal(worktreeBaseFor({ agents: { workspaceDir: '/tmp/ws' } }, ''), join('/tmp', 'dsh-worktrees'))
 })
+
+test('pathKey：分隔符、尾斜杠、大小写都不影响比较', () => {
+  assert.equal(pathKey('C:\\Users\\hp\\dsh-workspace\\'), 'c:/users/hp/dsh-workspace')
+  assert.equal(pathKey('C:/Users/hp/dsh-workspace'), 'c:/users/hp/dsh-workspace')
+  assert.equal(pathKey('  /repos/order//  '), '/repos/order')
+  assert.equal(pathKey(undefined), '')
+})
+
+test('补挂计划：cwd 落在某个工作区目录里、却不在名单上的会话才要补', () => {
+  const workspaces = [
+    { id: 'w1', path: 'C:\\Users\\hp\\dsh-workspace', sessionIds: ['studio-t-1-dev'] },
+    { id: 'w2', path: '/repos/order', sessionIds: [] },
+  ]
+  const sessions = [
+    { id: 'studio-t-1-dev', cwd: 'C:/Users/hp/dsh-workspace' }, // 已在名单里
+    { id: 'studio-t-2-dev', cwd: 'C:\\Users\\hp\\dsh-workspace\\' }, // 同目录、不同写法
+    { id: 'studio-t-3-dev', cwd: '/repos/order' },
+    { id: 'studio-t-4-dev', cwd: '/somewhere/else' }, // 没有对应工作区
+    { id: 'session-user-1', cwd: '/repos/order' }, // 调用方自己先筛掉别人的会话也行
+    { id: '', cwd: '/repos/order' },
+  ]
+  assert.deepEqual(workspaceAttachPlan({ sessions, workspaces }), [
+    { workspaceId: 'w1', sessionId: 'studio-t-2-dev' },
+    { workspaceId: 'w2', sessionId: 'studio-t-3-dev' },
+    { workspaceId: 'w2', sessionId: 'session-user-1' },
+  ])
+})
+
+test('补挂计划：空输入、没工作区、会话头没 cwd 都不炸也不产出', () => {
+  assert.deepEqual(workspaceAttachPlan(), [])
+  assert.deepEqual(workspaceAttachPlan({ sessions: [{ id: 'studio-a', cwd: '/x' }], workspaces: [] }), [])
+  assert.deepEqual(workspaceAttachPlan({ sessions: [{ id: 'studio-a' }, { id: 'studio-b', cwd: '' }], workspaces: [{ id: 'w', path: '/x' }] }), [])
+})
+

@@ -10,6 +10,9 @@
 //   2. 项目或服务配了「本机代码目录」→ 就用那个仓库，会话因此落在项目工作区里
 //   3. 都没有 → 退回 workspaceDir 的临时目录，工作区名固定为「Studio 工作区」
 //
+// 注意这里只解决「会话跑在哪」。「会话显示在哪个工作区下」还要 `workspace.attachSession()`：
+// 宿主的成员资格是显式名单（只在首次初始化时按 cwd 归组一次），见 workspaceAttachPlan。
+//
 // 这里只有纯函数：建目录、注册工作区由 dispatcher.ensureSession 执行。
 
 import { homedir } from 'node:os'
@@ -67,6 +70,42 @@ export function projectContext(config, task, requirements = []) {
  * 标题只在「新建」工作区时生效：同一个路径已经注册过时 DSH 会复用旧标题，
  * 所以兜底目录的标题必须是固定的（不能带卡号），否则同一个目录会因为先派哪张卡而定名。
  */
+/** 比较用的路径键：分隔符归一、去掉尾斜杠、小写（Windows 路径不区分大小写）。 */
+export function pathKey(path) {
+  return String(path ?? '').trim().replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase()
+}
+
+/**
+ * 哪些会话该补挂进哪个工作区：cwd 已经落在某个工作区目录里、却不在它的名单上。
+ *
+ * 为什么需要这一步：DSH 只在**首次初始化**（注册表 `initialized === false`）时按
+ * 会话头的 canonical cwd 做一次性归组；此后成员资格只看 `workspace.attachSession()`
+ * 有没有把它加进 `sessionIds`。所以「把会话跑进项目目录」只做对了一半 —— 没 attach
+ * 的会话照样停在侧栏「未分组」。
+ *
+ * 这里只产出候选（路径键比较），真正的归属由宿主的 `attachSession` 用 realpath
+ * 再校验一次（不匹配会抛错，调用方记日志即可）。
+ */
+export function workspaceAttachPlan({ sessions = [], workspaces = [] } = {}) {
+  const byPath = new Map()
+  for (const workspace of workspaces) {
+    const key = pathKey(workspace?.path)
+    if (key === '' || byPath.has(key)) continue
+    byPath.set(key, workspace)
+  }
+  const plan = []
+  for (const session of sessions) {
+    const id = String(session?.id ?? '').trim()
+    if (id === '') continue
+    const workspace = byPath.get(pathKey(session?.cwd))
+    if (workspace === undefined) continue
+    const members = Array.isArray(workspace.sessionIds) ? workspace.sessionIds.map(String) : []
+    if (members.includes(id)) continue
+    plan.push({ workspaceId: String(workspace.id ?? ''), sessionId: id })
+  }
+  return plan
+}
+
 export function dispatchDirFor({ task, worktree, context, fallbackDir } = {}) {
   const code = String(task?.code ?? '').trim() || String(task?.id ?? '').trim().slice(-8)
   const projectName = String(context?.projectName ?? '').trim()

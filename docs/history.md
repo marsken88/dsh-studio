@@ -1222,3 +1222,41 @@ TDZ 41 文件，`pnpm build` 后 `cmp dist/client.js client.js` 一致，`probe:
 用线上真实需求（REQ-2026-002）渲染四棒提示词，手册与当前事实都在，协作约定四列都有。
 
 没验到的：目标机未部署；真实四棒接力（澄清→方案→研发→测试）要等部署后派一条需求确认。
+
+## 派单会话真的挂进工作区（2026-11-24）
+
+现象：派单会话明明跑在 `~/dsh-workspace`、`~/dsh-role-relay` 这些**已经注册过工作区**的目录里，
+侧栏里却一直躺在「未分组」里。
+
+查下来是 11-23 那轮只做了一半 —— DSH 的工作区成员资格是**显式名单**：
+
+- 只有注册表**首次初始化**（`global.initialized === false`）时才按会话头的 canonical cwd 做一次性
+  `bootstrap()`，把历史会话按目录归组；
+- 之后 `workspace.sessionIds` 只由 `attachSession` / `detachSession` / `insertSessionBefore` 改。
+  `create(dir, title)` 只登记目录，**不会**把会话放进去。
+
+所以「把会话跑进项目目录」只是让 cwd 对上了，会话从没进过名单，侧栏照样「未分组」。
+实测：`~/.dsh/storages/workspace.json` 里 `C:\Users\hp\dsh-workspace`（Studio 工作区）的 `sessionIds` 是空数组，
+而 `~/.dsh/sessions/--C-Users-hp-dsh-workspace--/` 下躺着 6 个 `studio-t-*` 会话。
+
+改法：
+
+- `src/host/dispatch-cwd.js` 加纯函数 `pathKey` / `workspaceAttachPlan`：cwd 落在某个工作区目录里、
+  却不在它名单上的会话 → 补挂候选（路径只做预筛选，真正归属由宿主 realpath 校验）
+- `Dispatcher.ensureSession` 在会话建好（含模型漂移重建）之后调 `joinWorkspace()` → `workspace.attachSession(sessionId)`；
+  刚 create 的会话头可能还没落盘，按 0/150/400ms 重试三次，仍失败只在 `log` 里留一行，不影响派单
+- `Dispatcher.start()` 起一次 `healWorkspaceMembership()`：用 `ctx.get('sessionPersistence').list()` 的会话头，
+  把 `studio-*` 开头、cwd 已在注册工作区里的老会话补挂回去（只碰自己的会话；宿主没给服务就直接跳过）
+
+验证：`node tests/dispatch-cwd.test.mjs` 11/11、`node tests/dispatch-session-dir.test.mjs` 7/7
+（含 attach 重试与自愈）、`node --test --test-isolation=none tests/repo.test.mjs` 78/80
+（另 2 条要 spawn 子进程，本机沙箱 `spawn EPERM`，与本改动无关）。
+
+没验到的：本机沙箱禁 `spawn` 又写不了 `.git`，所以 `npm test` 全量与提交还没做；
+宿主侧要重启 dsh 才加载新代码 ——「侧栏里真的出现在工作区下」与「老会话被补挂」都要等重启后看一眼。
+
+**重启后实测（当天 15:0x）**：`~/.dsh/storages/workspace.json` 里「Studio 工作区」的 `sessionIds`
+从 0 条变成 6 条、「（自检）四棒接力」变成 4 条（其中 3 条是 `studio-t-*` 派单会话）；
+侧栏里这些会话已经出现在各自工作区下，「未分组」整组消失。
+`npm test` 也在切到完全权限后跑通：492/492（本地 + `TZ=UTC`）。
+仍未实测的只有「新派单当场挂上」这一条（要真派一张卡才会走到 `joinWorkspace`）。
