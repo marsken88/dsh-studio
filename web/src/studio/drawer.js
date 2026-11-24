@@ -26,7 +26,7 @@ const PANEL = 'flex min-w-0 flex-col gap-2 rounded-xl border border-separator-bo
 const PANEL_HEAD = 'flex min-w-0 items-start gap-2'
 const PANEL_LINE = 'min-w-0 break-words text-body-2-semibold text-text-primary'
 const ART_TITLE = 'text-body-2-semibold text-text-primary'
-const ART_REF = 'break-all font-mono text-caption-1-regular text-text-tertiary'
+const ART_REF = 'break-words font-mono text-caption-1-regular text-text-secondary'
 const ERR_TEXT = 'text-caption-1-regular text-text-error-primary'
 const OK_TEXT = 'text-caption-1-regular text-state-success-text'
 const WARN_TEXT = 'whitespace-nowrap text-caption-1-semibold text-text-error-primary'
@@ -37,10 +37,12 @@ const LINK = 'text-caption-1-regular text-accent-600 hover:underline'
 const LIST_ROW = 'flex min-w-0 items-center gap-2 border-b border-l-2 border-separator-border py-2 last:border-b-0 border-l-separator-border'
 const CASE_RESULT_RAIL = {
   fail: 'border-l-border-error-default bg-background-tertiary-error',
-  pass: 'border-l-state-success-base',
-  pending: 'border-l-separator-border',
-  skip: 'border-l-separator-border',
+  pass: 'border-l-state-success-text',
+  // pending 与 skip 必须能分开：未跑=黄，跳过=中性灰
+  pending: 'border-l-status-yellow-text',
+  skip: 'border-l-separator-border-strong',
 }
+const CASE_RESULT_CHIP = { pass: 'lime', fail: 'rose', pending: 'yellow', skip: 'neutral' }
 const COMMENT_ROLE_RAIL = {
   product: 'border-l-status-blue-text',
   architect: 'border-l-status-purple-text',
@@ -309,10 +311,11 @@ function Drawer({ task, state, onClose, onChanged }) {
   const [gateNote, setGateNote] = React.useState('')
   const casePass = caseSum.pass
   const caseFail = caseSum.fail
-  const caseRest = Math.max(0, caseSum.total - casePass - caseFail)
+  const caseSkip = cases.filter(item => item.result === 'skip').length
+  const casePending = Math.max(0, caseSum.total - casePass - caseFail - caseSkip)
   const caseSummary = caseSum.total === 0
     ? ''
-    : `${caseSum.total} 条 · 通过 ${casePass} · 不通过 ${caseFail}${caseRest > 0 ? ` · 没跑 ${caseRest}` : ''}`
+    : `${caseSum.total} 条 · 通过 ${casePass} · 不通过 ${caseFail}${casePending > 0 ? ` · 未跑 ${casePending}` : ''}${caseSkip > 0 ? ` · 跳过 ${caseSkip}` : ''}`
   const checklist = parts !== null && Array.isArray(parts.checklist) ? parts.checklist : (Array.isArray(task.checklist) ? task.checklist : [])
   const doneCount = checkSum.done
   const artifacts = task.artifacts ?? []
@@ -781,6 +784,7 @@ function Drawer({ task, state, onClose, onChanged }) {
     }
   }
   const removeCase = async (item) => {
+    if (!(await confirmDialog(`删除用例「${item.title}」？删掉后不可恢复。`, { title: '删除用例', danger: true, okText: '删除' }))) return
     setBusy(true); setError(null)
     try { await api('/task/case', { id: task.id, action: 'remove', caseId: item.id }); await onChanged() }
     catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)) } finally { setBusy(false) }
@@ -1074,9 +1078,11 @@ function Drawer({ task, state, onClose, onChanged }) {
               : (gapSet.has(row.tier) ? h(ChipField, { variant: 'yellow' }, '缺') : h(ChipField, { variant: 'lime' }, '已覆盖')),
           ),
           row.applicable === false && row.reason !== '' ? h('div', { className: ART_REF }, `理由：${row.reason}`) : null,
-          h('div', { className: 'mt-1' },
-            h(ProgressTrack, { percentage: row.total === 0 ? 0 : Math.round(row.pass / row.total * 100), size: 'sm' }),
-          ),
+          row.total === 0
+            ? h('div', { className: 'mt-1 text-caption-1-regular text-text-tertiary' }, '这一层还没有用例')
+            : h('div', { className: 'mt-1' },
+              h(ProgressTrack, { percentage: Math.round(row.pass / row.total * 100), size: 'sm' }),
+            ),
         ),
         row.applicable === false
           ? h(Button, { variant: 'ghost', size: 'sm', disabled: busy, title: '恢复为适用：这一层要补用例并跑通', onClick: () => void setTierApplicable(row.tier, true) }, '恢复适用')
@@ -1098,11 +1104,15 @@ function Drawer({ task, state, onClose, onChanged }) {
             onClick: () => void setTierApplicable(row.tier, false),
           }, '本层不适用'),
       )),
-      testRuns.length === 0 ? null : h('div', { className: ROW, style: { gap: 10, marginTop: 2 }, 'data-test-runs': '' },
-        h('span', { className: HINT }, '最近执行'),
-        ...testRuns.slice(-3).reverse().map(run => h('span', { key: run.id, className: HINT, title: run.by ? `执行人：${run.by}` : '' },
-          `${fmtTime(run.at)} · ${run.passed ?? 0}/${run.total ?? 0} 通过${(run.failed ?? 0) > 0 ? ` · ${run.failed} 失败` : ''}`)),
-      ),
+      testRuns.length === 0 ? null : (() => {
+        const latest = testRuns[testRuns.length - 1]
+        return h('div', { className: ROW, style: { gap: 10, marginTop: 2 }, 'data-test-runs': '' },
+          h('span', { className: HINT }, '最近执行'),
+          h('span', { className: HINT, title: latest.by ? `执行人：${latest.by}` : '' },
+            `${fmtTime(latest.at)} · ${latest.passed ?? 0}/${latest.total ?? 0} 通过${(latest.failed ?? 0) > 0 ? ` · ${latest.failed} 失败` : ''}`),
+          testRuns.length > 1 ? h('span', { className: HINT }, `共 ${testRuns.length} 次`) : null,
+        )
+      })(),
     )
   }
 
@@ -2196,7 +2206,7 @@ function Drawer({ task, state, onClose, onChanged }) {
             onClick: () => void generateCases(),
           }, caseGen.busy ? '生成中…' : '生成用例草稿'),
           h(Button, {
-            variant: 'ghost', size: 'sm',
+            variant: 'primary', size: 'sm',
             disabled: caseRun.busy || cases.filter(item => item.http != null || item.shell != null || item.db != null || item.browser != null).length === 0,
             onClick: () => void runCases(undefined),
           }, caseRun.busy ? '运行中…' : [uiIcon(h, 'run'), ' 跑用例'])),
@@ -2214,7 +2224,7 @@ function Drawer({ task, state, onClose, onChanged }) {
                 'data-drawer-case-row': item.id,
                 /* 每条用例一张小卡片：结果选择在左、标题与操作在顶部、明细在下面。
                    以前是 items-center 的列表行，操作按钮垂直居中在一堆长文本中间，看着很乱。 */
-                className: 'flex min-w-0 items-start gap-3 rounded-lg border border-separator-border border-l-2 bg-background-primary-default px-3 py-3 ' + (CASE_RESULT_RAIL[item.result] ?? ''),
+                className: 'flex min-w-0 items-start gap-3 rounded-lg border border-separator-border border-l-4 bg-background-primary-default px-3 py-3 ' + (CASE_RESULT_RAIL[item.result] ?? ''),
               },
               h(SelectField, {
                 style: { width: 88, height: 28, fontSize: 12 }, value: item.result, disabled: busy,
@@ -2224,6 +2234,7 @@ function Drawer({ task, state, onClose, onChanged }) {
               h('div', { className: GROW },
                 h('div', { className: 'truncate text-body-2-semibold text-text-primary', title: item.title }, item.title),
                 h('div', { className: ROW, style: { gap: 8, alignItems: 'center', marginTop: 2 } },
+                  h(ChipField, { variant: CASE_RESULT_CHIP[item.result] ?? 'neutral', 'data-case-result': item.result }, CASE_RESULT_LABEL[item.result] ?? item.result),
                   h(ChipField, { variant: 'soft' }, CASE_TYPE_LABEL[item.type ?? 'functional'] ?? '功能'),
                   h(SelectField, {
                     style: { width: 108, height: 24, fontSize: 12 },
@@ -2301,7 +2312,7 @@ function Drawer({ task, state, onClose, onChanged }) {
                 : h(Button, { variant: 'ghost', size: 'sm', disabled: busy, title: '改这条用例的定义（地址 / 命令 / SQL / 断言）；lastRun 与历史保留', onClick: () => void editCaseDefinition(item) }, '改定义'),
               (item.http == null && item.shell == null && item.db == null && item.browser == null)
                 ? null
-                : h(Button, { variant: 'ghost', size: 'sm', disabled: caseRun.busy, onClick: () => void runCases(item.id) }, uiIcon(h, 'run')),
+                : h(Button, { variant: 'ghost', size: 'sm', disabled: caseRun.busy, title: '跑这条用例', 'aria-label': '跑这条用例', onClick: () => void runCases(item.id) }, uiIcon(h, 'run')),
               h(Button, {
                 variant: 'ghost', size: 'sm',
                 disabled: busy,
@@ -2309,7 +2320,7 @@ function Drawer({ task, state, onClose, onChanged }) {
                 'data-flaky': item.flaky === true ? '1' : '0',
                 onClick: () => void toggleFlaky(item),
               }, item.flaky === true ? '不稳' : '标不稳'),
-              h(Button, { variant: 'ghost', size: 'sm', disabled: busy, 'aria-label': '删除这条用例', onClick: () => void removeCase(item) }, '×'),
+              h(Button, { variant: 'danger', size: 'sm', disabled: busy, 'aria-label': '删除这条用例', title: '删除这条用例', onClick: () => void removeCase(item) }, '×'),
               ))),
 
           h('div', { className: ROW },

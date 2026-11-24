@@ -319,6 +319,14 @@ try {
   await new Promise(resolve => setTimeout(resolve, 400))
   const openedDetails = await page.evaluate(() => document.querySelectorAll('[data-case-details]').length)
   check('②c 点「详情」展开这条用例的明细', openedDetails === 1, String(openedDetails))
+  const resultChip = await page.evaluate(() => document.querySelector('[data-case-result]')?.getAttribute('data-case-result') ?? '')
+  check('②c 用例结果有颜色 chip', resultChip === 'pass', resultChip)
+  await page.evaluate(() => { document.querySelector('[aria-label="删除这条用例"]')?.click() })
+  await new Promise(resolve => setTimeout(resolve, 500))
+  const deleteConfirm = await page.evaluate(() => [...document.querySelectorAll('[role="dialog"], [role="alertdialog"]')].some(node => String(node.textContent || '').includes('删除用例')))
+  check('②c 删除用例先弹确认框', deleteConfirm === true)
+  await page.keyboard.press('Escape')
+  await new Promise(resolve => setTimeout(resolve, 300))
 
   /* ②a2 执行记录 → 代码改动：真实 git diff 的入口。
      探针卡没配代码目录，这里验两件事：区块在、而且说清了为什么读不到（不空着不报错）。 */
