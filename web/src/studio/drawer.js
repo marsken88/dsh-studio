@@ -221,6 +221,9 @@ function Drawer({ task, state, onClose, onChanged }) {
   const [diffError, setDiffError] = React.useState(null)
   // 文件树里选中的那个文件：默认选第一个有改动的文件，打开就能看到内容。
   const [diffPath, setDiffPath] = React.useState('')
+  // 「看全部 / 看某一次提交」与按路径筛文件。
+  const [diffCommit, setDiffCommit] = React.useState('')
+  const [diffQuery, setDiffQuery] = React.useState('')
   // 右边内容区看「改动（patch）」还是「全文（工作树里的文件）」。
   const [diffMode, setDiffMode] = React.useState('diff')
   const [fileView, setFileView] = React.useState(null)
@@ -258,12 +261,12 @@ function Drawer({ task, state, onClose, onChanged }) {
     }
     setNotice(ok ? `已复制${label}（${value.length} 字）` : `复制失败：浏览器不允许写剪贴板，手动选中${label}吧`)
   }
-  const loadDiff = async () => {
+  const loadDiff = async (commit = diffCommit) => {
     if (diffBusy) return
     setDiffBusy(true)
     setDiffError(null)
     try {
-      const out = await api('/task/diff', { id: task.id })
+      const out = await api('/task/diff', { id: task.id, ...(commit === '' ? {} : { commit }) })
       setDiffView(out ?? null)
       const files = Array.isArray(out?.files) ? out.files : []
       setDiffPath(current => (files.some(item => item.path === current) ? current : (files[0]?.path ?? '')))
@@ -279,6 +282,8 @@ function Drawer({ task, state, onClose, onChanged }) {
     setDiffError(null)
     setDiffMode('diff')
     setFileView(null)
+    setDiffCommit('')
+    setDiffQuery('')
   }, [task.id])
   // 项目检查：跑本地质量命令（npm run check 之类），结果由服务端写回卡片。
   const [qualityRun, setQualityRun] = React.useState({ busy: false, line: '' })
@@ -1646,12 +1651,14 @@ function Drawer({ task, state, onClose, onChanged }) {
             }
             if (String(diffView.skipped ?? '') !== '') return h(EmptyState, { title: diffView.skipped })
             if (diffView.ok !== true) return h(EmptyState, { title: '读不到代码改动' })
-            const files = Array.isArray(diffView.files) ? diffView.files : []
+            const allFiles = Array.isArray(diffView.files) ? diffView.files : []
+            const fileQuery = diffQuery.trim().toLowerCase()
+            const files = fileQuery === '' ? allFiles : allFiles.filter(item => String(item.path).toLowerCase().includes(fileQuery))
             const totals = diffView.totals ?? { files: 0, additions: 0, deletions: 0 }
             const uncommitted = diffView.uncommitted ?? { total: 0, files: [], additions: 0, deletions: 0 }
             /* 文件树：目录分组 + 改动标记（新增/修改/删除）+ 行数；点一个文件在下面看它的 patch。 */
             const tree = buildDiffTree(files)
-            const selected = files.find(item => item.path === diffPath) ?? null
+            const selected = files.find(item => item.path === diffPath) ?? files[0] ?? null
             const changeLabel = item => DIFF_CHANGE_LABEL[item.change] ?? '修改'
             const changeClass = item => DIFF_CHANGE_CLASS[item.change] ?? ''
             const renderNode = node => (node.kind === 'dir'
@@ -1700,9 +1707,30 @@ function Drawer({ task, state, onClose, onChanged }) {
             }
             return h('div', { className: 'flex min-w-0 flex-col gap-2' },
               h('div', { className: ROW, style: { gap: 8, alignItems: 'center' } },
-                h(ChipField, { variant: 'gray', 'data-diff-range': '1' }, `${diffView.branch || '(无分支)'} ← ${diffView.base}`),
+                h(ChipField, { variant: 'gray', 'data-diff-range': '1' }, diffView.rangeLabel || `${diffView.branch || '(无分支)'} ← ${diffView.base}`),
                 h('span', { className: HINT, 'data-diff-totals': `${totals.files}-${totals.additions}-${totals.deletions}` },
                   `${totals.files} 个文件 · +${totals.additions} −${totals.deletions}${diffView.truncated === true ? '（已截断）' : ''}`),
+                (diffView.commits ?? []).length === 0
+                  ? null
+                  : h('div', { className: 'w-56 max-w-full', 'data-diff-commit': '' },
+                    h(SelectField, {
+                      value: diffCommit,
+                      'aria-label': '看哪一次提交',
+                      onChange: event => { setDiffCommit(event.target.value); setDiffQuery(''); void loadDiff(event.target.value) },
+                    },
+                      h('option', { value: '' }, '全部改动'),
+                      diffView.commits.map(item => h('option', { key: item.sha, value: item.sha }, `${item.sha} ${String(item.subject).slice(0, 24)}`)))),
+                allFiles.length > 6
+                  ? h('div', { className: 'w-40 max-w-full', 'data-diff-filter': '' },
+                    h(TextField, { value: diffQuery, placeholder: '筛文件路径…', 'aria-label': '筛文件', onChange: event => {
+                      const value = event.target.value
+                      setDiffQuery(value)
+                      const query = value.trim().toLowerCase()
+                      const hit = allFiles.filter(item => query === '' || String(item.path).toLowerCase().includes(query))
+                      setDiffPath(hit[0]?.path ?? '')
+                      setFileView(null)
+                    } }))
+                  : null,
                 h(Button, { variant: 'ghost', size: 'sm', disabled: diffBusy, onClick: () => void loadDiff() }, '刷新'),
                 (task.gitlabMR?.url ?? '') === ''
                   ? null
@@ -1713,7 +1741,7 @@ function Drawer({ task, state, onClose, onChanged }) {
                   `还有 ${uncommitted.total} 个文件没提交（+${uncommitted.additions} −${uncommitted.deletions}）：这些改动不在分支上，评审和测试都看不到`)
                 : null,
               files.length === 0
-                ? h('div', { className: HINT }, '这条分支相对基线没有代码改动。')
+                ? h('div', { className: HINT }, allFiles.length === 0 ? '这条分支相对基线没有代码改动。' : '没有匹配的文件。')
                 : h('div', { className: 'min-w-0', 'data-diff-tree': '' },
                   h(TreeView, {
                     // 刷新（at 变了）就重建：新出现的目录也要按默认全部展开，避免沿用旧的展开集合。

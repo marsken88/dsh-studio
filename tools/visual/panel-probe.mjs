@@ -701,6 +701,34 @@ try {
       content: document.querySelector('[data-diff-copy="content"]') !== null,
     }))
     check('⑦ 可复制路径 / 内容', copyButtons.path === true && copyButtons.content === true, JSON.stringify(copyButtons))
+    /* 文件多时可按路径筛；有提交历史时给出「全部改动 / 某一次提交」下拉。 */
+    const diffFilter = await page.evaluate(() => document.querySelector('[data-diff-filter] input') !== null)
+    if (diffFilter === true) {
+      await page.evaluate(() => {
+        const input = document.querySelector('[data-diff-filter] input')
+        const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set
+        setter.call(input, 'api.test')
+        input.dispatchEvent(new Event('input', { bubbles: true }))
+      })
+      await new Promise(resolve => setTimeout(resolve, 500))
+      const narrowed = await page.evaluate(() => ({
+        paths: [...document.querySelectorAll('[data-drawer-diff] [data-diff-file]')].map(node => node.getAttribute('data-diff-file') ?? ''),
+        content: document.querySelector('[data-diff-content]')?.getAttribute('data-diff-content') ?? '',
+      }))
+      check('⑦ 文件路径筛选收窄树', narrowed.paths.length > 0 && narrowed.paths.length < 9 && narrowed.paths.every(path => path.includes('api.test')) && narrowed.content.includes('api.test'), JSON.stringify(narrowed))
+      await page.evaluate(() => {
+        const input = document.querySelector('[data-diff-filter] input')
+        const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set
+        setter.call(input, '')
+        input.dispatchEvent(new Event('input', { bubbles: true }))
+      })
+      await new Promise(resolve => setTimeout(resolve, 300))
+    }
+    const commitPicker = await page.evaluate(() => ({
+      trigger: document.querySelector('[data-diff-commit] button') !== null,
+      range: document.querySelector('[data-diff-range]')?.textContent ?? '',
+    }))
+    check('⑦ 有「全部改动 / 某次提交」下拉', commitPicker.trigger === true, JSON.stringify(commitPicker))
     await page.screenshot({ path: join(outDir, 'drawer-diff-fulltext.png') })
   }
 

@@ -421,3 +421,39 @@ test('POST /task/file：符号链接指到仓库外也拒绝（字面路径在�
     rmSync(dir, { recursive: true, force: true })
   }
 })
+
+test('POST /task/diff：commit 只看某一次提交；坏 sha 如实拒绝', async () => {
+  const { dir, repo } = makeRepo()
+  const store = await makeDiffStore(dir)
+  try {
+    const head = spawnSync('git', ['-C', repo, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).stdout.trim()
+    let captured = null
+    const configure = body => configureCodingRoutes({
+      readJsonBody: async () => body,
+      sendJson: (res, status, payload) => { captured = { status, payload } },
+      serviceOf: () => ({ repoPath: repo, baseBranch: 'main' }),
+      workProjectOf: () => ({ repoPath: repo, baseBranch: 'main' }),
+      publicState: () => ({}),
+      getDispatcher: () => undefined,
+    })
+    const call = async body => {
+      configure(body)
+      await handleCodingRoute({ method: 'POST', route: '/task/diff', req: {}, res: {}, store, url: new URL('http://local/studio-api/task/diff') })
+      return captured
+    }
+    const one = await call({ id: 't-diff-1', commit: head.slice(0, 7) })
+    assert.equal(one.payload.ok, true, one.payload.skipped ?? '')
+    assert.equal(String(one.payload.rangeLabel).startsWith('提交 '), true)
+    assert.equal(one.payload.commit, head, '短 sha 要归一成长 sha')
+    assert.equal(one.payload.files.length, 2, '这一次提交改了 a.js + b.js')
+    assert.equal(Array.isArray(one.payload.commits), true)
+    assert.equal(one.payload.commits.length, 1, 'base..HEAD 只有一次提交')
+    const bad = await call({ id: 't-diff-1', commit: 'deadbeef' })
+    assert.match(String(bad.payload.skipped), /找不到提交/)
+    const weird = await call({ id: 't-diff-1', commit: 'not-a-sha' })
+    assert.match(String(weird.payload.skipped), /提交号不合法/)
+  } finally {
+    store.db?.close?.()
+    rmSync(dir, { recursive: true, force: true })
+  }
+})

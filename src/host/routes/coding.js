@@ -187,14 +187,46 @@ if (method === 'POST' && route === '/task/diff') {
     host.sendJson(res, 200, { ok: true, skipped: `找不到基线分支（试过 ${candidates.join(' / ')}）：这张卡的分支 ${branch || '(未知)'} 没法比出改动` })
     return true
   }
-  const numstat = await git('diff', '--numstat', `${base}...HEAD`)
+  /* 可选 commit：只看某一次提交的改动（前端「提交」下拉）。只认十六进制短/长 sha，
+     先用 rev-parse 验它真的在这个仓库里，再按 <sha>^..<sha> 出 diff。 */
+  const wantedCommit = String(body.commit ?? '').trim()
+  let commitSha = ''
+  let rangeRef = `${base}...HEAD`
+  let rangeLabel = `${branch || '(无分支)'} ← ${base}`
+  if (wantedCommit !== '') {
+    if (/^[0-9a-f]{4,40}$/i.test(wantedCommit) !== true) {
+      host.sendJson(res, 200, { ok: true, skipped: '提交号不合法：只认 4–40 位十六进制 sha' })
+      return true
+    }
+    const verified = await git('rev-parse', '--verify', '--quiet', `${wantedCommit}^{commit}`)
+    if (verified.ok !== true) {
+      host.sendJson(res, 200, { ok: true, skipped: `找不到提交 ${wantedCommit}（可能不在这个仓库/分支上）` })
+      return true
+    }
+    commitSha = String(verified.stdout ?? '').trim()
+    rangeRef = `${commitSha}^..${commitSha}`
+    rangeLabel = `提交 ${commitSha.slice(0, 8)}`
+  }
+  // 可选的提交列表：让面板能选「全部改动 / 某一次提交」。
+  const log = await git('log', '--format=%h%x09%s', `${base}..HEAD`, '-n', '50')
+  const commits = String(log.stdout ?? '').trim().split(/\r?\n/).filter(line => line.trim() !== '').map(line => {
+    const [sha, ...rest] = line.split('\t')
+    return { sha: String(sha ?? '').trim(), subject: rest.join('\t').trim() }
+  }).filter(item => /^[0-9a-f]{4,40}$/i.test(item.sha))
+  let numstat = await git('diff', '--numstat', rangeRef)
+  if (numstat.ok !== true && commitSha !== '') {
+    // 仓库的第一个提交没有父：退回 git show，仍然只出这一次提交的内容。
+    numstat = await git('show', '--format=', '--numstat', commitSha)
+  }
   if (numstat.ok !== true) {
-    host.sendJson(res, 200, { ok: true, skipped: `读不到 ${base}...HEAD 的改动：${firstLine(numstat.stderr)}` })
+    host.sendJson(res, 200, { ok: true, skipped: `读不到 ${rangeRef} 的改动：${firstLine(numstat.stderr)}` })
     return true
   }
-  const patch = await git('diff', '--unified=3', `${base}...HEAD`)
+  let patch = await git('diff', '--unified=3', rangeRef)
+  if (patch.ok !== true && commitSha !== '') patch = await git('show', '--format=', '--unified=3', commitSha)
   // 改动类型（新增 / 修改 / 删除 / 改名）：面板的树形视图用它标每个文件。
-  const nameStatus = patch.ok === true ? await git('diff', '--name-status', `${base}...HEAD`) : { ok: false, stdout: '' }
+  let nameStatus = patch.ok === true ? await git('diff', '--name-status', rangeRef) : { ok: false, stdout: '' }
+  if (nameStatus.ok !== true && commitSha !== '') nameStatus = await git('show', '--format=', '--name-status', commitSha)
   const view = buildDiffView({ numstat: numstat.stdout, patch: patch.ok === true ? patch.stdout : '', nameStatus: nameStatus.stdout })
   // 还没提交的改动单独报：研发说「改完了」但忘了提交时，代码其实不在分支上。
   const status = await git('status', '--porcelain')
@@ -207,6 +239,9 @@ if (method === 'POST' && route === '/task/diff') {
     dir,
     branch,
     base,
+    commit: commitSha,
+    rangeLabel,
+    commits,
     ...view,
     patchUnavailable: patch.ok !== true,
     uncommitted: {
