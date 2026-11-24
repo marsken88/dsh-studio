@@ -1000,6 +1000,12 @@ html[data-dsh-theme="light"] [class*="rightbarCol"] { background: #fafafa !impor
       const markDirty = event => {
         const target = event.target
         const tag = target?.tagName
+        /* 下拉在大多数面板是即时保存的（权限、测试开关），不能一概算脏；
+           但「看板外观 / 角色与模型 / 自动派单」这三块是草稿 + 保存条，改了下拉也要提示。 */
+        if (tag === 'SELECT') {
+          if (event.currentTarget?.getAttribute?.('data-draft-form') === '1') setDirty(true)
+          return
+        }
         if (tag !== 'INPUT' && tag !== 'TEXTAREA') return
         if (tag === 'INPUT' && ['checkbox', 'radio', 'file', 'range', 'color', 'search'].includes(String(target.type))) return
         // 搜索/筛选框不是表单字段：在设置页里搜一下再切分区，不该弹「未保存」。
@@ -1156,6 +1162,8 @@ html[data-dsh-theme="light"] [class*="rightbarCol"] { background: #fafafa !impor
           className: 'flex min-w-0 flex-col gap-4',
           'data-settings-pane': section,
           'data-settings-dirty': dirty ? '1' : '0',
+          // 草稿 + 保存条的面板：下拉改动也算未保存（其余面板的下拉多数是即时保存）
+          'data-draft-form': ['board', 'models', 'agents'].includes(section) ? '1' : '0',
           onChange: markDirty,
           onInput: markDirty,
           onClick: clearDirtyOnSave,
