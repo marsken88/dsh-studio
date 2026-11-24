@@ -20,6 +20,17 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 
 const browser = await puppeteer.launch({ executablePath: CHROME, headless: 'new', args: ['--no-sandbox'], defaultViewport: { width: 1680, height: 1000 } })
 const page = await browser.newPage()
+/* 宿主只认 cookie 时用 STUDIO_COOKIE（name=value; ...）登录。 */
+const cookieSpec = String(process.env.STUDIO_COOKIE ?? '').trim()
+if (cookieSpec !== '') {
+  await page.goto(BASE + '/', { waitUntil: 'domcontentloaded', timeout: 60000 })
+  const origin = new URL(BASE)
+  const parsed = cookieSpec.split(';').map(part => part.trim()).filter(Boolean).map(part => {
+    const at = part.indexOf('=')
+    return at > 0 ? { name: part.slice(0, at), value: part.slice(at + 1), url: origin.origin } : null
+  }).filter(Boolean)
+  if (parsed.length > 0) await page.setCookie(...parsed)
+}
 const errors = []
 page.on('pageerror', (e) => errors.push(String(e).slice(0, 160)))
 await page.goto(`${BASE}/?token=${TOKEN}`, { waitUntil: 'networkidle2', timeout: 60000 })
@@ -54,7 +65,9 @@ const audit = () => page.evaluate((sel) => {
   const vis = (el) => { const r = el.getBoundingClientRect(); return r.width > 4 && r.height > 4 }
   const nativeSelect = q('select').filter((el) => vis(el) && el.closest('[data-testid="hidden-select-container"]') === null).length
   const rawField = q('input, textarea').filter((el) => vis(el) && el.type !== 'hidden' && el.closest('[data-rac]') === null).length
-  const legacyBtn = q('[data-variant], a[data-variant], label[data-variant]').filter(vis).length
+  /* data-variant 现在是 BoardUI 适配层给 CSS 的钩子，不能再当「老按钮」标记；
+     老按钮只认 ds-btn 这类手写类。 */
+  const legacyBtn = q('button, a, label').filter((el) => vis(el) && /(^|\\s)ds-btn\\b/.test(String(el.className ?? ''))).length
   return { crashed, nativeSelect, rawField, legacyBtn, controls: q('[data-field="select"], [data-rac]').length }
 }, SCOPE)
 

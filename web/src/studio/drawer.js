@@ -2302,7 +2302,12 @@ function Drawer({ task, state, onClose, onChanged }) {
               .map(([id, label, count]) => h(ChipField, {
                 key: id, variant: caseFilter === id ? 'soft' : 'gray', className: 'cursor-pointer',
                 'data-case-filter-chip': id,
+                role: 'button', tabIndex: 0, 'aria-pressed': caseFilter === id,
+                'aria-label': `筛选用例：${label}`,
                 onClick: () => setCaseFilter(id),
+                onKeyDown: event => {
+                  if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); setCaseFilter(id) }
+                },
               }, `${label} ${count}`)),
             h('div', { className: 'w-56 max-w-full' },
               h(TextField, {

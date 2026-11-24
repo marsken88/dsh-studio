@@ -307,7 +307,7 @@ function Board({ state, onOpen, onMove, onWip, onCreate }) {
                 h(Button, {
                   variant: 'ghost', size: 'xs',
                   onClick: () => setShown(previous => ({ ...previous, [column.id]: (previous[column.id] ?? COLUMN_PAGE) + COLUMN_PAGE })),
-                }, `显示更多（还有 ${tasks.length - (shown[column.id] ?? COLUMN_PAGE)} 张）`))
+                }, `显示更多（+${tasks.length - (shown[column.id] ?? COLUMN_PAGE)}）`))
               : null,
           ),
         )

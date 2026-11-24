@@ -68,6 +68,17 @@ const COUNT = () => {
 
 const browser = await puppeteer.launch({ executablePath: CHROME, headless: 'new', args: ['--no-sandbox'], defaultViewport: { width: 1680, height: 1000 } })
 const page = await browser.newPage()
+/* 宿主只认 cookie 时用 STUDIO_COOKIE（name=value; ...）登录。 */
+const cookieSpec = String(process.env.STUDIO_COOKIE ?? '').trim()
+if (cookieSpec !== '') {
+  await page.goto(BASE + '/', { waitUntil: 'domcontentloaded', timeout: 60000 })
+  const origin = new URL(BASE)
+  const parsed = cookieSpec.split(';').map(part => part.trim()).filter(Boolean).map(part => {
+    const at = part.indexOf('=')
+    return at > 0 ? { name: part.slice(0, at), value: part.slice(at + 1), url: origin.origin } : null
+  }).filter(Boolean)
+  if (parsed.length > 0) await page.setCookie(...parsed)
+}
 const errors = []
 page.on('pageerror', (e) => errors.push(String(e).slice(0, 160)))
 await page.goto(`${BASE}/?token=${TOKEN}`, { waitUntil: 'networkidle2', timeout: 60000 })
