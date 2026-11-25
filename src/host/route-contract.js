@@ -40,7 +40,8 @@ declareRoute('/requirement/pool', ['id', 'pool', 'reach', 'impact', 'confidence'
 /* 列负责人与派单/会话：字段少、形状明确（issue #148 / #149 —— 不认识的字段不许静默忽略）。 */
 declareRoute('/columns/save', ['status', 'kind', 'id', 'owner', 'members', 'strategy', 'dryRun'])
 declareRoute('/agents/run', ['id', 'expert', 'instruction'])
-declareRoute('/agents/chat', ['expert', 'team', 'topic', 'instruction', 'workdir'])
+declareRoute('/agents/chat', ['expert', 'team', 'member', 'topic', 'instruction', 'workdir'])
+declareRoute('/agents/stop', ['id', 'expert', 'sessionId'])
 
 /** 诊断用：当前登记了哪些路由。 */
 export function declaredRoutes() {

@@ -1778,6 +1778,7 @@ export function registerTools(ctx, store) {
       + '返回 sessionId 与在哪接着聊；专家团由团长接话，需要成员接手时在回复里 @ 名字。',
     parameters: {
       expert: { type: 'string', required: true, description: '专家 id 或专家团 id（不是名字；看 studio_config_get 的 experts / teams）' },
+      member: { type: 'string', description: '传的是专家团时：指定由哪位成员接话（省略 = 团长）' },
       topic: { type: 'string', required: true, description: '这次想聊什么（一句话，会作为首轮消息发出去）' },
       instruction: { type: 'string', description: '补充说明（可选）' },
       workdir: { type: 'string', description: '会话跑在哪个目录（可选；默认用自动派单配置里的工作区目录）' },
@@ -1787,6 +1788,7 @@ export function registerTools(ctx, store) {
       if (dispatcher === undefined) throw new Error('派单引擎还没就绪（刚启动时会有几秒），稍后再试')
       const out = await dispatcher.startChat({
         expert: String(args.expert ?? ''),
+        member: String(args.member ?? ''),
         topic: String(args.topic ?? ''),
         instruction: String(args.instruction ?? ''),
         workdir: String(args.workdir ?? ''),

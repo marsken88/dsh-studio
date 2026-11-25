@@ -88,6 +88,35 @@ export function resolveOwner(config, owner, domain) {
 }
 
 /**
+ * 无卡会话由谁接话：专家就是它本人；专家团默认团长，也可以用 `member` 指定团里的某一位
+ * （issue #148：「和团队聊」实际上常常只想找团队里的某个人）。
+ * 纯函数，路由 / 工具 / dispatcher 共用；解析不出就返回 error。
+ */
+export function resolveChatSpeaker(config, target, member) {
+  const wanted = String(member ?? '').trim()
+  if (target === undefined || target === null) return { error: '没说找谁：传 expert（专家 id 或专家团 id）' }
+  if (target.error !== undefined) return { error: target.error }
+  const experts = config?.experts ?? []
+  const team = target.team
+  if (team === undefined) {
+    if (wanted !== '') return { error: `「${target.expert?.name ?? ''}」是专家不是专家团：member 只用于专家团` }
+    return { expert: target.expert, team: undefined }
+  }
+  const members = Array.isArray(team.members) ? team.members : []
+  if (wanted === '') {
+    const leadId = members.includes(team.lead) ? team.lead : (members[0] ?? '')
+    const lead = experts.find(entry => entry.id === leadId)
+    return lead === undefined ? { error: `专家团「${team.name}」里没有可用成员` } : { expert: lead, team }
+  }
+  if (!members.includes(wanted)) {
+    const names = members.map(id => experts.find(entry => entry.id === id)?.name ?? id).join(' / ')
+    return { error: `「${wanted}」不在专家团「${team.name}」的成员里（成员：${names || '无'}）` }
+  }
+  const picked = experts.find(entry => entry.id === wanted)
+  return picked === undefined ? { error: `专家「${wanted}」不在名册里（团里挂着但已被删）` } : { expert: picked, team }
+}
+
+/**
  * 「手动派单 / 发起会话」的目标：既认专家 id，也认专家团 id（团派给团长）。
  *
  * 以前 `/agents/run` 只把字符串原样塞进 `{kind:'expert'}`，于是
@@ -465,6 +494,9 @@ export class Dispatcher {
     this.store = store
     this.timer = undefined
     this.running = new Map()
+    /* 无卡会话（/agents/chat）的运行态：不占卡槽位，但要能在 /agents 里看见、能被 /agents/stop 收掉。
+       只活在内存里：进程重启后会话本身也不在了，没有需要恢复的。 */
+    this.chats = new Map()
     this.log = []
     this.lastTickAt = 0
     this.lastError = ''
@@ -591,6 +623,20 @@ export class Dispatcher {
     return stopped
   }
 
+  /**
+   * 停掉一个无卡会话（`/agents/stop {sessionId}` 的分支）。
+   * 它会 abort 驱动器并清掉运行态；会话本身留在 DSH 侧栏（transcript 不删）。
+   */
+  abortSession(sessionId) {
+    const id = String(sessionId ?? '').trim()
+    if (id === '') return false
+    const info = this.chats.get(id)
+    this.chats.delete(id)
+    try { this.ctx.agents.get(id)?.abort?.() } catch { /* best effort */ }
+    if (info !== undefined) this.note(`chat ${id} aborted`)
+    return info !== undefined
+  }
+
   /** 缺陷卡超过 SLA 还没关：记一次升级并推飞书，避免一直躺着没人管。 */
   async escalateOverdue() {
     const state = this.store.snapshot()
@@ -633,6 +679,7 @@ export class Dispatcher {
       worktreeRoot: worktreeRoot(this.store.snapshot().config),
       cleanupWorktree: cfg.cleanupWorktree ?? 'manual',
       running: [...this.running.values()].map(info => ({ ...info })),
+      chats: [...this.chats.values()].map(info => ({ ...info })),
       lastTickAt: this.lastTickAt,
       lastError: this.lastError,
       deliveryVia: this.deliveryVia,
@@ -750,15 +797,17 @@ export class Dispatcher {
    * 「先聊清楚再建卡」被逼成「先建卡 → 等 5 秒 tick 派单」，而且对话会把评论区灌满。
    * 这里造一个 `studio-chat-<expert>-<hex>` 会话：跑在 workdir（或工作区目录），
    * 用**对话模式**的提示词（不派工、不改代码、不往任何卡写评论），transcript 就是普通会话。
+   * 专家团默认由团长接话；`member` 可以指定团里的某一位（见 resolveChatSpeaker）。
    */
-  async startChat({ expert, topic, instruction, workdir } = {}) {
+  async startChat({ expert, member, topic, instruction, workdir } = {}) {
     const state = this.store.snapshot()
     const cfg = state.config.agents
     const target = resolveDispatchTarget(state.config, expert)
     if (target.error !== undefined) throw new Error(target.error)
-    const team = target.team
-    const leadId = team === undefined ? '' : (team.members.includes(team.lead) ? team.lead : (team.members[0] ?? ''))
-    const who = target.expert ?? (state.config.experts ?? []).find(entry => entry.id === leadId)
+    const speaker = resolveChatSpeaker(state.config, target, member)
+    if (speaker.error !== undefined) throw new Error(speaker.error)
+    const team = speaker.team
+    const who = speaker.expert
     if (who === undefined) throw new Error(`「${String(expert ?? '')}」解析不到具体的人：专家团里没有可用成员`)
     const said = String(topic ?? '').trim().slice(0, 500)
     const note = String(instruction ?? '').trim().slice(0, 2000)
@@ -773,15 +822,32 @@ export class Dispatcher {
     }
     this.note(`会话目录：${dir}`)
     const title = `[${who.name}] 会话：${said.slice(0, 60) || '未命名话题'}`
-    const agent = await this.mountAgentSession({ sessionId, expert: who, cfg, dir, workspace, title, task: undefined })
-    const prompt = buildChatPrompt({ expert: who, team, topic: said, instruction: note, config: state.config })
-    await this.deliverChat(agent, sessionId, prompt)
+    let agent
+    try {
+      agent = await this.mountAgentSession({ sessionId, expert: who, cfg, dir, workspace, title, task: undefined })
+      const prompt = buildChatPrompt({ expert: who, team, topic: said, instruction: note, config: state.config })
+      await this.deliverChat(agent, sessionId, prompt)
+    } catch (error) {
+      // 会话起来了但投递失败：别把它留成一个「看着在跑、其实一句话没发出去」的幽灵会话。
+      try { await this.ctx.agents.get(sessionId)?.dispose?.() } catch { /* best effort */ }
+      try { this.ctx.agents.get(sessionId)?.abort?.() } catch { /* best effort */ }
+      throw error
+    }
+    this.chats.set(sessionId, {
+      sessionId,
+      expert: who.id,
+      expertName: who.name,
+      team: team?.id ?? '',
+      topic: said,
+      workdir: dir,
+      at: Date.now(),
+    })
     this.note(`chat ${sessionId} → ${who.name}`)
     return {
       ok: true,
       sessionId,
       expert: { id: who.id, name: who.name },
-      team: team === undefined ? null : { id: team.id, name: team.name, lead: who.id },
+      team: team === undefined ? null : { id: team.id, name: team.name, lead: team.members.includes(team.lead) ? team.lead : (team.members[0] ?? '') },
       workdir: dir,
       topic: said,
       // 会话在哪接着聊：DSH 侧栏里按这个名字找（已挂进工作区，不会落在「未分组」）。

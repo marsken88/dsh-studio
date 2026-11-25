@@ -185,10 +185,10 @@ studio_task_check          { id, itemId, note }         // 清单逐项勾，附
 「下个版本先做哪几张卡」「这个需求到底要不要做」——这类问题不该先建一张卡再等 5 秒 tick 派单。现在可以直接开会话：
 
 - **面板**：设置 → 专家 / 专家团，每一行有「发起会话」；说一句想聊什么就开聊（团长接话）。
-- **HTTP**：`POST /studio-api/agents/chat { expert 或 team, topic, instruction?, workdir? }`（`expert` 既认专家 id 也认专家团 id）。
-- **工具**：`studio_session_start { expert, topic, instruction?, workdir? }`，agent 自己也能发起。
+- **HTTP**：`POST /studio-api/agents/chat { expert 或 team, member?, topic, instruction?, workdir? }`（`expert` 既认专家 id 也认专家团 id；专家团默认团长接话，`member` 可以指定团里的某一位）。
+- **工具**：`studio_session_start { expert, member?, topic, instruction?, workdir? }`，agent 自己也能发起。
 
-会话 id 是 `studio-chat-<expert>-<hex>`：跑的是**对话模式**的提示词（不要开工、不改代码、不建卡、不往看板写评论），transcript 就是普通 DSH 会话，在侧栏按会话名接着聊。它不会污染看板，也不会冒充某张卡的消耗（成本页只把它算进总量与按专家）。聊到能落地时，请它给一段可直接复制的需求/卡描述（标题 + 背景 + 可判定的验收要点），再由人决定建不建。
+会话会出现在 `GET /studio-api/agents` 的 `chats` 里（不占卡的派单槽位），要停就 `POST /agents/stop { sessionId }`（只 abort，transcript 留在侧栏）。会话 id 是 `studio-chat-<expert>-<hex>`：跑的是**对话模式**的提示词（不要开工、不改代码、不建卡、不往看板写评论），transcript 就是普通 DSH 会话，在侧栏按会话名接着聊。它不会污染看板，也不会冒充某张卡的消耗（成本页只把它算进总量与按专家）。聊到能落地时，请它给一段可直接复制的需求/卡描述（标题 + 背景 + 可判定的验收要点），再由人决定建不建。
 
 **和「派单」的区别**：派单是 `POST /agents/run { id, expert?, instruction? }`，必须有卡、会把卡上的工位提示词一起注入、跑完要求登记评论并推进列。`expert` 传错时会分开报：卡不存在 / 目标不存在（或停用、团里没人）/ 这一列没人负责——不再一律回「这一列没人负责」。
 

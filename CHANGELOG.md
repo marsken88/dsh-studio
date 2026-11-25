@@ -24,6 +24,8 @@
 - **`POST /studio-api/agents/chat { expert 或 team, topic, instruction?, workdir? }`**（工具 `studio_session_start`）：造一个 `studio-chat-<expert>-<hex>` 会话，跑**对话模式**提示词（不开工、不改代码、不建卡、不往看板写评论），transcript 就是普通 DSH 会话；专家团由团长接话，需要成员接手时在回复里 @。面板上「设置 → 专家 / 专家团」每行有「发起会话」。
 - **`/agents/run` 错误分流**：卡不存在 / 目标不存在（或已停用、团里没有成员）/ 这一列没人负责，三种文案分开；`expert` 现在也认专家团 id（派给团长），并支持 `instruction`（以前也没地方传开场白）。
 - **工具层补齐 `studio_requirement_assist`**：以前「需求对话澄清」只有 `POST /requirement/assist`（人在面板里聊），51 个工具里 agent 调不到，人和 AI 的能力不对等。现在路由与工具共用 `streamAssistReply` / `assistMessages`，只读档位（不写库），参数为 `message` + 可选 `history` / `mode` / `project` / `title`。
+- **会话有运行态、也能停**：无卡会话列在 `GET /agents` 的 `chats` 里（不占卡的派单槽位），`POST /agents/stop { sessionId }` 只 abort 不收 transcript；启动失败会自己收摊，不留「看着在跑、其实没投递出去」的幽灵会话。
+- **专家团可以指定成员接话**：`/agents/chat` 与 `studio_session_start` 新增 `member`（省略 = 团长；不在团里会 400 并列出成员）。
 - 无卡会话不会冒充某张卡：执行播报（`parseStudioSession`）不认它，成本统计把它算进总量与按专家（`adHoc`），不落成一张空卡。
 - `/columns/save`、`/agents/run`、`/agents/chat` 也纳入 HTTP 入参白名单：多传字段直接 400。
 

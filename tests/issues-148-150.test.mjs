@@ -17,7 +17,7 @@ import { buildRoster } from '../web/src/studio/roster.js'
 import { configureToolHost, registerTools } from '../src/host/tools.js'
 import { toolAccessTable } from '../src/host/tool-access.js'
 import { describeOwner, dispatchPreview, previewWarning } from '../src/host/column-preview.js'
-import { Dispatcher, buildChatPrompt, resolveDispatchTarget, resolveOwner } from '../src/host/dispatcher.js'
+import { Dispatcher, buildChatPrompt, resolveChatSpeaker, resolveDispatchTarget, resolveOwner } from '../src/host/dispatcher.js'
 import { parseStudioSession } from '../src/host/agent-feed.js'
 import { parseSessionName } from '../src/host/session-usage.js'
 import { configureTaskRoutes, handleTaskRoute } from '../src/host/routes/tasks.js'
@@ -408,6 +408,49 @@ test('#148 会话出口：/agents/chat 认 expert 或 team，缺话题时报错�
     const { res } = await call({ team: 'team1', topic: '先聊下个版本', workdir: '/tmp/x' })
     assert.equal(res.status, 200)
     assert.equal(res.body.sessionId, 'studio-chat-dev-ab12cd34')
-    assert.deepEqual(calls[0], { expert: 'team1', topic: '先聊下个版本', instruction: '', workdir: '/tmp/x' }, 'team 也能开局（由团长接话），workdir 要传下去')
+    assert.deepEqual(calls[0], { expert: 'team1', member: '', topic: '先聊下个版本', instruction: '', workdir: '/tmp/x' }, 'team 也能开局（默认团长），workdir 要传下去')
+    await call({ expert: 'team1', member: 'qa', topic: '找测试聊' })
+    assert.equal(calls[1].member, 'qa', '专家团可以指定成员接话')
+  })
+})
+
+test('#148 resolveChatSpeaker：专家就是本人，团默认团长，指定成员要在团里', () => {
+  const config = {
+    experts: [{ id: 'lead', name: '团长' }, { id: 'qa', name: '测试' }],
+    teams: [{ id: 'team1', name: '结算团', lead: 'lead', members: ['lead', 'qa'] }],
+  }
+  const expertTarget = resolveDispatchTarget(config, 'qa')
+  assert.equal(resolveChatSpeaker(config, expertTarget, '').expert.id, 'qa')
+  assert.match(resolveChatSpeaker(config, expertTarget, 'lead').error, /是专家不是专家团/, 'member 只对专家团有意义')
+
+  const teamTarget = resolveDispatchTarget(config, 'team1')
+  assert.equal(resolveChatSpeaker(config, teamTarget, '').expert.id, 'lead', '默认团长')
+  assert.equal(resolveChatSpeaker(config, teamTarget, 'qa').expert.id, 'qa', '指定成员')
+  const bad = resolveChatSpeaker(config, teamTarget, 'ghost')
+  assert.match(bad.error, /不在专家团「结算团」的成员里/)
+  assert.match(bad.error, /团长 \/ 测试/, '要列出成员，别只说找不到')
+})
+
+test('#148 无卡会话进运行态、能被 /agents/stop 按 sessionId 停掉', async () => {
+  await withStore(async store => {
+    const aborted = []
+    const dispatcher = new Dispatcher({ agents: { get: id => ({ abort: () => { aborted.push(id) } }) } }, store)
+    dispatcher.chats.set('studio-chat-dev-ab12cd34', { sessionId: 'studio-chat-dev-ab12cd34', expert: 'dev', expertName: '开发工程师', team: '', topic: '聊两句', workdir: '/tmp', at: Date.now() })
+    assert.equal(dispatcher.status().chats.length, 1, '/agents 要能看见无卡会话')
+    assert.equal(dispatcher.status().running.length, 0, '但不能占卡的派单槽位')
+
+    configureAgentsRoutes({
+      readJsonBody: async req => req.body ?? {},
+      sendJson: (res, status, payload) => { res.status = status; res.body = payload },
+      publicState: () => ({ revision: 1 }),
+      getDispatcher: () => dispatcher,
+    })
+    const res = RES()
+    await handleAgentsRoute({ method: 'POST', route: '/agents/stop', req: { body: { sessionId: 'studio-chat-dev-ab12cd34' } }, res, store, url: new URL('http://x/agents/stop') })
+    assert.equal(res.status, 200)
+    assert.equal(res.body.stopped, true)
+    assert.deepEqual(aborted, ['studio-chat-dev-ab12cd34'], '要真的 abort 那个会话')
+    assert.equal(dispatcher.status().chats.length, 0, '停掉后运行态里不再有它')
+    assert.equal(dispatcher.abortSession('studio-chat-nope-000000'), false, '不存在的会话返回 false，不抛')
   })
 })
