@@ -1,6 +1,6 @@
 # 更新日志
 
-## [未发布] — 2026-11-25
+## [0.17.2] — 2026-11-26
 
 ### 卡「跑完就停在原地 / 重启后不接着跑」：正常结束有印记，重启会续跑
 
@@ -24,6 +24,21 @@
 - **评论不再谎报**：原来在归档*之前*就写「已归档并重建」；现在按实际结果写（归档失败 / 重建后仍是 …）。
 
 验证：`tests/model-drift.test.mjs` 新增 3 条（真实目录归档、归档失败必须失败、没漂移不动）；`npm run check` 591 条、本地与 `TZ=UTC` 全绿。
+
+### 「提权审批 = 自动批准」现在真的等于完全权限
+
+用户反馈：派单起来的卡片会话没有完全权限，所有写入都被限制在工作区内。查下来是两件事叠在一起：
+
+- **DSH 的审批只有 `allowed-once` 一种放行**（没有「始终允许」），而 `workspace-write` 沙箱下每碰一次边界就要重新批一次；
+- 平台的 `escalation: allow` 只是「审批时答放行」，**沙箱档位没有变** —— 于是 agent 会在评论里停下来问「要不要提权」，长一点的活直接卡住（本机 REQ-003 实测：`Sandbox denies writes outside workspace … the approval applies only to this call`）。
+
+现在：
+
+- `effectiveSandbox()`（`src/host/escalation.js`）统一判定：**allow = 会话一开头就以 `danger-full-access` 运行**（无沙箱、不再逐次审批）；**deny 才把沙箱当边界**；专家显式 `read-only` 永远只读，不会被 allow 放大。
+- dispatcher 落 permission preset、`GET /agents/policy` 的 `configured.effectiveSandbox`、卡片抽屉「本次派单」三处用同一份判据，不再出现「面板写只写工作区、实际完全权限」这种对不上。
+- 设置页「提权审批」与 README / 使用说明的文案改成新口径。
+
+验证：`tests/escalation.test.mjs` 新增 `effectiveSandbox` 用例（allow / deny / 只读优先 / 脏值兜底）；面板文案同步；`npm run check` 与 `pnpm build` 通过。
 
 ## [0.17.1] — 2026-11-25
 

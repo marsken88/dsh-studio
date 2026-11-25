@@ -7,7 +7,7 @@ import test from 'node:test'
 
 import { approvalNote } from '../src/host/agent-feed.js'
 import { defaultConfig, mergeConfig } from '../src/host/domain.js'
-import { ESCALATION_MODES, escalationFor, escalationOutcome, sanitizeEscalation } from '../src/host/escalation.js'
+import { ESCALATION_MODES, effectiveSandbox, escalationFor, escalationOutcome, sanitizeEscalation } from '../src/host/escalation.js'
 
 const read = name => readFileSync(name, 'utf8')
 
@@ -48,6 +48,15 @@ test('escalationFor：专家沙箱优先，只读一律拒绝', () => {
   // 没有配置、没有专家列表也不能崩（老库启动期）
   assert.equal(escalationFor(undefined, 'dev').mode, 'allow')
   assert.equal(escalationFor({}, 'dev').sandbox, 'workspace-write', '兜底档位要和 dispatcher 一致')
+})
+
+test('effectiveSandbox：自动批准 = 会话直接完全权限；只读永远优先；自动拒绝才用沙箱边界', () => {
+  assert.equal(effectiveSandbox({ globalSandbox: 'workspace-write', escalation: 'allow' }), 'danger-full-access', '自动批准不再逐次审批，直接给完全访问')
+  assert.equal(effectiveSandbox({ globalSandbox: 'workspace-write', escalation: 'deny' }), 'workspace-write', '自动拒绝时沙箱就是边界')
+  assert.equal(effectiveSandbox({ expertSandbox: 'read-only', globalSandbox: 'workspace-write', escalation: 'allow' }), 'read-only', '专家显式只读不许被放大成可写')
+  assert.equal(effectiveSandbox({ expertSandbox: 'danger-full-access', escalation: 'deny' }), 'danger-full-access', '专家显式完全权限保持')
+  assert.equal(effectiveSandbox({ globalSandbox: 'bogus', escalation: 'deny' }), 'workspace-write', '认不出的档位落安全默认')
+  assert.equal(effectiveSandbox({}), 'danger-full-access', '默认 escalation=allow + 没配沙箱 → 完全权限')
 })
 
 test('escalationOutcome：allow → allowed-once，其余 → rejected', () => {

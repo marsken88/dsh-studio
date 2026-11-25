@@ -1325,3 +1325,19 @@ TDZ 41 文件，`pnpm build` 后 `cmp dist/client.js client.js` 一致，`probe:
 验证：`tests/model-drift.test.mjs` 新增 3 条（真实目录归档 / 归档失败必须失败 / 没漂移不动），
 `npm run check` 591 条本地与 `TZ=UTC` 全绿；真机：把这一版部署到 .218 后，等
 `REQ-2026-005-3` 下一次催派，看它是否归档到 `--home-lyf-dsh-workspace--` 下并用 flash 起新会话。
+
+## 派单会话的「完全权限」（2026-11-26）
+
+用户：「启动的卡片会话没有用完全权限，现在对话都是选择的工作区内修改。」
+
+查下来：DSH 的沙箱档位（permission preset）与提权审批是两件事。平台默认
+`escalation: allow` 只影响「审批时怎么答」，而 DSH 的审批结论只有 `allowed-once`
+（逐次放行），沙箱仍是 `workspace-write`。本机 REQ-003 的开发会话在评论里明确抱怨
+`Sandbox denies writes outside workspace … the approval applies only to this call`，
+长一点的活会反复停下要权限。
+
+改法：新增 `effectiveSandbox()`（`src/host/escalation.js`）——
+**allow ⇒ 直接 `danger-full-access`**，deny ⇒ 沙箱当边界，专家显式只读永远只读。
+dispatcher 落 preset、`/agents/policy` 的 `effectiveSandbox`、卡片抽屉文案共用这一份判据；
+设置页与 README / manual 的「提权审批」文案同步改。默认值仍是 allow，所以升级后
+开箱即完全权限；要收紧就改成「自动拒绝」并选沙箱档位。

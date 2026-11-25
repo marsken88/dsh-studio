@@ -13,8 +13,28 @@
  * 沙箱选 read-only 时一律拒绝 —— 选了只读就不该被自动放行成可写。
  */
 
+import { SANDBOX_MODES } from './domain.js'
+
 /** 提权审批的两种口径（写进配置的是这两个值）。 */
 export const ESCALATION_MODES = ['allow', 'deny']
+
+/**
+ * 这张卡 / 这次会话**实际**用的沙箱档位。
+ *
+ * 口径（2026-11-26 用户明确要求后改）：
+ *   escalation = allow 的语义就是「始终允许完全访问」——那就别再用 workspace-write
+ *   一处处边写边审批。DSH 的审批只有 `allowed-once`（逐次放行），
+ *   于是无人值守会话每碰一次边界就被重新问一次，agent 自己都在评论里抱怨
+ *   「the approval applies only to this call」。所以 allow 直接以 `danger-full-access` 运行。
+ *   deny 才把沙箱当边界用（workspace-write / 只读），越界一律拒绝。
+ *   只读永远优先：专家的沙箱显式选了 read-only 就不该被 allow 悄悄放大成可写。
+ */
+export function effectiveSandbox({ expertSandbox, globalSandbox, escalation } = {}) {
+  const wanted = String(expertSandbox ?? '').trim() || String(globalSandbox ?? '').trim()
+  const base = SANDBOX_MODES.includes(wanted) ? wanted : 'workspace-write'
+  if (base === 'read-only') return 'read-only'
+  return sanitizeEscalation(escalation) === 'allow' ? 'danger-full-access' : base
+}
 
 /** 清洗一个提权审批设置：认不出的值落到 fallback，fallback 也不认得就按 allow。 */
 export function sanitizeEscalation(value, fallback = 'allow') {

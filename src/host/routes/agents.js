@@ -1,5 +1,5 @@
 import { ISOLATION_MODES, SANDBOX_MODES } from '../domain.js'
-import { sanitizeEscalation } from '../escalation.js'
+import { effectiveSandbox, sanitizeEscalation } from '../escalation.js'
 import { rejectUnknownFields } from '../route-contract.js'
 const INJECTED = ["getDispatcher","publicState","readJsonBody","sendJson"]
 let host = {
@@ -43,6 +43,8 @@ if ((method === 'GET' || method === 'POST') && route === '/agents/policy') {
     ok: true,
     configured: {
       sandbox: SANDBOX_MODES.includes(String(cfg.sandbox ?? '')) ? cfg.sandbox : 'workspace-write',
+      // 实际生效的档位：提权审批=自动批准时直接是完全访问（与 dispatcher 落 preset 同一份判据）
+      effectiveSandbox: effectiveSandbox({ globalSandbox: cfg.sandbox, escalation: cfg.escalation }),
       escalation: sanitizeEscalation(cfg.escalation),
       isolation: ISOLATION_MODES.includes(String(cfg.isolation ?? '')) ? cfg.isolation : 'none',
       worktreeRoot: String(cfg.worktreeRoot ?? ''),

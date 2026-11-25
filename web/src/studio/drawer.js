@@ -1529,13 +1529,19 @@ function Drawer({ task, state, onClose, onChanged }) {
             const cfg = policy.configured ?? {}
             const expertId = (picked.startsWith('expert:') ? picked.slice('expert:'.length) : picked) || task.dispatch?.expert || task.expert || ''
             const expert = (state.config?.experts ?? []).find(item => item.id === expertId)
-            const sandbox = String(expert?.sandbox ?? '').trim() || String(cfg.sandbox ?? '').trim() || 'workspace-write'
+            /* 与 src/host/escalation.js 的 effectiveSandbox 同一口径：
+               提权审批=自动批准 → 会话直接以完全权限（danger-full-access）运行；
+               自动拒绝才把沙箱当边界用；专家的只读设置永远优先。 */
+            const wanted = String(expert?.sandbox ?? '').trim() || String(cfg.sandbox ?? '').trim() || 'workspace-write'
+            const configuredSandbox = ['read-only', 'danger-full-access', 'workspace-write'].includes(wanted) ? wanted : 'workspace-write'
+            const allow = String(cfg.escalation ?? 'allow') !== 'deny'
+            const sandbox = configuredSandbox === 'read-only' ? 'read-only' : (allow ? 'danger-full-access' : configuredSandbox)
             const forced = String(cfg.isolation ?? '') === 'worktree' && sandbox !== 'danger-full-access'
             const label = value => value === 'read-only' ? '只读' : value === 'danger-full-access' ? '无沙箱' : '只写工作区'
             const live = (policy.live ?? []).find(item => item.taskId === task.id)
             return h('div', { className: 'flex min-w-0 flex-col gap-1' },
               h('div', { className: HINT, 'data-dispatch-policy': '' },
-                `本次派单：沙箱 ${label(forced ? 'danger-full-access' : sandbox)}${forced ? '（worktree 隔离自动提权）' : ''} · 提权审批 ${cfg.escalation === 'deny' ? '自动拒绝' : '自动批准'}${live?.preset ? ` · 本会话实际 ${label(String(live.preset))}` : ''}`),
+                `本次派单：沙箱 ${label(forced ? 'danger-full-access' : sandbox)}${configuredSandbox === 'read-only' ? '（专家设为只读）' : forced ? '（worktree 隔离自动提权）' : allow ? '（自动批准 = 完全权限）' : ''} · 提权审批 ${allow ? '自动批准（直接完全权限运行）' : '自动拒绝（只做沙箱内的事）'}${live?.preset ? ` · 本会话实际 ${label(String(live.preset))}` : ''}`),
               h('div', { className: HINT }, '只对 Studio 派单的会话生效；你在侧栏手动新开的会话仍按 DSH 自己的权限档位。'))
           })(),
           h('div', { className: FIELD, style: { marginTop: 4 } },

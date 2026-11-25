@@ -2,6 +2,7 @@
 import { DEFAULT_ROLES, FALLBACK_AGENT_MODEL, ROLE_IDS, SANDBOX_MODES, STATUSES, codingSummary, normalizeStrategy, worktreeRoot } from './domain.js'
 import { effectiveConcurrency } from './parallel-guard.js'
 import { abandonedRetry, dispatchPhase, handoffRetry, restartResume } from './dispatch-state.js'
+import { effectiveSandbox, sanitizeEscalation } from './escalation.js'
 import { driftNote, isModelDrift, sessionDirOf } from './model-drift.js'
 import { stripQuotedCode } from './mention-note.js'
 import { handoffBlock } from './handoff.js'
@@ -1402,11 +1403,18 @@ export class Dispatcher {
        否则侧栏里它仍然在「未分组」里躺着（这一条 2026-11-23 那轮只做了一半）。 */
     await this.joinWorkspace({ workspace, dir, sessionId })
     agent = handle.agent
-    // 沙箱档位：专家自己的设置优先，否则跟随全局。解析不出可用档位时落到
-    // workspace-write（安全默认）——绝不因为「没配」而悄悄全开。
+    /* 沙箱档位：专家自己的设置优先，否则跟随全局；再叠一层「提权审批」口径：
+       allow（默认）= 始终允许完全访问 → 直接以 danger-full-access 运行，不再逐次审批；
+       deny = 把沙箱当边界用（workspace-write / 只读）。只读永远优先。
+       以前 allow 只是「审批时答 allowed-once」，而 DSH 只有逐次放行，
+       于是无人值守会话每碰一次边界就被重问一次（agent 会停下来等、甚至整轮挂死）。 */
     const wanted = String(expert?.sandbox ?? '').trim() || String(cfg.sandbox ?? '').trim()
-    let sandbox = SANDBOX_MODES.includes(wanted) ? wanted : 'workspace-write'
-    if (!SANDBOX_MODES.includes(wanted)) this.note(`sandbox "${wanted}" 不认识，按 workspace-write 执行`)
+    let sandbox = effectiveSandbox({ expertSandbox: expert?.sandbox, globalSandbox: cfg.sandbox, escalation: cfg.escalation })
+    if (!SANDBOX_MODES.includes(wanted) && wanted !== '') this.note(`sandbox "${wanted}" 不认识，按 workspace-write 执行`)
+    const escalationMode = sanitizeEscalation(cfg.escalation)
+    if (escalationMode === 'allow' && sandbox === 'danger-full-access' && wanted !== 'danger-full-access') {
+      this.note('提权审批 = 自动批准：会话直接以 danger-full-access 运行（不再逐次审批）')
+    }
     // worktree 隔离时，提交要写主仓的 .git（在 worktree 之外），workspace-write 会直接拒绝并弹审批；
     // 无人值守的会话就卡死等审批（2026-11-16 实测：approval/asked 后再无动作）。
     // 所以 worktree 模式一律提权到 danger-full-access，并在卡上留一句解释。
