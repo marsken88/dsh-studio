@@ -69,9 +69,9 @@ export async function uploadToWeknora({ sink, title, markdown, previousKnowledge
     headers,
     body: JSON.stringify({ title: trim(title, 200), content: String(markdown ?? ''), knowledge_type: 'manual' }),
   }, timeoutMs)
-  if (created.ok !== true) return { ok: false, error: `建文档失败（${created.error}）` }
+  if (created.ok !== true) return { ok: false, replaced, error: `建文档失败（${created.error}）` }
   const knowledgeId = trim(created.body?.data?.id ?? created.body?.id, 80)
-  if (knowledgeId === '') return { ok: false, error: '建文档成功但没拿到 knowledge id' }
+  if (knowledgeId === '') return { ok: false, replaced, error: '建文档成功但没拿到 knowledge id' }
 
   // manual 文档落库是 draft，不 reparse 就不会分块，检索永远查不到。
   const reparsed = await callJson(doFetch, `${base}/knowledge/${encodeURIComponent(knowledgeId)}/reparse`, {

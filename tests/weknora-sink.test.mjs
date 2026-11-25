@@ -131,6 +131,31 @@ test('幂等：旧文档已经不在了（404）也算删成功，继续建新�
   }
 })
 
+test('幂等：建文档失败时也要回报 replaced（台账靠它判「旧文档是否已失效」）', async () => {
+  // 删旧成功（200）+ 建新失败（500）：replaced 必须是 true。
+  // 少了这个字段，doc-sync 分不清「旧文档真没了」和「删旧根本没跑成」，
+  // 只能一律保锚 —— 或者更糟，像 BUG-001 那样一律抹掉。
+  const server = createServer((req, res) => {
+    req.resume()
+    req.on('end', () => {
+      res.setHeader('Content-Type', 'application/json')
+      if (req.method === 'DELETE') return res.end('{}')
+      if (req.url.endsWith('/knowledge/manual')) { res.statusCode = 500; return res.end(JSON.stringify({ message: 'create boom' })) }
+      res.end('{}')
+    })
+  })
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve))
+  const { port } = server.address()
+  try {
+    const result = await uploadToWeknora({ sink: { ...sink, baseUrl: `http://127.0.0.1:${port}` }, title: 't', markdown: 'm', previousKnowledgeId: 'k-old' })
+    assert.equal(result.ok, false)
+    assert.equal(result.replaced, true, '旧文档删成功了，失败返回里也要如实带出来')
+    assert.match(result.error, /建文档失败/)
+  } finally {
+    await new Promise(resolve => server.close(resolve))
+  }
+})
+
 test('幂等：旧文档删不掉（500）时仍继续建新，但把原因写进 warning', async () => {
   const server = createServer((req, res) => {
     req.resume()
