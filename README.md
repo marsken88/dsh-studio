@@ -207,7 +207,20 @@ curl -s http://<host>:<port>/studio-api/health   # 应返回 {"ok":true}
 | 放行 | 同源 + 已认证 | 继续走插件自己的权限名单 |
 
 也就是说：**浏览器里随便一个网页调不动这些接口**，匿名者也拿不到台账。脚本没有浏览器，
-要用 `dsh web` 的启动 token 换一次 cookie（`tools/lib/studio-auth.mjs`），否则会拿到 401。
+得先用启动 token 换一次会话 cookie（浏览器打开面板时做的就是这件事），否则会拿到 401：
+
+```bash
+# 1) 换 cookie：返回 303 + Set-Cookie，写进 cookie jar
+curl -c jar.txt "http://<host>:<port>/?token=<启动 token>"
+# 2) 之后每个请求带上它（面板的浏览器也是这么带的）
+curl -b jar.txt http://<host>:<port>/studio-api/state
+```
+
+启动 token 在 `dsh web` 启动时打印的那条 URL 上；目标机上这样取：
+`journalctl -u dsh-web -n 50 | grep -o 'token=[^&]*' | tail -1`。**每次 `dsh web` 重启都会换新。**
+
+源码检出里 `tools/lib/studio-auth.mjs` 把这套封成了 `studioFetch()`（仓库自己的脚本用它）；
+**从 npm 装的话包里不带 `tools/`，用上面两条命令就行。**
 
 默认**不启用登录**（`access.enabled=false`），开箱即用。这个模式下有三类操作只允许在
 **服务器本机（127.0.0.1）**执行，其他机器调用会返回 `403 local_only`：

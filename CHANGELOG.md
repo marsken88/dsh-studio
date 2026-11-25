@@ -1,5 +1,20 @@
 # 更新日志
 
+## [未发布]
+
+### 文档：换 session cookie 的做法改成两条 curl
+
+0.16.0 的说明里让脚本去用 `tools/lib/studio-auth.mjs`——那是**源码检出**才有的文件：`files` 白名单不含 `tools/`，从 npm 装下来的 `node_modules/@marsken/dsh-studio` 里没有这个目录（实测）。现在 README 与 `docs/manual.md` 直接给协议级做法：
+
+```bash
+curl -c jar.txt "http://<host>:<port>/?token=<启动 token>"   # 303 + Set-Cookie
+curl -b jar.txt http://<host>:<port>/studio-api/state        # 之后每个请求都带上
+```
+
+源码检出里的 `studioFetch()` 封装保留，给仓库自己的脚本用。
+
+顺带记一条安装实测：把 0.16.0 从 npm 装进干净 profile 后，`--dump-config` 认到了 `@marsken/dsh-studio`，起实例验 `/health` 200、无凭据 `/state` 401、伪造 `Host` 403、跨站 403、公开提单 200——**发布出去的包确实带着这次修复**（0.5.1 那种「装完不加载」没有复现）。
+
 ## [0.16.0] — 2026-11-25
 
 ### `/studio-api` 接上宿主信任栅栏：浏览器里的网页再也调不动它
