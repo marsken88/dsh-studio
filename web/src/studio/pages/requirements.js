@@ -10,30 +10,6 @@ import { Button, Select, Chip } from '../../boardui/index'
 import { EmptyState } from '../../boardui/empty-state'
 import { ProgressTrack } from '../../components/base/progress/progress'
 
-/* 「先聊清楚」：用户还没想清楚时，用 5 个问题把需求聊成一份 PRD 草稿；不调模型、纯本地合成。 */
-const INTAKE_STEPS = [
-  { key: 'title', question: '这条需求一句话是什么？', hint: '例：管理后台登录失败要锁定账号，防止暴力破解' },
-  { key: 'who', question: '谁在用？他们现在是怎么做的？', hint: '例：运营同学现在只能反复试密码，锁没锁只能靠猜' },
-  { key: 'goal', question: '你希望他们能做什么？做到什么程度？', hint: '例：连续错 5 次锁 10 分钟，锁定期间正确密码也拒绝' },
-  { key: 'scope', question: '这次明确不做什么？', hint: '例：不做图形验证码，不做异地登录提醒' },
-  { key: 'accept', question: '怎么算完成？写一条能验收的标准。', hint: '例：第 6 次请求返回 423，锁定期内正确密码仍 423' },
-]
-const composeIntake = answers => [
-  '## 背景',
-  String(answers.who ?? '').trim() || '（待补充）',
-  '',
-  '## 目标',
-  String(answers.goal ?? '').trim() || '（待补充）',
-  '',
-  '## 范围与不做什么',
-  String(answers.scope ?? '').trim() || '（待补充）',
-  '',
-  '## 验收',
-  String(answers.accept ?? '').trim() || '（待补充）',
-  '',
-  '> 本稿由「先聊清楚」的 5 个回答整理而成，保存后可在需求详情里继续补功能点、文档与验收条件。',
-].join('\n')
-
 /* 整页 BoardUI：面板 / 表单 / 列表 / 徽标 / 动作全部换成 token + Tailwind（4px 档位）。
    Markdown 正文不是组件：renderMarkdown 的产物挂语义类 md-content，排版规则（标题/列表/表格/代码）
    写在 client.src.js 的 CSS 段里——BoardUI 没有等价的富文本作用域，删了正文就没样式了。 */
@@ -376,63 +352,86 @@ export     function RequirementsPage({ state, onOpenTask, onChanged, createSigna
         if (current !== null) void loadMatrix(current.id)
       }, [current === null ? '' : current.id, loadMatrix])
 
-      const startIntake = () => setIntake({ step: 0, answers: {}, input: '', done: false })
-      const submitIntake = () => {
-        if (intake === null) return
+      const startIntake = () => {
+        /* 默认带上第一个业务项目：项目沉淀（已有需求/PRD/卡）才有东西可参考。 */
+        const project = String(form.project ?? '').trim() || String(projectOptions[0]?.value ?? '')
+        if (project !== '' && form.project !== project) setForm(previous => previous === null ? previous : { ...previous, project })
+        setIntake({ messages: [], input: '', busy: false, error: null })
+      }
+      const assist = async (body) => api('/requirement/assist', { project: form.project, title: form.title, ...body })
+      const submitIntake = async () => {
+        if (intake === null || intake.busy === true) return
         const value = String(intake.input ?? '').trim()
         if (value === '') return
-        const answers = { ...intake.answers, [INTAKE_STEPS[intake.step].key]: value }
-        if (intake.step >= INTAKE_STEPS.length - 1) setIntake({ ...intake, answers, input: '', done: true })
-        else setIntake({ ...intake, answers, input: '', step: intake.step + 1 })
+        const messages = [...intake.messages, { role: 'user', content: value }]
+        setIntake({ ...intake, messages, input: '', busy: true, error: null })
+        try {
+          const out = await assist({ mode: 'chat', messages })
+          setIntake(previous => previous === null ? previous : {
+            ...previous,
+            messages: [...messages, { role: 'assistant', content: String(out.reply ?? '') }],
+            busy: false,
+          })
+        } catch (cause) {
+          setIntake(previous => previous === null ? previous : { ...previous, busy: false, error: cause instanceof Error ? cause.message : String(cause) })
+        }
       }
-      const finishIntake = () => {
-        if (intake === null) return
-        const answers = intake.answers
-        fromChatRef.current = true
-        setForm({
-          title: String(answers.title ?? '').trim(),
-          description: composeIntake(answers),
-          project: '', iteration: '', owner: '', priority: 'normal', status: 'draft',
-          links: {}, fromChat: true,
-        })
-        setIntake(null)
+      const draftIntake = async () => {
+        if (intake === null || intake.busy === true || intake.messages.length === 0) return
+        setIntake({ ...intake, busy: true, error: null })
+        try {
+          const out = await assist({ mode: 'draft', messages: intake.messages })
+          const reply = String(out.reply ?? '').trim()
+          const heading = /^#\s+(.+)$/m.exec(reply)
+          const title = String(heading?.[1] ?? form.title ?? '').trim().slice(0, 120)
+          const description = heading === null ? reply : reply.replace(/^\s*#\s+.+\n?/, '').trim()
+          fromChatRef.current = true
+          setForm({ ...form, title, description, fromChat: true, status: 'draft', links: {}, project: form.project })
+          setIntake(null)
+        } catch (cause) {
+          setIntake(previous => previous === null ? previous : { ...previous, busy: false, error: cause instanceof Error ? cause.message : String(cause) })
+        }
       }
       const renderIntake = () => {
         if (intake === null) return null
-        const step = INTAKE_STEPS[intake.step]
-        const done = intake.done === true
-        const transcript = []
-        for (let i = 0; i < intake.step; i++) {
-          transcript.push(h('div', { key: 'q' + i, className: 'rounded-xl bg-background-secondary-default px-3 py-2 text-body-2-regular text-text-primary' }, INTAKE_STEPS[i].question))
-          transcript.push(h('div', { key: 'a' + i, className: 'self-end rounded-xl bg-accent-600 px-3 py-2 text-body-2-regular text-text-white' }, intake.answers[INTAKE_STEPS[i].key]))
-        }
-        transcript.push(h('div', { key: 'q-now', className: 'rounded-xl bg-background-secondary-default px-3 py-2 text-body-2-regular text-text-primary' }, step.question))
-        transcript.push(h('div', { key: 'hint', className: HINT }, step.hint))
-        if (done) {
-          transcript.push(h('div', { key: 'done', className: 'rounded-xl bg-status-lime-background px-3 py-2 text-body-2-regular text-text-primary' }, '收到，我按这些回答整理成需求文档草稿；保存后还能改。'))
-          transcript.push(h('div', { key: 'preview', className: 'md-content rounded-xl border border-separator-border p-3 text-body-2-regular text-text-primary' }, renderMarkdown(composeIntake(intake.answers))))
-        }
-        return h('div', { 'data-intake-ui': '', className: 'flex min-w-0 flex-col gap-2' },
-          h('div', { className: HINT }, done ? '回答完了，检查一下草稿' : `第 ${intake.step + 1} / ${INTAKE_STEPS.length} 个问题`),
-          h('div', { className: 'flex min-w-0 flex-col gap-2', 'data-intake-transcript': '' }, transcript),
-          done
-            ? h('div', { className: 'flex flex-wrap items-center gap-2' },
-              h(Button, { variant: 'secondary', size: 'sm', onClick: () => setIntake({ ...intake, done: false, step: INTAKE_STEPS.length - 1 }) }, '改最后一条'),
-              h(Button, { variant: 'primary', size: 'sm', onClick: finishIntake }, '生成文档并继续编辑'))
-            : h('div', { className: 'flex min-w-0 flex-col gap-2' },
-              h(TextAreaField, {
-                rows: 3, value: intake.input, 'aria-label': '回答当前问题',
-                placeholder: '用自己的话写，想到多少写多少',
-                onChange: event => setIntake({ ...intake, input: event.target.value }),
-                onKeyDown: event => {
-                  if ((event.metaKey || event.ctrlKey) && (event.key === 'Enter' || event.key === 'NumpadEnter')) {
-                    event.preventDefault(); submitIntake()
-                  }
-                },
-              }),
-              h('div', { className: 'flex flex-wrap items-center gap-2' },
-                intake.step > 0 ? h(Button, { variant: 'ghost', size: 'sm', onClick: () => setIntake({ ...intake, step: intake.step - 1, input: intake.answers[INTAKE_STEPS[intake.step - 1].key] ?? '' }) }, '上一条') : null,
-                h(Button, { variant: 'primary', size: 'sm', disabled: String(intake.input ?? '').trim() === '', onClick: submitIntake }, intake.step >= INTAKE_STEPS.length - 1 ? '看草稿' : '下一条'))))
+        const messages = intake.messages
+        const bubbles = [
+          h('div', { key: 'intro', className: 'rounded-xl bg-background-secondary-default px-3 py-2 text-body-2-regular text-text-primary' },
+            '先说一句你大概想解决什么？我会结合这个项目已有的需求、PRD 和当前卡继续追问，避免重复或冲突。'),
+          ...messages.map((message, index) => h('div', {
+            key: 'm' + index,
+            className: message.role === 'assistant'
+              ? 'rounded-xl bg-background-secondary-default px-3 py-2 text-body-2-regular text-text-primary'
+              : 'self-end rounded-xl bg-accent-600 px-3 py-2 text-body-2-regular text-text-white',
+          }, String(message.content ?? ''))),
+        ]
+        if (intake.busy === true) bubbles.push(h('div', { key: 'busy', className: HINT }, '模型正在结合项目沉淀思考…'))
+        return h('div', { 'data-intake-ui': '', className: 'flex min-w-0 flex-col gap-3' },
+          h('div', { className: FIELD },
+            h('div', { className: LABEL }, '参考项目（会读这个项目已有的需求 / PRD / 卡）'),
+            h(Select, {
+              className: 'w-full', value: form.project, options: projectOptions, 'aria-label': '参考项目',
+              onChange: event => setForm({ ...form, project: event.target.value }),
+            }),
+          ),
+          h('div', { className: 'flex min-w-0 flex-col gap-2', 'data-intake-messages': '' }, bubbles),
+          intake.error === null ? null : h('div', { className: 'text-caption-1-regular text-text-error-primary', 'data-intake-error': '' }, `模型没回上来：${intake.error}（可以重试，或切「直接填写」）`),
+          h('div', { className: 'flex min-w-0 flex-col gap-2' },
+            h(TextAreaField, {
+              rows: 3, value: intake.input, 'aria-label': '回答当前问题',
+              placeholder: messages.length === 0 ? '例：管理后台登录失败要锁定账号，防止暴力破解' : '接着回答，想到多少写多少',
+              onChange: event => setIntake({ ...intake, input: event.target.value }),
+              onKeyDown: event => {
+                if ((event.metaKey || event.ctrlKey) && (event.key === 'Enter' || event.key === 'NumpadEnter')) {
+                  event.preventDefault(); void submitIntake()
+                }
+              },
+            }),
+            h('div', { className: 'flex flex-wrap items-center gap-2' },
+              h(Button, { variant: 'primary', size: 'sm', disabled: intake.busy || String(intake.input ?? '').trim() === '', onClick: () => void submitIntake() }, intake.busy ? '思考中…' : '发送'),
+              h(Button, { variant: 'secondary', size: 'sm', disabled: intake.busy || messages.length < 2, onClick: () => void draftIntake() }, '整理成 PRD 草稿'),
+              messages.length === 0 ? null : h(Button, { variant: 'ghost', size: 'sm', onClick: startIntake }, '重新开始'))),
+        )
       }
       const save = async () => {
         if (form === null) return

@@ -2591,7 +2591,9 @@ export function apply(ctx) {
     configureInsightsRoutes({ readJsonBody, getDispatcher: () => activeDispatcher, sendJson, buildMetrics, buildAnalytics, workloadReport, burndownReport })
     configureReleasesRoutes({ sendJson, readJsonBody, publicState, releaseGate, releaseNotes, releaseRequirements, releaseRuleViolations, releaseDeploys })
     configureRequirementRoutes({
-      deleteRequirementFolder: (store, requirementId) => deleteRequirementFolder(store, requirementId, larkJson), commentTask, getDispatcher: () => activeDispatcher, sendJson, readJsonBody, createTask, publicState })
+      deleteRequirementFolder: (store, requirementId) => deleteRequirementFolder(store, requirementId, larkJson), commentTask,
+      getDefaultModel: () => ctx.get?.('agentDefaultModel')?.currentSelection?.() ?? undefined,
+      getDispatcher: () => activeDispatcher, getLlm: () => ctx.get?.('llm'), sendJson, readJsonBody, createTask, publicState })
     configureTaskRoutes({
       sendJson,
       readJsonBody,

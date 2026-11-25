@@ -619,7 +619,7 @@ try {
   await new Promise(resolve => setTimeout(resolve, 500))
   const chatState = await page.evaluate(() => ({
     ui: document.querySelector('[data-intake-ui]') !== null,
-    question: String(document.body.innerText ?? '').includes('这条需求一句话是什么'),
+    question: String(document.body.innerText ?? '').includes('先说一句你大概想解决什么'),
     fieldsHidden: (document.querySelector('[data-intake="1"] input[aria-label="需求标题"]')?.getBoundingClientRect().width ?? 1) === 0,
   }))
   check('③d 新建需求支持「先聊清楚」对话', chatOpened === true && chatState.ui === true && chatState.question === true && chatState.fieldsHidden === true, JSON.stringify(chatState))
