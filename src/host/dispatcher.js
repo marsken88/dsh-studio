@@ -14,7 +14,7 @@ import { STUDIO_WORKSPACE_TITLE, dispatchDirFor, projectContext, workspaceAttach
 import { mkdir, readdir, rename, stat } from 'node:fs/promises'
 import { randomBytes } from 'node:crypto'
 import { homedir } from 'node:os'
-import { dirname, join } from 'node:path'
+import { basename, dirname, join } from 'node:path'
 // 派单引擎：一卡一会话、槽位限流、幂等投递、SLA 升级。
 // 需要宿主能力的少数几处走 configureDispatcher() 注入，避免这里反过来依赖 index.js。
 
@@ -1200,9 +1200,15 @@ export class Dispatcher {
     const from = await this.locateSessionDir(sessionId, dir)
     let archived = false
     let archiveError = ''
+    let archivedTo = ''
     if (from !== '') {
+      /* 归档必须挪到 sessions/ **之外**：宿主启动时会扫 sessions/<slug>/* 并校验每个目录头里的
+         id/cwd，原地留一个 .stale-* 会被判「corrupt session log」，整个 workspace 服务起不来
+         （2026-11-26 .218 实测：重启后 /studio-api 全部挂起）。 */
+      archivedTo = join(this.archiveRoot(), basename(dirname(from)), `${basename(from)}.stale-${Date.now()}`)
       try {
-        await rename(from, `${from}.stale-${Date.now()}`)
+        await mkdir(dirname(archivedTo), { recursive: true })
+        await rename(from, archivedTo)
         archived = true
       } catch (error) {
         archiveError = String(error?.message ?? error)
@@ -1218,12 +1224,17 @@ export class Dispatcher {
       const still = `${after?.provider ?? '?'}/${after?.model ?? '?'}`
       const detail = `重建后仍是 ${still}：宿主可能把型号固定在别处`
       this.note(detail)
-      await this.commentDrift(task, `${note} 但旧会话${archived ? `已归档（${from}）` : `归档失败（${archiveError}）`}，${detail}；这一轮不再开跑（继续跑只会拿旧型号撞 503）。先重启 dsh，或手工删掉旧会话目录再派。`)
+      await this.commentDrift(task, `${note} 但旧会话${archived ? `已归档（${archivedTo}）` : `归档失败（${archiveError}）`}，${detail}；这一轮不再开跑（继续跑只会拿旧型号撞 503）。先重启 dsh，或手工删掉旧会话目录再派。`)
       throw new Error(`会话模型仍是 ${still}，配置要的是 ${agentOptions?.provider ?? ''}/${agentOptions?.model ?? ''}：旧会话${archived ? '已归档' : `归档失败（${archiveError}）`}，重建后型号没变`)
     }
-    await this.commentDrift(task, `${note}${from === '' ? '（没找到旧会话目录）' : `（旧会话 ${from}，${archived ? '已归档' : '未归档'}）`}，已按配置重建。`)
+    await this.commentDrift(task, `${note}${from === '' ? '（没找到旧会话目录）' : `（旧会话 ${from}，${archived ? `已归档到 ${archivedTo}` : '未归档'}）`}，已按配置重建。`)
     this.note(`已按配置重建会话（${agentOptions?.provider ?? ''}/${agentOptions?.model ?? ''}）`)
     return rebuilt
+  }
+
+  /** 归档目录：故意放在 `~/.dsh/sessions-archive`，不参与宿主的工作区扫描。测试可覆盖。 */
+  archiveRoot() {
+    return join(homedir(), '.dsh', 'sessions-archive')
   }
 
   /**

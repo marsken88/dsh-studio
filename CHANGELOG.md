@@ -40,6 +40,12 @@
 
 验证：`tests/escalation.test.mjs` 新增 `effectiveSandbox` 用例（allow / deny / 只读优先 / 脏值兜底）；面板文案同步；`npm run check` 与 `pnpm build` 通过。
 
+### 归档旧会话不再放在 `sessions/` 里（会把宿主 workspace 服务搞挂）
+
+- 漂移重建时旧会话原来原地改名成 `~/.dsh/sessions/<slug>/<id>.stale-<ts>`；宿主启动会扫 `sessions/<slug>/*` 并校验每个目录头的 id/cwd，`.stale-*` 对不上就被判 **corrupt session log**，`workspaceRegistry` 起不来 → `/studio-api` 全部挂起（2026-11-26 `.218` 实测，重启后 state/agents 全超时）。
+- 现在归档到 `~/.dsh/sessions-archive/<slug>/<id>.stale-<ts>`（`archiveRoot()`，测试可覆盖），不参与工作区扫描；卡上评论写清新的归档路径。
+- 现场修复：`.218` 上 4 个 `.stale-*` 已挪进 `sessions-archive/`，重启后无激活错误、`/state` 与 `/agents/policy` 均 200。
+
 ## [0.17.1] — 2026-11-25
 
 ### 探针 ⑥b 不再是假红：命令面板得搜得到「自己造的卡」

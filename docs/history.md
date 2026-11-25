@@ -1341,3 +1341,16 @@ TDZ 41 文件，`pnpm build` 后 `cmp dist/client.js client.js` 一致，`probe:
 dispatcher 落 preset、`/agents/policy` 的 `effectiveSandbox`、卡片抽屉文案共用这一份判据；
 设置页与 README / manual 的「提权审批」文案同步改。默认值仍是 allow，所以升级后
 开箱即完全权限；要收紧就改成「自动拒绝」并选沙箱档位。
+
+### 补一刀：归档目录不能留在 sessions/ 下（2026-11-26 00:39 真机）
+
+把新版部署到 .218 并重启后，`/studio-api/state`、`/agents` 全部挂起（health 200，其它 10s 超时）。
+日志：`workspace (@deepseek-ai/dsh-workspace): Error: corrupt session log
+".../--home-lyf-dsh-workspace--/studio-t-5d1d2ad4-architect.stale-1795623869499/session.v4.jsonl.zstd":
+header id ... and cwd identify ".../studio-t-5d1d2ad4-architect/..."` —— 宿主启动会扫
+`sessions/<slug>/*` 并校验目录头，漂移归档用的 `.stale-*` 被判 corrupt，workspaceRegistry
+起不来，依赖它的路由全挂。
+
+修法：归档改到 `~/.dsh/sessions-archive/<slug>/<id>.stale-<ts>`（`archiveRoot()`），
+并把 .218 上 4 个 `.stale-*` 挪出 `sessions/`；重启后无激活错误，接口恢复。
+单测 `model-drift.test.mjs` 断言 `sessions/<slug>/` 下不再留 `.stale-*`。

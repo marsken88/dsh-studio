@@ -85,6 +85,7 @@ test('漂移重建：按 sessionPersistence 给的真实目录归档（不再用
       locationPath: id => join(root, '--home-old-workspace--', id),
       models: {},
     })
+    dispatcher.archiveRoot = () => join(root, 'archive')
     const state = {}
     const rebuiltHandle = handleFor(flash, state)
     let opened = 0
@@ -101,8 +102,9 @@ test('漂移重建：按 sessionPersistence 给的真实目录归档（不再用
     assert.equal(state.disposed, true, '旧会话要先 dispose')
     const stillThere = await stat(realDir).then(() => true).catch(() => false)
     assert.equal(stillThere, false, '旧会话目录要真的被 rename 走，而不是原地留着')
-    const entries = readdirSync(join(root, '--home-old-workspace--'))
-    assert.equal(entries.some(name => name.startsWith(sessionId + '.stale-')), true, '归档目录要带 .stale- 后缀')
+    const archivedEntries = readdirSync(join(root, 'archive', '--home-old-workspace--'))
+    assert.equal(archivedEntries.some(name => name.startsWith(sessionId + '.stale-')), true, '归档目录要带 .stale- 后缀')
+    assert.equal(readdirSync(join(root, '--home-old-workspace--')).length, 0, 'sessions/<slug>/ 下不能再留 .stale-*（宿主会扫到并判 corrupt）')
     assert.equal(comments.length, 1, '重建成功也要在卡上留一条（写明归档了哪条目录）')
     assert.match(comments[0].body, /已按配置重建/)
     assert.match(comments[0].body, new RegExp(sessionId))
