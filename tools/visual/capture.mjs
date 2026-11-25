@@ -2,7 +2,8 @@
 /**
  * README 截图生成器（npm run shots）：造一套**演示数据**，用真实 client.js 渲染面板，逐页截图到 docs/images/。
  *
- * 不需要 STUDIO_TOKEN：面板本身只依赖 /studio-api，这里用最小假宿主把它挂起来，
+ * 需要 STUDIO_TOKEN（dsh web 的启动 token）：`/studio-api` 过宿主信任栅栏，没有已认证的浏览器会话
+ * 一律 401，脚本得先换一次 cookie。面板本身只依赖 /studio-api，这里用最小假宿主把它挂起来，
  * 再把 /studio-api/* 反代到正在跑的实例（所以图里是真实渲染 + 真实的交互状态）。
  *
  *   npm run shots -- --base http://127.0.0.1:<dsh 端口>
@@ -18,6 +19,7 @@ import { existsSync, mkdirSync, readFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { launchTokenFromEnv, studioFetch } from '../lib/studio-auth.mjs'
 
 const here = dirname(fileURLToPath(import.meta.url))
 const repo = join(here, '..', '..')
@@ -31,6 +33,9 @@ if (base === '') {
   console.error('用法：npm run shots -- --base http://127.0.0.1:<dsh 端口>')
   process.exit(2)
 }
+/* `/studio-api` 过宿主信任栅栏：没有已认证的浏览器会话的请求一律 401。脚本没有浏览器，
+   用 dsh web 的启动 token 换 cookie —— api() 与假宿主代理层共用这一份会话（见 tools/lib/studio-auth.mjs）。 */
+const authedFetch = studioFetch(base, launchTokenFromEnv())
 const OUT = join(repo, 'docs', 'images')
 mkdirSync(OUT, { recursive: true })
 
@@ -41,7 +46,7 @@ const CHROME = [process.env.CHROME_PATH, 'C:/Program Files/Google/Chrome/Applica
 if (CHROME === undefined) { console.log('跳过：找不到 Chrome/Edge'); process.exit(0) }
 
 const api = async (path, body) => {
-  const res = await fetch(base + '/studio-api' + path, {
+  const res = await authedFetch('/studio-api' + path, {
     method: body === undefined ? 'GET' : 'POST',
     headers: { 'content-type': 'application/json' },
     body: body === undefined ? undefined : JSON.stringify(body),
@@ -75,7 +80,7 @@ const server = createServer(async (req, res) => {
     const chunks = []
     for await (const chunk of req) chunks.push(chunk)
     try {
-      const upstream = await fetch(base + url.pathname + url.search, {
+      const upstream = await authedFetch(url.pathname + url.search, {
         method: req.method,
         headers: { 'content-type': 'application/json' },
         body: ['GET', 'HEAD'].includes(req.method) ? undefined : (chunks.length > 0 ? Buffer.concat(chunks) : undefined),

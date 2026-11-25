@@ -12,6 +12,7 @@
  * /studio-api/state 的响应替换掉；不改服务器上的任何数据。
  */
 import { createRequire } from 'node:module'
+import { launchTokenFromEnv, studioFetch } from '../lib/studio-auth.mjs'
 
 const require = createRequire(import.meta.url)
 const puppeteer = require('puppeteer-core')
@@ -22,6 +23,9 @@ if (token === '' || baseUrl === '') {
   console.error('需要 STUDIO_TOKEN 与 STUDIO_BASE')
   process.exit(2)
 }
+/* `/studio-api` 过宿主信任栅栏：没有已认证的浏览器会话的请求一律 401。脚本没有浏览器，
+   用 dsh web 的启动 token 换 cookie（见 tools/lib/studio-auth.mjs）。 */
+const api = studioFetch(baseUrl, launchTokenFromEnv())
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms))
 
 /** 刚装好：没有卡、没有需求、没有版本、没有项目。config 保留（里面是专家/列/模板）。 */
@@ -40,7 +44,7 @@ function emptyStateOf(state) {
   }
 }
 
-const real = await fetch(`${baseUrl}/studio-api/state`, { headers: { 'x-studio-user': 'empty-probe' } })
+const real = await api('/studio-api/state', { headers: { 'x-studio-user': 'empty-probe' } })
 const realJson = await real.json()
 const state = realJson?.state ?? realJson
 if (state === undefined || state === null) {

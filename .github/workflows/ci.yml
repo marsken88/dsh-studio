@@ -35,6 +35,12 @@ jobs:
       - name: TDZ scan
         run: npm run verify:tdz
 
+      # /studio-api 的信任栅栏：真 handler + 假宿主 + 真 HTTP。
+      # 无会话读台账要 401、伪造 Host 要 403、跨站 Origin 要 403、公开提单匿名可用。
+      # 没有这一条，「栅栏被谁删掉了」只能等社区列表的披露来提醒。不需要依赖与 token。
+      - name: Trust fence
+        run: npm run verify:fence
+
       - name: Build bundle
         working-directory: web
         run: pnpm install --frozen-lockfile && pnpm build

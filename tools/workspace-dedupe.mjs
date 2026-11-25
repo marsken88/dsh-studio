@@ -12,7 +12,13 @@
  *   1. 同名组里会话最多的那个；
  *   2. 一样多时，优先路径以 REQ-* 结尾的（需求级 worktree）；
  *   3. 只删路径里带 /worktrees/ 或 studio 的注册，仓库根/未知路径一律不碰。
+ *
+ * 鉴权：`/studio-api` 过宿主的信任栅栏 —— 给 STUDIO_TOKEN（dsh web 的启动 token，脚本自己换 cookie），
+ * 或用 --token 传同一个值：
+ *   STUDIO_TOKEN=<dsh web 启动 token> node tools/workspace-dedupe.mjs --base http://<host>:18080
  */
+import { launchTokenFromEnv, studioFetch } from './lib/studio-auth.mjs'
+
 const argv = process.argv.slice(2)
 const arg = (name, fallback) => {
   const i = argv.indexOf('--' + name)
@@ -32,8 +38,10 @@ if (apply && !yes) {
   process.exit(2)
 }
 
+// token 已经按 STUDIO_TOKEN / --token 解析好了，直接交给 studioFetch（缺了会抛带说明的错误，不静默跳过）。
+const api = studioFetch(base, token || launchTokenFromEnv())
 const post = async (path, body) => {
-  const response = await fetch(base + '/studio-api' + path, {
+  const response = await api('/studio-api' + path, {
     method: 'POST',
     headers: { 'content-type': 'application/json', ...(token === '' ? {} : { 'x-studio-session': token }) },
     body: JSON.stringify(body ?? {}),

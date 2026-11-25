@@ -186,13 +186,28 @@ sudo systemctl restart dsh-web
 
 ### 验证装好了
 
-浏览器打开 DSH Web，左侧栏出现「需求&任务工作空间」；或直接打接口：
+浏览器打开 DSH Web，左侧栏出现「需求&任务工作空间」；或直接打接口（`/health` 只回 `{"ok":true}`，探活用它，
+不要去探 `/state`——那份台账要求已登录的浏览器会话）：
 
 ```bash
-curl -s http://<host>:<port>/studio-api/state | head -c 80   # 应返回 {"ok":true,"revision":...}
+curl -s http://<host>:<port>/studio-api/health   # 应返回 {"ok":true}
 ```
 
 ## 安全与来源边界
+
+### `/studio-api` 先过宿主的信任栅栏
+
+面板以外的所有接口都挂在 DSH 的同一个端口上，所以每个请求进来先过宿主的
+`connection.requestRejection(req)`：
+
+| 结论 | 什么时候 | 我们的处置 |
+| --- | --- | --- |
+| **403** | `Host` / `Origin` 不是本机同源（DNS rebinding、跨站网页） | 一律拒绝，公开提单页也不豁免 |
+| **401** | 没有已认证的 DSH 浏览器会话 | 拒绝；只豁免公开自助提单面与 `/health` |
+| 放行 | 同源 + 已认证 | 继续走插件自己的权限名单 |
+
+也就是说：**浏览器里随便一个网页调不动这些接口**，匿名者也拿不到台账。脚本没有浏览器，
+要用 `dsh web` 的启动 token 换一次 cookie（`tools/lib/studio-auth.mjs`），否则会拿到 401。
 
 默认**不启用登录**（`access.enabled=false`），开箱即用。这个模式下有三类操作只允许在
 **服务器本机（127.0.0.1）**执行，其他机器调用会返回 `403 local_only`：
@@ -242,6 +257,7 @@ GitHub Actions（`.github/workflows/release.yml`）会依次：校验 tag 与 `p
 | `npm run shots -- --base <端口>` | README 截图：造演示数据 → 真 `client.js` 渲染 → 逐页截图到 `docs/images/`，跑完自删（含云盘目录）。**界面一改就重跑**，别手工截图——2026-11-20 那批图停在 11-18，中间左栏、闸门、BoardUI 全变了 |
 | `npm run drive:gc -- --base <端口>` | 云盘孤儿目录体检/清理：**只删「名字像 REQ-* 且台账里没有引用」的文件夹**，项目目录/未归属项目/看不懂的一律保留，文件永不删。默认只体检，`--apply` 才真删（进回收站），串行 + 退避重试（并发会被飞书判 resource contention） |
 | `npm run probe:panel -- --base http://127.0.0.1:<端口>` | 面板**渲染**：假宿主挂真实 `client.js` + 把 `/studio-api/*` 反代到正在跑的实例，puppeteer 逐页断言并截图到 `tmp/probe/`。接口测试与单测看不见「渲染在哪个面板里」——0.9.36 就有开关插错面板而全绿的情况。自己造「（探针）」数据、跑完自删；没装 puppeteer-core 或没 Chrome 时跳过不判红 |
+| `npm run verify:fence` | `/studio-api` 的**信任栅栏**（把 `index.js` 注册的真实 handler 挂在假宿主上发真 HTTP）：无会话读台账要 401、伪造 `Host`（DNS rebinding）要 403、跨站 `Origin` 要 403、公开提单页匿名可用但同样挡住跨站、`/health` 不要登录。单测验不到「handler 里到底调没调」，真机探针又要部署，这层夹在中间 |
 | `npm run verify:mirror` | 本地演练 GitHub Packages 镜像的改名步骤（只在打 tag 时才跑的东西，提前在本地验一遍） |
 | `npm run verify:tdz` | 作用域级“先用后声明”扫描（TDZ）：浏览器里的 `Cannot access 'x' before initialization` 就是这么来的，`node --check` 查不出。已接进 `release:check` |
 | `npm run verify:pack` | 打包后自检（**验的是要发的 tarball**）：patch 在包里且 `name` 等于包名、`exports`/`dsh` 指向的文件都在、`index.js` 能被真的 import。已接进 `release:check` |
@@ -396,7 +412,8 @@ GitHub Actions（`.github/workflows/release.yml`）会依次：校验 tag 与 `p
    直接把这几个文件拷进去：`index.js client.js package.json cordis.patch.yml locale src`）
 4. **重启 dsh**（桌面端：退出并重开客户端）—— host 半边只在启动时加载
 
-挂好之后自检：`curl -s localhost:<port>/studio-api/state | head -c 80` 应该返回 `{"ok":true,...}`。
+挂好之后自检：`curl -s localhost:<port>/studio-api/health` 应该返回 `{"ok":true}`
+（别探 `/state`：那份台账要求已登录的浏览器会话，裸 curl 会拿到 401 `login_required`）。
 
 ## 装完不对劲先看这里
 

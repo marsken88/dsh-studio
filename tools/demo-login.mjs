@@ -1,10 +1,13 @@
 // 用「管理后台登录功能」走一遍完整链路（真数据，会留在看板上）
+import { launchTokenFromEnv, studioFetch } from './lib/studio-auth.mjs'
+
 const BASE = process.env.STUDIO_BASE ?? 'http://192.168.120.218:18080'
+const api = studioFetch(BASE, launchTokenFromEnv())
 const post = async (path, body) => {
-  const res = await fetch(BASE + '/studio-api' + path, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body ?? {}) })
+  const res = await api('/studio-api' + path, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body ?? {}) })
   return { status: res.status, body: await res.json().catch(() => ({})) }
 }
-const state = async () => (await (await fetch(BASE + '/studio-api/state')).json()).state
+const state = async () => (await (await api('/studio-api/state')).json()).state
 const show = (label, ok, detail) => console.log((ok ? 'ok   ' : 'FAIL ') + label + (detail === undefined ? '' : ' — ' + detail))
 
 const points = [

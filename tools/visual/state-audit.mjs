@@ -20,6 +20,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { dirname, extname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { launchTokenFromEnv, studioFetch } from '../lib/studio-auth.mjs'
 
 const here = dirname(fileURLToPath(import.meta.url))
 const repo = join(here, '..', '..')
@@ -29,6 +30,9 @@ const base = argOf('base', process.env.STUDIO_BASE ?? '')
 const mode = argOf('mode', 'empty')
 const width = Number(argOf('width', mode === 'mobile' ? '375' : '1440'))
 if (base === '') { console.error('用法：node tools/visual/state-audit.mjs --base http://127.0.0.1:<端口> --mode empty|locked|scale|mobile|interact'); process.exit(2) }
+/* `/studio-api` 过宿主信任栅栏：没有已认证的浏览器会话的请求一律 401。脚本没有浏览器，
+   用 dsh web 的启动 token 换 cookie —— 真状态读取与假宿主代理层共用这一份会话（见 tools/lib/studio-auth.mjs）。 */
+const api = studioFetch(base, launchTokenFromEnv())
 
 const require = createRequire(import.meta.url)
 let puppeteer
@@ -39,7 +43,7 @@ const OUT = join(repo, 'tmp', 'state-audit')
 mkdirSync(OUT, { recursive: true })
 
 // ---------------------------------------------------------------- 真状态（只读）
-const realJson = await fetch(`${base}/studio-api/state`).then(res => res.json()).catch(() => null)
+const realJson = await api('/studio-api/state').then(res => res.json()).catch(() => null)
 const real = realJson?.state ?? null
 if (real === null) { console.error('拉不到 /state'); process.exit(1) }
 
@@ -138,7 +142,7 @@ const server = createServer(async (req, res) => {
   }
   if (url.pathname.startsWith('/studio-api/')) {
     try {
-      const upstream = await fetch(base + url.pathname + url.search)
+      const upstream = await api(url.pathname + url.search)
       res.writeHead(upstream.status, { 'content-type': upstream.headers.get('content-type') ?? 'application/json' })
       res.end(await upstream.text())
     } catch { res.writeHead(502); res.end('{}') }

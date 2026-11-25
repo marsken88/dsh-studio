@@ -39,6 +39,88 @@ export function checkAccess(config, operator, level, trusted = false) {
   return null
 }
 
+/* --------------------------------------------------------------- 宿主信任栅栏 ---
+   `/studio-api` 挂在 DSH 的 webServer 上，于是它**继承宿主的端口**：任何能连到
+   这个端口的人都能调。宿主的 connection.requestRejection() 是 Host/Origin 栅栏
+   加「已认证的浏览器会话」，结论只有三种：403（栅栏没过）、401（没有会话）、
+   undefined（放行）。这里负责把结论翻成我们的处置，以及替调用方拿住连接本体
+   （见 trustOutcomeFor；connection 由 index.js 从 ctx 取来传进来）。 */
+
+/** 对外公开的自助提单面：业务方不登录也能提交与查询（README 的「自助提单」）。
+ *  它们是**设计成公开**的，所以只豁免「没有会话」这一条，绝不豁免 Host/Origin 栅栏
+ *  ——否则随便一个网页就能借 DNS rebinding 往里灌需求。
+ *  名单必须与 intake-pages.js 里页面真正会调的地址一致（页面只调这三个 POST）。 */
+export const PUBLIC_INTAKE_ROUTES = new Set([
+  '/intake',
+  '/intake/requirement',
+  '/intake/status',
+  '/intake/query',
+  '/intake/mine',
+  '/intake/mine/query',
+  /* 运维探活：只看得到「活着」，看不到任何台账。部署脚本靠它判断服务起没起。 */
+  '/health',
+])
+
+/** requestRejection 的结论 → 我们的处置。返回 null 表示放行，否则是 { status, code, error }。
+ *
+ *  为什么按值分开处置：宿主把「没有会话」和「Host 不对」压成两个不同的状态码，
+ *  而我们的公开提单页只该被第一条挡住。写成 `rejection !== undefined` 一把拒，
+ *  等于顺手把匿名提单功能关掉；写成只认 403，等于没做会话校验。 */
+export function trustRejectionOutcome(rejection, route) {
+  if (rejection === undefined || rejection === null) return null
+  if (rejection === 403) {
+    return {
+      status: 403,
+      code: 'bad_origin',
+      error: '这不是本机的同源请求（Host/Origin 栅栏没过）：跨站网页与 DNS rebinding 都调不动这些接口。',
+    }
+  }
+  if (rejection === 401 && PUBLIC_INTAKE_ROUTES.has(route)) return null
+  return {
+    status: 401,
+    code: 'login_required',
+    error: '需要已登录的 DSH 浏览器会话：从 dsh web 启动时打印的那个 URL 打开面板（脚本用 tools/lib/studio-auth.mjs 换 cookie）。',
+  }
+}
+
+/** 宿主没提供 connection.requestRejection 时的说明（**不拦**）。
+ *
+ *  为什么是放行而不是「只信回环」：这个插件声明兼容的是 dsh 0.2.2-rc.1+，而
+ *  requestRejection 从 0.1.5-alpha.1 就存在——拿不到它，说明是宿主的服务名换了或
+ *  某种非标准宿主。这种情况下**只信回环**会把局域网里正常打开面板的人一起挡成 403
+ *  （可用性事故），而我们又没有宿主那份可信 Host 名单，判断不出「谁该被信」。
+ *  所以这里放行，由 trustOutcomeFor 记一行日志，让「栅栏没生效」在日志里看得见。
+ *  真正支持的宿主上这条分支永远不会走到。 */
+export function trustUnavailableOutcome() {
+  return null
+}
+
+let trustUnavailableWarned = false
+
+/** 宿主信任栅栏的实际调用：`connection` 从 ctx 取来传进来（可能没有）。
+ *
+ *  `requestRejection` **必须以方法形式调用**：宿主那边是类方法，内部读
+ *  `this.trustedHosts` / `this.browserAuth`，抽成裸函数调用会丢 this → TypeError
+ *  （dsh-pocket 的 issue #117 就是这么全盘 403 的）。所以这里拿到连接本体直接 call。
+ *
+ *  宿主自己抛错时按「栅栏没过」处理：宁可回 403，也不放一个说不清的请求进去。 */
+export function trustOutcomeFor(connection, req, route) {
+  if (typeof connection?.requestRejection === 'function') {
+    let rejection
+    try {
+      rejection = connection.requestRejection(req)
+    } catch {
+      rejection = 403
+    }
+    return trustRejectionOutcome(rejection, route)
+  }
+  if (!trustUnavailableWarned) {
+    trustUnavailableWarned = true
+    console.warn('[dsh-studio] 宿主没有 connection.requestRejection：/studio-api 的信任栅栏本次未生效（同源/会话都没校验）。请升级 dsh。')
+  }
+  return trustUnavailableOutcome()
+}
+
 /* ------------------------------------------------------------------ 来源限制 ---
    权限模型默认没开（access.enabled=false）。这种部署下，凡是「真能造成不可逆损害」
    的操作只允许服务器本机执行，其余管理操作照旧（否则管理员在自己浏览器里什么都改不了，
