@@ -596,6 +596,14 @@ try {
     return { border: cs.borderTopWidth, bg: cs.backgroundColor, radius: cs.borderRadius }
   })
   check('③d 输入框保持 BoardUI 原样（无宿主边框/白底）', inputBox !== null && inputBox.border === '0px' && inputBox.bg === 'rgba(0, 0, 0, 0)' && inputBox.radius === '0px', JSON.stringify(inputBox))
+  const selectBox = await page.evaluate(() => {
+    const select = document.querySelector('[role="dialog"] button[aria-haspopup="listbox"], [data-side-drawer] button[aria-haspopup="listbox"]')
+    if (select === null) return null
+    const cs = getComputedStyle(select)
+    return { border: cs.borderTopWidth, bg: cs.backgroundColor, radius: cs.borderRadius, shadow: cs.boxShadow }
+  })
+  /* Select 与 Input 的官方视觉不同：白底 + 1px 边框 + shadow/xs（Figma trigger 规格），别统一改成灰底。 */
+  check('③d Select 保持 BoardUI 官方样式（白底/1px 边框/阴影）', selectBox !== null && selectBox.border === '1px' && selectBox.bg === 'rgb(255, 255, 255)' && selectBox.radius === '10px' && selectBox.shadow !== 'none', JSON.stringify(selectBox))
   await page.keyboard.press('Escape')
   await new Promise(resolve => setTimeout(resolve, 400))
 
