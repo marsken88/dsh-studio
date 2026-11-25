@@ -3,7 +3,8 @@
  * 清理侧栏里同名的重复工作区注册（会话日志不删，只是把分组注册删掉）。
  *
  *   node tools/workspace-dedupe.mjs --base http://192.168.120.218:18080            # 只列计划
- *   node tools/workspace-dedupe.mjs --base ... --apply --yes                       # 真删
+ *   node tools/workspace-dedupe.mjs --base ... --legacy                            # 顺带列出旧的一卡一 worktree 文件夹
+ *   node tools/workspace-dedupe.mjs --base ... --legacy --apply --yes              # 真删（只删注册）
  *
  * 背景：DSH 工作区按会话 cwd 精确归属；以前一卡一 worktree，同一个需求会建出
  * 多个同名 `项目 · REQ` 文件夹。分组改成 requirement 后新派单不再重复，但旧注册
@@ -20,6 +21,7 @@ const arg = (name, fallback) => {
 const base = String(arg('base', process.env.STUDIO_BASE ?? '')).replace(/\/+$/, '')
 const token = String(process.env.STUDIO_TOKEN ?? arg('token', '')).trim()
 const apply = argv.includes('--apply')
+const legacy = argv.includes('--legacy')
 const yes = argv.includes('--yes')
 if (base === '') {
   console.error('用法：node tools/workspace-dedupe.mjs --base http://<host>:18080 [--apply --yes]')
@@ -70,9 +72,18 @@ for (const [title, list] of groups.entries()) {
   }
 }
 
+/* --legacy：旧的一卡一 worktree 留下的 REQ-xxx-<hash> 文件夹（标题唯一，不会进同名分组）。 */
+if (legacy) {
+  for (const item of workspaces) {
+    if (!/^REQ-\d{3}-[0-9a-f]{6,}$/i.test(String(item.title ?? ''))) continue
+    if (!protectedPath(item.path)) continue
+    plan.push({ title: item.title, keep: null, drop: item, legacy: true })
+  }
+}
 console.log(`工作区 ${workspaces.length} 个，同名分组 ${[...groups.values()].filter(list => list.length > 1).length} 个，计划删除 ${plan.length} 个注册`)
 for (const entry of plan) {
-  console.log(`- 「${entry.title}」保留 ${entry.keep.sessions} 会话 @ ${entry.keep.path}\n  删除 ${entry.drop.sessions} 会话 @ ${entry.drop.path}`)
+  if (entry.keep === null) console.log(`- 旧卡片文件夹「${entry.title}」：删除 ${entry.drop.sessions} 会话 @ ${entry.drop.path}`)
+  else console.log(`- 「${entry.title}」保留 ${entry.keep.sessions} 会话 @ ${entry.keep.path}\n  删除 ${entry.drop.sessions} 会话 @ ${entry.drop.path}`)
 }
 if (plan.length === 0) {
   console.log('没有需要清理的重复注册。')
