@@ -1573,8 +1573,8 @@ async function ensureWorktree(store, task, config) {
 }
 
 /** 需求级共享 worktree 的实现在 src/host/requirement-worktree.js（index 行数棘轮）。 */
-async function ensureRequirementWorktree(store, task, config) {
-  return ensureRequirementWorktreeIn({ store, task, config, workProjectOf, serviceOf, runCommandFn: runCommand, listWorkspaces: () => ctx.get?.('workspaceRegistry')?.list?.() ?? [] })
+async function ensureRequirementWorktree(store, task, config, listWorkspaces) {
+  return ensureRequirementWorktreeIn({ store, task, config, workProjectOf, serviceOf, runCommandFn: runCommand, listWorkspaces })
 }
 
 /** 回收 worktree（卡已完成且策略是 on_done 时调用）。 */
@@ -2572,7 +2572,7 @@ export function apply(ctx) {
   })
 
   ctx.inject(['agents', 'sessionController', 'workspaceRegistry', 'permissionPresets', 'agentDefaultModel', 'sessionProjections'], dispatcherCtx => {
-    configureDispatcher({ getActiveSkills: () => activeSkills, sessionProjections: dispatcherCtx.sessionProjections, commentTask, feishuBroadcast, INTEGRATION, bugSla, removeWorktree, ensureWorktree, ensureRequirementWorktree, serviceOf, workProjectOf, serviceConflicts })
+    configureDispatcher({ getActiveSkills: () => activeSkills, sessionProjections: dispatcherCtx.sessionProjections, commentTask, feishuBroadcast, INTEGRATION, bugSla, removeWorktree, ensureWorktree, ensureRequirementWorktree, listWorkspaces: () => ctx.get?.('workspaceRegistry')?.list?.() ?? [], serviceOf, workProjectOf, serviceConflicts })
     configureIntegrations({ newTaskId, serviceOf, getStore: () => activeStore })
   // 集成健康是旁路数据，启动时读回来，重启后不再显示成「还没用过」。
   restoreHealth()

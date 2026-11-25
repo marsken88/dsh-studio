@@ -824,7 +824,7 @@ export class Dispatcher {
         if (concurrentDev) {
           worktree = await host.ensureWorktree(this.store, task, cfgNow)
         } else if (typeof host.ensureRequirementWorktree === 'function') {
-          requirementWorktree = await host.ensureRequirementWorktree(this.store, task, cfgNow)
+          requirementWorktree = await host.ensureRequirementWorktree(this.store, task, cfgNow, host.listWorkspaces)
           if (requirementWorktree?.skipped !== undefined) this.note(`requirement worktree skipped: ${requirementWorktree.skipped}`)
           if (isDevRole && String(requirementWorktree?.path ?? '') !== '') {
             worktree = requirementWorktree
