@@ -1765,10 +1765,13 @@ function installKeyboardActivation() {
                 ? h(Button, {
                     variant: 'ghost',
                     size: 'sm',
+                    // 集成异常是错误语义：边框/文字/底色统一用 rose；以前是 ghost 按钮里套 rose chip，
+                    // 键盘聚焦时外圈还是主题蓝，蓝框配红字，看着像两个互不相干的信号。
+                    className: '!border !border-status-rose-text/40 !bg-status-rose-background !text-status-rose-text hover:!bg-status-rose-background/80 focus-visible:!ring-status-rose-text',
                     'data-integration-alert': String(state.integrations.broken),
                     title: (state.integrations.channels ?? []).filter(item => item.state === 'error').map(item => `${item.label}：${item.lastError}`).join('\n'),
                     onClick: () => { setTab('settings'); setSettingsSection('health') },
-                  }, h(ChipField, { variant: 'rose' }, `集成异常 ${state.integrations.broken}`))
+                  }, `集成异常 ${state.integrations.broken}`)
                 : null,
               h('div', { className: 'relative', 'data-new-menu': '' },
                 h(Button, {
