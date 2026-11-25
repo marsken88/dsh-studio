@@ -17,6 +17,8 @@ test('澄清阶段：提示词要求先检索历史，并说明命中/未命中�
   assert.match(prompt, /REQ 编号/)
   assert.match(prompt, /已检索，无命中/, '没命中也要留一句话，否则看不出查没查过')
   assert.match(prompt, /不要编造查过/, '没有检索工具时不许假装查过')
+  assert.match(prompt, /weknora_search/, '工具名要写注册名，少一次调错')
+  assert.match(prompt, /报错原文/, '工具报错不能被写成「无命中」')
 })
 
 test('方案阶段：同一条要求也生效', () => {

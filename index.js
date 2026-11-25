@@ -28,6 +28,7 @@ export const inject = ['tools', 'systemPrompt']
 
 
 import { sanitizeProjectFolders, ACCESS_ROLE_LABEL, ACCESS_ROLES, ADMIN_ROUTES, ARTIFACT_KINDS, ARTIFACT_STATUS, CASE_HTTP_METHODS, CASE_PRIORITIES, CASE_RESULTS, CASE_TYPE_LABEL, CASE_TYPES, cleanId, CODE_PREFIX, CODING_FILE_CHANGES, CODING_REVIEW_STATUS, codingSummary, COLUMN_STRATEGIES, DEFAULT_ROLES, defaultColumns, defaultConfig, defaultDeployEnvs, defaultTemplates, DEPLOY_ENV_KINDS, FALLBACK_AGENT_MODEL, hashLocalPassword, ISOLATION_MODES, LEGACY_BLOCKED_STATUS, LEVEL_RANK, LOCAL_DEFAULT_PASSWORD, mergeCoding, mergeConfig, mergeSection, nextRequirementCode, nextTaskCode, normalizePatch, normalizeStrategy, publicArtifact, publicCases, publicChecklist, publicComments, PRIORITIES, ROLE_LABELS, roleIdsOf, rolesInColumns, canonicalAuthor, RELEASE_STATUSES, RELEASE_STATUS_LABEL, REQ_DOC_KIND_LABEL, REQ_DOC_KINDS, REQ_DOC_STATUS, REQ_REVIEW_LABEL, REQ_REVIEW_STATUS, REQ_STATUS_LABEL, REQ_STATUSES, ROLE_IDS, ROLE_LEVEL, SANDBOX_MODES, sanitizeAccess, sanitizeAllowHosts, sanitizeArtifact, sanitizeArtifacts, sanitizeBaseline, sanitizeBots, sanitizeBugSource, sanitizeCase, sanitizeCaseHttp, sanitizeCaseRun, sanitizeCases, sanitizeChangedFile, sanitizeChangedFiles, sanitizeChecklist, sanitizeChecklistItem, sanitizeCaseGate, sanitizeCoding, sanitizeColumns, sanitizeCommit, sanitizeCommits, sanitizeCosts, sanitizeDeployEnvs, sanitizeEnvs, sanitizeExperts, sanitizeIterations, sanitizeLdap, sanitizeLocalAuth, sanitizeProjects, sanitizeReqDoc, sanitizeReqDocs, sanitizeRelease, sanitizeRequirement, sanitizeRequirementChange, sanitizeRequirementGate, sanitizeRequirementHistory, sanitizeRequirementPoint, sanitizeRequirementPoints, sanitizeRequirementPool, sanitizeRequirementQuestions, sanitizeRequirementReview, sanitizeRequirements, sanitizeReviewGate, sanitizeServices, sanitizeSla, sanitizeRoles, sanitizeTeams, sanitizeTemplates, sanitizeTesting, sanitizeTestRun, sanitizeTestRuns, sanitizeUsers, sanitizeWorkProjects, seedExperts, SEVERITIES, STATUS_IDS, STATUS_SET, STATUSES, TASK_TYPES, text, verifyLocalPassword, worktreeRoot } from './src/host/domain.js'
+import { withClarifyHistoryItem } from './src/host/acceptance.js'
 import { accessLevelFor, checkAccess, isCrossSiteRequest, isLoopbackRequest, needsConfirm, needsLocalSource, READ_ONLY_POST_ROUTES, trustOutcomeFor } from './src/host/access.js'
 import { Dispatcher, RUN_LOG, attachRunLog, claimDispatchLock, clearAgentFailure, configureDispatcher, noteAgentFailure, parseMentions, runSummary } from './src/host/dispatcher.js'
 import { worktreeBaseFor } from './src/host/dispatch-cwd.js'
@@ -1204,14 +1205,9 @@ async function createTask(store, input) {
   const type = patch.type ?? 'requirement'
   // 建卡时按模板铺一张验收清单：这一行活到底要交什么，一开始就写清楚。
   const template = store.snapshot().config.templates[type] ?? []
-  const seeded = patch.checklist ?? template.map((text, index) => ({
-    id: `c${index + 1}`,
-    text,
-    done: false,
-    by: '',
-    at: 0,
-    note: '',
-  }))
+  // 澄清卡另补一条「先检索历史」（提示词是软约束，清单项才是准出闸门认的，REQ-2026-001 / p3）；
+  // 这里是建卡唯一入口（API /task/create、studio_task_create、需求拆卡）；GitLab 导入那条路在 integrations.js 另接。
+  const seeded = withClarifyHistoryItem(patch.checklist ?? template.map((text, index) => ({ id: `c${index + 1}`, text, done: false, by: '', at: 0, note: '' })), initialStatus)
   const requirementId = patch.requirementId ?? ''
   // 卡片的业务领域默认跟随所属需求：泳道按角色位派单时靠它挑对应领域专家。
   const inheritedDomain = (() => {
