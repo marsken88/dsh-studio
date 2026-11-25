@@ -6,12 +6,12 @@
 
 | 项 | 值 |
 | --- | --- |
-| dsh-studio | `package.json` `version: 0.15.1` |
+| dsh-studio | `package.json` `version: 0.16.0` |
 | DeepSeek Harness | `0.2.2-rc.1`（`dsh --version`） |
 | Node | `v24.22.2`（Linux 目标机）；本机 Windows `v24.19.0` |
 | 目标系统 | Ubuntu 24.04，`dsh web` 监听 `18080`，nginx `:80` 反代并注入 `dsh-auth-*` cookie |
 | 插件安装方式 | npm：`dsh plugin --profile web add @marsken/dsh-studio`；本地开发：`add link:~/dsh-studio`（profile `web`） |
-| 验证范围 | 0.15.1：**目标机部署 + CI**（527 单测 / 48 项页面与 AX 探针 / `probe:panel` 83 项全绿 / `audit:ui` 30 模块 0 违规 / `review:layout` 0 溢出）；**目标机已部署 0.15.1**（`tools/deploy.mjs`，`restart=sudo active=active files=91 state=200`；`package.json` version 0.15.1） |
+| 验证范围 | 0.16.0：**CI + 隔离实例真机 + 生产实例重启后复验**（542 单测 / 0 失败 / 页面与 AX 探针全过 / `verify:fence` 8 条断言进 CI）；**隔离实例真机**：全新 web 模板 profile + 独立端口装本版，`/health` 200、无凭据 `/state` 401、伪造 Host 403、跨站 403、匿名提单 200、启动 token 换 cookie 后 `/state` 200；**生产实例**：Desktop 重开后无凭据 `/state` 从 200+87KB 变成 401、伪造 Host 从 200 变成 403、面板带 cookie 正常 |
 | 兼容声明 | `engines.dsh: ">=0.2.2-rc.1"`、`dsh.compatibility.dshReleases: { "0.2.2-rc.1+": "compatible" }` |
 
 > 结论：只在 **0.2.2-rc.1** 上做过端到端验证。0.2.2 正式版、以及 `<0.2.2` 均未验证。
