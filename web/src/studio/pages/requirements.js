@@ -159,12 +159,17 @@ export     function RequirementsPage({ state, onOpenTask, onChanged, createSigna
       // 从顶部「＋ 新建 → 新建需求」进来时，展开新建表单（form 为 null 时不显示面板）。
       const openNew = () => {
         setForm({ title: '', description: '', project: '', iteration: '', owner: '', priority: 'normal', status: 'draft', links: {} })
+        setIntake(null)
         setError(null)
       }
       React.useEffect(() => { if (Number(createSignal) > 0) openNew() }, [createSignal])
       // 从全局搜索跳过来时，直接选中那一条需求。
       React.useEffect(() => { if (focusReq && focusReq.id) setSelected(focusReq.id) }, [focusReq])
       const [form, setForm] = React.useState(null)
+      /* 对话澄清：null = 直接填写；对象 = 正在一步步聊。 */
+      const [intake, setIntake] = React.useState(null)
+      /* 对话生成的草稿要建 PRD 文档：用 ref 记一下，避免保存按钮拿到旧闭包里的 form。 */
+      const fromChatRef = React.useRef(false)
       const [error, setError] = React.useState(null)
       /* 需求详情分区：概览 / 沟通 / 任务与验收 / 交付物。只切显示，数据仍整页加载。 */
       const [reqPane, setReqPane] = React.useState('overview')
@@ -347,12 +352,98 @@ export     function RequirementsPage({ state, onOpenTask, onChanged, createSigna
         if (current !== null) void loadMatrix(current.id)
       }, [current === null ? '' : current.id, loadMatrix])
 
+      const startIntake = () => {
+        /* 默认带上第一个业务项目：项目沉淀（已有需求/PRD/卡）才有东西可参考。 */
+        const project = String(form.project ?? '').trim() || String(projectOptions[0]?.value ?? '')
+        if (project !== '' && form.project !== project) setForm(previous => previous === null ? previous : { ...previous, project })
+        setIntake({ messages: [], input: '', busy: false, error: null })
+      }
+      const assist = async (body) => api('/requirement/assist', { project: form.project, title: form.title, ...body })
+      const submitIntake = async () => {
+        if (intake === null || intake.busy === true) return
+        const value = String(intake.input ?? '').trim()
+        if (value === '') return
+        const messages = [...intake.messages, { role: 'user', content: value }]
+        setIntake({ ...intake, messages, input: '', busy: true, error: null })
+        try {
+          const out = await assist({ mode: 'chat', messages })
+          setIntake(previous => previous === null ? previous : {
+            ...previous,
+            messages: [...messages, { role: 'assistant', content: String(out.reply ?? '') }],
+            busy: false,
+          })
+        } catch (cause) {
+          setIntake(previous => previous === null ? previous : { ...previous, busy: false, error: cause instanceof Error ? cause.message : String(cause) })
+        }
+      }
+      const draftIntake = async () => {
+        if (intake === null || intake.busy === true || intake.messages.length === 0) return
+        setIntake({ ...intake, busy: true, error: null })
+        try {
+          const out = await assist({ mode: 'draft', messages: intake.messages })
+          const reply = String(out.reply ?? '').trim()
+          const heading = /^#\s+(.+)$/m.exec(reply)
+          const title = String(heading?.[1] ?? form.title ?? '').trim().slice(0, 120)
+          const description = heading === null ? reply : reply.replace(/^\s*#\s+.+\n?/, '').trim()
+          fromChatRef.current = true
+          setForm({ ...form, title, description, fromChat: true, status: 'draft', links: {}, project: form.project })
+          setIntake(null)
+        } catch (cause) {
+          setIntake(previous => previous === null ? previous : { ...previous, busy: false, error: cause instanceof Error ? cause.message : String(cause) })
+        }
+      }
+      const renderIntake = () => {
+        if (intake === null) return null
+        const messages = intake.messages
+        const bubbles = [
+          h('div', { key: 'intro', className: 'rounded-xl bg-background-secondary-default px-3 py-2 text-body-2-regular text-text-primary' },
+            '先说一句你大概想解决什么？我会结合这个项目已有的需求、PRD 和当前卡继续追问，避免重复或冲突。'),
+          ...messages.map((message, index) => h('div', {
+            key: 'm' + index,
+            className: message.role === 'assistant'
+              ? 'rounded-xl bg-background-secondary-default px-3 py-2 text-body-2-regular text-text-primary'
+              : 'self-end rounded-xl bg-accent-600 px-3 py-2 text-body-2-regular text-text-white',
+          }, String(message.content ?? ''))),
+        ]
+        if (intake.busy === true) bubbles.push(h('div', { key: 'busy', className: HINT }, '模型正在结合项目沉淀思考…'))
+        return h('div', { 'data-intake-ui': '', className: 'flex min-w-0 flex-col gap-3' },
+          h('div', { className: FIELD },
+            h('div', { className: LABEL }, '参考项目（会读这个项目已有的需求 / PRD / 卡）'),
+            h(Select, {
+              className: 'w-full', value: form.project, options: projectOptions, 'aria-label': '参考项目',
+              onChange: event => setForm({ ...form, project: event.target.value }),
+            }),
+          ),
+          h('div', { className: 'flex min-w-0 flex-col gap-2', 'data-intake-messages': '' }, bubbles),
+          intake.error === null ? null : h('div', { className: 'text-caption-1-regular text-text-error-primary', 'data-intake-error': '' }, `模型没回上来：${intake.error}（可以重试，或切「直接填写」）`),
+          h('div', { className: 'flex min-w-0 flex-col gap-2' },
+            h(TextAreaField, {
+              rows: 3, value: intake.input, 'aria-label': '回答当前问题',
+              placeholder: messages.length === 0 ? '例：管理后台登录失败要锁定账号，防止暴力破解' : '接着回答，想到多少写多少',
+              onChange: event => setIntake({ ...intake, input: event.target.value }),
+              onKeyDown: event => {
+                if ((event.metaKey || event.ctrlKey) && (event.key === 'Enter' || event.key === 'NumpadEnter')) {
+                  event.preventDefault(); void submitIntake()
+                }
+              },
+            }),
+            h('div', { className: 'flex flex-wrap items-center gap-2' },
+              h(Button, { variant: 'primary', size: 'sm', disabled: intake.busy || String(intake.input ?? '').trim() === '', onClick: () => void submitIntake() }, intake.busy ? '思考中…' : '发送'),
+              h(Button, { variant: 'secondary', size: 'sm', disabled: intake.busy || messages.length < 2, onClick: () => void draftIntake() }, '整理成 PRD 草稿'),
+              messages.length === 0 ? null : h(Button, { variant: 'ghost', size: 'sm', onClick: startIntake }, '重新开始'))),
+        )
+      }
       const save = async () => {
         if (form === null) return
         if (String(form.title ?? '').trim() === '') { setError('需求标题不能为空'); return }
         setBusy(true)
         try {
+          /* 先记下「这是新建 + 来自对话」：保存后再拿响应里的 created 判断，
+             出现过字段不在回包里导致 PRD 草稿没建的情况。 */
+          const isNew = form.id === undefined || form.id === null || form.id === ''
+          const fromChat = fromChatRef.current === true || form.fromChat === true || String(form.description ?? '').includes('本稿由「先聊清楚」')
           const payload = await api('/requirement/save', {
+            intake: fromChat,
             requirement: {
               id: form.id,
               title: form.title,
@@ -367,9 +458,19 @@ export     function RequirementsPage({ state, onOpenTask, onChanged, createSigna
             },
           })
           setSelected(payload.requirement.id)
+          let docNote = ''
+          if (isNew && fromChat) {
+            try {
+              await api('/requirement/doc', {
+                id: payload.requirement.id, action: 'add', by: '需求澄清',
+                doc: { kind: 'prd', title: `${form.title} PRD`, version: 'v1.0', content: form.description },
+              })
+            } catch (cause) { docNote = '；PRD 草稿没建成：' + (cause instanceof Error ? cause.message : String(cause)) }
+          }
+          fromChatRef.current = false
           setForm(null)
           setError(null)
-          toast(payload.created === true ? '需求已创建' : '需求已保存')
+          toast((payload.created === true ? '需求已创建' : '需求已保存') + docNote)
         } catch (err) {
           setError(err.message)
         } finally {
@@ -599,14 +700,20 @@ export     function RequirementsPage({ state, onOpenTask, onChanged, createSigna
       /* 新建/编辑需求走侧滑块：页面本体只留列表与详情，不再把一长串表单铺在顶部。 */
       const formPanel = form === null ? null : h(SideDrawer, {
         title: form.id === undefined ? '新建需求' : `编辑 ${current?.code ?? ''}`,
-        hint: '先写标题与澄清三问；保存后可在需求详情里继续补功能点、文档与验收条件。',
+        hint: intake !== null ? '回答 5 个问题，自动整理成 PRD 草稿；也可以随时切回「直接填写」。' : '先写标题与澄清三问；保存后可在需求详情里继续补功能点、文档与验收条件。',
         onClose: closeForm,
         footer: [
           h(Button, { key: 'cancel', variant: 'secondary', size: 'sm', onClick: closeForm }, '取消'),
-          h(Button, { key: 'save', variant: 'primary', size: 'sm', disabled: busy, onClick: () => void save() }, busy ? '保存中…' : '保存需求'),
+          /* 对话还没生成草稿时别给「保存需求」：标题/正文还空着，点了只会报错。 */
+          intake === null ? h(Button, { key: 'save', variant: 'primary', size: 'sm', disabled: busy, onClick: () => void save() }, busy ? '保存中…' : '保存需求') : null,
         ],
       },
-        h('div', { className: 'flex min-w-0 flex-col gap-3' },
+        h('div', { className: 'flex min-w-0 flex-col gap-3', 'data-intake': intake === null ? '0' : '1', 'data-form-id': form.id ?? 'new', 'data-chat-draft': form.fromChat === true ? '1' : '0' },
+          h('div', { className: 'flex flex-wrap items-center gap-2', 'data-intake-switch': '' },
+            h(Button, { variant: intake === null ? 'secondary' : 'ghost', size: 'sm', onClick: startIntake }, '先聊清楚'),
+            h(Button, { variant: intake === null ? 'ghost' : 'secondary', size: 'sm', onClick: () => setIntake(null) }, '直接填写'),
+            h('span', { className: HINT }, intake === null ? '不知道怎么填？用 5 个问题把需求聊成文档' : '答完会生成一份可编辑的 PRD 草稿')),
+          renderIntake(),
           h('div', { className: FIELD },
             h('div', { className: LABEL }, '需求标题'),
             h(TextField, { 'aria-label': '需求标题', value: form.title, onChange: e => setForm({ ...form, title: e.target.value }) }),

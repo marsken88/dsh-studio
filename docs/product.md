@@ -116,6 +116,7 @@ AI 是执行手，判定权在确定性规则和人手里。要变成 AI Native�
 | 32 | **门禁提示折叠** | 需求准出面板的 blocker/warning 超过 5 条时只露 5 条，其余折叠成「展开其余 N 条」，避免首屏一片红/黄 | ✅ 已做（2026-11-25：requirements gate details） |
 | 33 | **看板横向滚动提示** | 列多时看板右侧/左侧出现渐变边缘，提示还有列；方向键左右可滚动（aria-label 说的方向键以前是假的） | ✅ 已做（2026-11-25：board.js fades + ArrowLeft/Right） |
 | 34 | **负载/预算用官方 Meter** | 团队负载与预算使用是「容量占用」，改用 BoardUI Meter（role=meter）；完成率仍用 ProgressBar。审计探针补扫效能「AI 与成本」分区 | ✅ 已做（2026-11-25：analytics Meter；audit 30 模块 0 违规） |
+| 35 | **对话式需求澄清（模型 + 项目沉淀）** | 新建需求支持「先聊清楚」：选参考项目，模型读取该项目已有需求 / PRD / 当前卡，先查重或指出冲突，再追问关键问题；可随时「整理成 PRD 草稿」，保存时自动落成 PRD 文档。模型走宿主 `llm`；不可用时提示切「直接填写」 | ✅ 已做（2026-11-25：`/requirement/assist` + `requirement-assist.js` 项目沉淀；真机回复引用了 REQ-2026-007 / BUG-042；probe ③d） |
 
 ## 5. 落地顺序
 
