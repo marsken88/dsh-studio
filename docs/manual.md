@@ -256,6 +256,7 @@ studio_task_check          { id, itemId, note }         // 清单逐项勾，附
 | 交付物大量同步失败，想一次性补齐 | 哪些件没有 `doc.token` | 需求级：`POST /studio-api/requirement/sync {id}` 逐条跑（会自动重建失效文件夹）；零散件：`POST /studio-api/task/artifact/sync {id, artifactId}`。跑完看 `doc.token` 非空、`doc.error` 为空即成功 |
 | 产物落在需求根目录而不是 `01 需求文档` | `doc.error` 是否为空 | 空 = 子目录已建好；非空按提示修。历史文档不会自动移动，新文档才进子目录 |
 | 云盘根目录一堆同名文件夹 | `npm run drive:gc -- --base <端口>` | 先体检；`--apply` 才删（只删孤儿） |
+| 侧栏同一个需求有多个同名工作区 | 设置 → 自动派单 →「工作区分组」 | 选「一个需求一个文件夹」后新派单会复用已有同名工作区；旧注册先 `node tools/workspace-dedupe.mjs --base http://<host>:18080` 看计划，再加 `--apply --yes` 清理（只删注册，会话日志保留） |
 | 面板白屏 / 一行「渲染失败：xxx is not defined」 | 浏览器 console | 这是前端 `ReferenceError`；`node --check` 查不出，重启/升级后复现就报 issue |
 | 改了代码重启没生效 | `npm run sync:profile` 的版本输出 | 确认 profile 版本 = 仓库版本；前端改动还要 `cd web && pnpm build` |
 | 派单没反应/没留言 | 会话日志 `turn/end`、集成健康 | 常见是无可用模型通道（503）；先看「集成健康」 |

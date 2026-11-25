@@ -1574,7 +1574,7 @@ async function ensureWorktree(store, task, config) {
 
 /** 需求级共享 worktree 的实现在 src/host/requirement-worktree.js（index 行数棘轮）。 */
 async function ensureRequirementWorktree(store, task, config) {
-  return ensureRequirementWorktreeIn({ store, task, config, workProjectOf, serviceOf, runCommandFn: runCommand })
+  return ensureRequirementWorktreeIn({ store, task, config, workProjectOf, serviceOf, runCommandFn: runCommand, listWorkspaces: () => ctx.get?.('workspaceRegistry')?.list?.() ?? [] })
 }
 
 /** 回收 worktree（卡已完成且策略是 on_done 时调用）。 */
@@ -2586,7 +2586,7 @@ export function apply(ctx) {
   deleteProjectFolder: (store, projectId) => deleteProjectFolder(store, projectId, larkJson) })
     configureAgentsRoutes({ publicState, readJsonBody, sendJson, getDispatcher: () => activeDispatcher })
     configureConnectRoutes({ mirrorCardsToBitable, applyConfig, installedPackages, publicState, readJsonBody, resolvePackageName, runPluginCli, sendJson, upsertById, getSyncTimer: () => syncTimer })
-    configureAdminRoutes({ applyConfig, checkToolAccess, operatorFromSessionId, operatorOf, publicState, readJsonBody, sendJson })
+    configureAdminRoutes({ applyConfig, checkToolAccess, getWorkspaceRegistry: () => ctx.get?.('workspaceRegistry'), operatorFromSessionId, operatorOf, publicState, readJsonBody, sendJson })
     configureSkillsRoutes({ isSkillName, readJsonBody, sendJson, skillFromMarkdown, skillFromZip, skillsRoot, getSkills: () => activeSkills })
     configureInsightsRoutes({ readJsonBody, getDispatcher: () => activeDispatcher, sendJson, buildMetrics, buildAnalytics, workloadReport, burndownReport })
     configureReleasesRoutes({ sendJson, readJsonBody, publicState, releaseGate, releaseNotes, releaseRequirements, releaseRuleViolations, releaseDeploys })
