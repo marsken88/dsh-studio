@@ -166,6 +166,8 @@ export     function RequirementsPage({ state, onOpenTask, onChanged, createSigna
       React.useEffect(() => { if (focusReq && focusReq.id) setSelected(focusReq.id) }, [focusReq])
       const [form, setForm] = React.useState(null)
       const [error, setError] = React.useState(null)
+      /* 需求详情分区：概览 / 沟通 / 任务与验收 / 交付物。只切显示，数据仍整页加载。 */
+      const [reqPane, setReqPane] = React.useState('overview')
       const [busy, setBusy] = React.useState(false)
       const [docForm, setDocForm] = React.useState(null)
       const [docNote, setDocNote] = React.useState(null)
@@ -694,7 +696,7 @@ export     function RequirementsPage({ state, onOpenTask, onChanged, createSigna
         const links = current.links ?? {}
         const folder = current.folder ?? {}
         const link = (label, url) => url === '' ? null : h('a', { className: LINK, href: url, target: '_blank', rel: 'noreferrer' }, label)
-        return h('div', { className: 'flex min-w-0 flex-col gap-3', 'data-requirement-body': '' },
+        return h('div', { className: 'flex min-w-0 flex-col gap-3', 'data-requirement-body': '', 'data-req-pane': reqPane },
           h('div', { className: 'flex min-w-0 flex-wrap items-start justify-between gap-3' },
             h('div', null,
               h('div', { className: 'font-mono text-caption-1-medium text-text-tertiary' }, current.code || current.id),
@@ -711,12 +713,26 @@ export     function RequirementsPage({ state, onOpenTask, onChanged, createSigna
             ),
           ),
           (() => {
+            const tabs = [
+              { id: 'overview', label: '概览' },
+              { id: 'discuss', label: '沟通' + (Array.isArray(current.comments) && current.comments.length > 0 ? ' ' + current.comments.length : '') },
+              { id: 'accept', label: '任务与验收' },
+              { id: 'artifacts', label: '交付物' + (artifacts.length > 0 ? ' ' + artifacts.length : '') },
+            ]
+            return h('div', { className: 'flex flex-wrap items-center gap-1 border-b border-separator-border pb-2', role: 'tablist', 'aria-label': '需求详情分区' },
+              tabs.map(tab => h(Button, {
+                key: tab.id, role: 'tab', 'aria-selected': reqPane === tab.id ? 'true' : 'false', 'data-req-tab': tab.id,
+                variant: reqPane === tab.id ? 'secondary' : 'ghost', size: 'sm',
+                onClick: () => setReqPane(tab.id),
+              }, tab.label)))
+          })(),
+          (() => {
             // 评审：草稿要先过评审才能拆卡；打回会退回草稿并留意见。
             const review = current.review ?? null
             const stateLabel = review === null ? '还没提交评审' : (REVIEW_LABEL[review.status] ?? review.status)
             const canSubmit = review === null || review.status === 'changes_requested'
             const canDecide = review !== null && review.status === 'pending'
-            return h('div', { className: `${PANEL} mt-4`, 'data-review': review === null ? 'none' : review.status },
+            return h('div', { className: `${PANEL} mt-4`, 'data-req-panel': 'overview', 'data-review': review === null ? 'none' : review.status },
               h('div', { className: PANEL_HEAD },
                 h('span', null, '需求评审'),
                 h(Chip, { color: review?.status === 'approved' ? 'lime' : 'gray', className: 'ms-2', 'data-on': review?.status === 'approved' ? '1' : '0' }, stateLabel),
@@ -761,7 +777,7 @@ export     function RequirementsPage({ state, onOpenTask, onChanged, createSigna
               } catch (error) { toast(error.message ?? String(error), 'error') }
               finally { setCommentBusy(false) }
             }
-            return h('div', { className: `${PANEL} mt-4`, 'data-requirement-comments': '' },
+            return h('div', { className: `${PANEL} mt-4`, 'data-req-panel': 'discuss', 'data-requirement-comments': '' },
               h('div', { className: PANEL_HEAD },
                 h('span', null, '沟通'),
                 h('span', { className: HINT, style: { marginLeft: 'auto' } }, comments.length === 0 ? '还没有人在这里说过话' : `${comments.length} 条`),
@@ -801,10 +817,10 @@ export     function RequirementsPage({ state, onOpenTask, onChanged, createSigna
             )
           })(),
           (link('PRD', links.prd) || link('原型', links.proto) || link('验收标准', links.acceptance))
-            ? h('div', { className: ROW }, link('PRD 文档', links.prd), link('原型', links.proto), link('验收标准', links.acceptance))
-            : h('div', { className: 'flex flex-wrap items-center gap-2 rounded-xl border border-dashed border-separator-border bg-background-secondary-default px-3 py-3 text-body-2-regular text-text-secondary' }, [h('span', null, '还没有登记 PRD / 原型 / 验收标准链接；PRD 与原型由产品在澄清后输出，可在这里补，或点右边「让产品补 PRD」。'), h(Button, { variant: 'ghost', size: 'sm', className: 'ms-2', onClick: async () => { const note = await promptDialog('想请产品补什么？', { title: '申请产品补 PRD', defaultValue: '需要产品输出 PRD 与原型' }); if (note === null) return; try { await api('/requirement/request-prd', { id: current.id, by: currentUser(), note }); toast('已申请产品补 PRD'); onChanged() } catch (error) { toast(error.message ?? String(error), 'error') } } }, '让产品补 PRD')]),
+            ? h('div', { className: ROW, 'data-req-panel': 'overview' }, link('PRD 文档', links.prd), link('原型', links.proto), link('验收标准', links.acceptance))
+            : h('div', { className: 'flex flex-wrap items-center gap-2 rounded-xl border border-dashed border-separator-border bg-background-secondary-default px-3 py-3 text-body-2-regular text-text-secondary', 'data-req-panel': 'overview' }, [h('span', null, '还没有登记 PRD / 原型 / 验收标准链接；PRD 与原型由产品在澄清后输出，可在这里补，或点右边「让产品补 PRD」。'), h(Button, { variant: 'ghost', size: 'sm', className: 'ms-2', onClick: async () => { const note = await promptDialog('想请产品补什么？', { title: '申请产品补 PRD', defaultValue: '需要产品输出 PRD 与原型' }); if (note === null) return; try { await api('/requirement/request-prd', { id: current.id, by: currentUser(), note }); toast('已申请产品补 PRD'); onChanged() } catch (error) { toast(error.message ?? String(error), 'error') } } }, '让产品补 PRD')]),
           current.description
-            ? h('div', { className: `${PANEL} mt-4` },
+            ? h('div', { className: `${PANEL} mt-4`, 'data-req-panel': 'overview' },
               h('div', { className: PANEL_HEAD },
                 h('span', null, '需求明细'), current.source === 'business' ? h('span', { className: HINT, 'data-src': 'business' }, `业务提单 · ${current.requester?.name || '未署名'}${current.requester?.dept ? '（' + current.requester.dept + '）' : ''} · ${fmtTime(current.requester?.at || current.createdAt)}`) : null,
                 h('span', { className: HINT, style: { marginLeft: 'auto' } }, '支持 Markdown'),
@@ -819,7 +835,7 @@ export     function RequirementsPage({ state, onOpenTask, onChanged, createSigna
             const history = (current.history ?? []).slice().reverse()
             if (history.length === 0 || (current.change ?? null) !== null) return null
             const label = { title: '标题', description: '需求明细', priority: '优先级', status: '状态', owner: '负责人', project: '项目', iteration: '迭代' }
-            return h('div', { className: `${PANEL} mt-4` },
+            return h('div', { className: `${PANEL} mt-4`, 'data-req-panel': 'overview' },
               h('div', { className: PANEL_HEAD },
                 h('span', null, '变更记录'),
                 h('span', { className: HINT, style: { marginLeft: 'auto' } }, `最近 ${history.length} 条`),
@@ -854,7 +870,7 @@ export     function RequirementsPage({ state, onOpenTask, onChanged, createSigna
               try { await api('/requirement/pool', { id: current.id, pool: { reach, impact, confidence, effort } }); toast('需求池评分已更新'); await onChanged() }
               catch (cause) { toast(cause instanceof Error ? cause.message : String(cause), 'error') }
             }
-            return h('div', { className: `${PANEL} mt-4` },
+            return h('div', { className: `${PANEL} mt-4`, 'data-req-panel': 'overview' },
               h('div', { className: PANEL_HEAD },
                 h('span', null, '需求池评分（RICE）'),
                 h('span', { className: HINT, style: { marginLeft: 'auto' } }, pool.score > 0 ? `得分 ${pool.score}` : '还没打分：不打分就没法和别的需求比优先级'),
@@ -892,7 +908,7 @@ export     function RequirementsPage({ state, onOpenTask, onChanged, createSigna
               if (ok !== true) return
               await call({ action: 'delete', questionId: item.id }, '已删除')
             }
-            return h('div', { className: `${PANEL} mt-4`, 'data-open': openCount > 0 ? '1' : '0' },
+            return h('div', { className: `${PANEL} mt-4`, 'data-req-panel': 'overview', 'data-open': openCount > 0 ? '1' : '0' },
               h('div', { className: PANEL_HEAD },
                 h('span', null, '待确认清单'),
                 h('span', { className: HINT, style: { marginLeft: 'auto' } }, openCount > 0 ? `${openCount} 个没回答，回答完才能拆卡` : (questions.length === 0 ? '澄清阶段把不确定的先记在这里' : '全部已回答')),
@@ -927,7 +943,7 @@ export     function RequirementsPage({ state, onOpenTask, onChanged, createSigna
             const affectedCases = change.affectedCases ?? []
             const byId = new Map(tasks.map(task => [task.id, task]))
             const statusLabel = id => (state.statuses.find(entry => entry.id === id)?.label) ?? id
-            return h('div', { className: `${PANEL} mt-4`, 'data-invalidated': change.invalidated ? '1' : '0' },
+            return h('div', { className: `${PANEL} mt-4`, 'data-req-panel': 'overview', 'data-invalidated': change.invalidated ? '1' : '0' },
               h('div', { className: PANEL_HEAD },
                 h('span', null, change.invalidated ? '变更影响（签字已作废）' : '变更影响'),
                 h('span', { className: HINT, style: { marginLeft: 'auto' } },
@@ -973,7 +989,7 @@ export     function RequirementsPage({ state, onOpenTask, onChanged, createSigna
           (() => {
             const deploys = current.deploys ?? []
             if (deploys.length === 0) return null
-            return h('div', { className: `${PANEL} mt-4` },
+            return h('div', { className: `${PANEL} mt-4`, 'data-req-panel': 'overview' },
               h('div', { className: PANEL_HEAD },
                 h('span', null, '上线足迹'),
                 h('span', { className: HINT, style: { marginLeft: 'auto' } }, '来自版本的部署记录，只留痕不触发'),
@@ -990,7 +1006,7 @@ export     function RequirementsPage({ state, onOpenTask, onChanged, createSigna
               ),
             )
           })(),
-          h('div', { className: `${PANEL} mt-4` },
+          h('div', { className: `${PANEL} mt-4`, 'data-req-panel': 'overview' },
             h('div', { className: PANEL_HEAD }, h('span', null, '依赖与排序')),
             h('div', { className: PANEL_BODY },
               h('div', { className: ROW },
@@ -1024,7 +1040,7 @@ export     function RequirementsPage({ state, onOpenTask, onChanged, createSigna
             const pointTotal = stats.points ?? (current.points ?? []).length
             const casePass = stats.pass ?? passed
             const caseTotal = stats.cases ?? caseAgg.total
-            return h('div', { className: `${PANEL} mt-4` },
+            return h('div', { className: `${PANEL} mt-4`, 'data-req-panel': 'accept' },
               h('div', { className: PANEL_HEAD },
                 h('span', null, '需求准出与验收签字'),
                 h(Chip, { color: gate.ready ? 'lime' : 'yellow', className: 'ms-auto', 'data-pt': gate.ready ? 'covered' : 'open' },
@@ -1056,6 +1072,7 @@ export     function RequirementsPage({ state, onOpenTask, onChanged, createSigna
               ),
             )
           })(),
+          h('div', { 'data-req-panel': 'artifacts', className: 'flex min-w-0 flex-col gap-3' },
           h('div', { className: SECTION }, '交付物归档（飞书云盘）',
             h('div', { className: ACTIONS },
               folder.url ? h('a', { className: LINK, href: folder.url, target: '_blank', rel: 'noreferrer' }, '打开文件夹') : null,
@@ -1185,6 +1202,8 @@ export     function RequirementsPage({ state, onOpenTask, onChanged, createSigna
               ),
             ),
           ),
+          ),
+          h('div', { 'data-req-panel': 'accept', className: 'flex min-w-0 flex-col gap-3' },
           h('div', { className: SECTION },
             h('div', { className: 'text-body-2-medium text-text-primary' }, '需求变更影响面'),
             h('div', { className: 'max-w-2xl text-caption-1-regular text-text-tertiary' }, '需求一改，下面这些卡和用例就要重看。点一下现算，不改任何数据。'),
@@ -1460,6 +1479,7 @@ export     function RequirementsPage({ state, onOpenTask, onChanged, createSigna
             h('div', { className: SECTION }, '关联 MR'),
             mrs.map(task => h('div', { key: task.id, className: HINT }, `${task.code || task.id} · !${task.gitlabMR.iid} ${task.gitlabMR.title ?? ''}（${task.gitlabMR.state || 'open'}）`)),
           ) : null,
+          ),
         )
       })()
 

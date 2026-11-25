@@ -567,6 +567,12 @@ html[data-dsh-theme="light"] [class*="rightbarCol"] { background: #fafafa !impor
    md-editor-bar / md-preview）。它不是组件样式，是「渲染出来的正文」的排版：
    颜色只取 BoardUI 的语义 token，字号走 4px 档（正文 13 / 标题 18·16·14 / 代码 12），
    行高落在 20·24·16 上。{--ds-*} 只在单文件产物（没有 index.css）里当兜底。 */
+/* 需求详情分区：只显示当前 pane 的直接子块；顶部标题与 tab 栏没有 data-req-panel，始终可见。 */
+[data-req-pane="overview"] > [data-req-panel]:not([data-req-panel="overview"]),
+[data-req-pane="discuss"] > [data-req-panel]:not([data-req-panel="discuss"]),
+[data-req-pane="accept"] > [data-req-panel]:not([data-req-panel="accept"]),
+[data-req-pane="artifacts"] > [data-req-panel]:not([data-req-panel="artifacts"]) { display:none; }
+
 [data-dsh-studio] .md-content { white-space:normal; word-break:break-word; font-size:13px; line-height:20px; color:var(--color-text-primary, currentColor); }
 
 [data-dsh-studio] .md-content > *:first-child { margin-top:0; }

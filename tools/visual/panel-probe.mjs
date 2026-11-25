@@ -488,6 +488,8 @@ try {
   await clickExact('关闭')
   await new Promise(resolve => setTimeout(resolve, 400))
   await clickExact('需求')
+  await page.evaluate(() => document.querySelector('[data-req-tab="accept"]')?.click())
+  await new Promise(resolve => setTimeout(resolve, 400))
   check('③ 需求页矩阵渲染', await waitText('功能点与可追溯矩阵'))
   check('③ 覆盖率口径写出来了', (await page.evaluate(() => document.body.innerText)).includes('覆盖率按功能点算'))
   check('③b 需求矩阵汇总有「需复跑 1」', /需复跑\s*1/.test(await page.evaluate(() => document.body.innerText)))
@@ -505,6 +507,10 @@ try {
     const countAfter = await page.evaluate(() => document.querySelector('[data-matrix-count]')?.textContent ?? '')
     check('③b 矩阵筛选真的收窄结果', /显示 1 \//.test(countAfter) && countBefore !== countAfter, `${countBefore} → ${countAfter}`)
   }
+
+  /* 矩阵在「任务与验收」分区里：先切过去再验。 */
+  await page.evaluate(() => document.querySelector('[data-req-tab="accept"]')?.click())
+  await new Promise(resolve => setTimeout(resolve, 400))
 
   /* ③c 矩阵行内编辑 + 批量覆盖验收条件 */
   const pickedPoint = await page.evaluate(() => {
@@ -606,6 +612,27 @@ try {
   check('③d Select 保持 BoardUI 官方样式（白底/1px 边框/阴影）', selectBox !== null && selectBox.border === '1px' && selectBox.bg === 'rgb(255, 255, 255)' && selectBox.radius === '10px' && selectBox.shadow !== 'none', JSON.stringify(selectBox))
   await page.keyboard.press('Escape')
   await new Promise(resolve => setTimeout(resolve, 400))
+
+  // ③e 需求详情分区：概览 / 沟通 / 任务与验收 / 交付物
+  const tabLabels = await page.evaluate(() => [...document.querySelectorAll('[data-req-tab]')].map(node => String(node.textContent ?? '').trim()))
+  const paneVisible = async id => {
+    await page.evaluate(tab => document.querySelector('[data-req-tab="' + tab + '"]')?.click(), id)
+    await new Promise(resolve => setTimeout(resolve, 400))
+    return page.evaluate(() => {
+      const pane = document.querySelector('[data-req-pane]')?.getAttribute('data-req-pane') ?? ''
+      const visible = [...document.querySelectorAll('[data-req-panel]')].filter(node => getComputedStyle(node).display !== 'none').map(node => node.getAttribute('data-req-panel'))
+      return { pane, visible: [...new Set(visible)], text: String(document.querySelector('[data-requirement-body]')?.innerText ?? '').slice(0, 80) }
+    })
+  }
+  const discussPane = await paneVisible('discuss')
+  const acceptPane = await paneVisible('accept')
+  const artifactPane = await paneVisible('artifacts')
+  const overviewPane = await paneVisible('overview')
+  check('③e 需求详情有 4 个分区页签', tabLabels.length === 4 && tabLabels.some(text => text.startsWith('概览')) && tabLabels.some(text => text.startsWith('沟通')) && tabLabels.some(text => text.startsWith('交付物')), JSON.stringify(tabLabels))
+  check('③e 切「沟通」只显示沟通区', discussPane.pane === 'discuss' && discussPane.visible.length === 1 && discussPane.visible[0] === 'discuss', JSON.stringify(discussPane))
+  check('③e 切「任务与验收」只显示验收区', acceptPane.pane === 'accept' && acceptPane.visible.length === 1 && acceptPane.visible[0] === 'accept', JSON.stringify(acceptPane))
+  check('③e 切「交付物」只显示交付物区', artifactPane.pane === 'artifacts' && artifactPane.visible.length === 1 && artifactPane.visible[0] === 'artifacts', JSON.stringify(artifactPane))
+  check('③e 切回「概览」只显示概览区', overviewPane.pane === 'overview' && overviewPane.visible.length === 1 && overviewPane.visible[0] === 'overview', JSON.stringify(overviewPane))
 
   // ④ 设置 → 列的负责人：两道闸门开关
   await clickExact('设置')
