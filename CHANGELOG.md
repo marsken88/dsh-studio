@@ -36,6 +36,22 @@
 - **#157 挂死的 `running` 印记会被收回**：`dispatch.state='running'` 但会话早没了（进程重启/会话崩）时，这张卡既不再派、看板还一直显示「处理中」。现在 tick 每轮用 `dispatchPhase`（真会话表优先、10 分钟超时兜底）判一次：挂死的印记收回（清 status + 历史留一句「派单印记已收回…」），下一轮重新派单。
 - **#148 评论补齐派活入口**：新增工具 `studio_task_mention`（按名字/id 把卡当场派给专家/团/角色位，带开场白）；卡详情「派给谁」下拉加了**专家团**与**开场白**输入（走 `/agents/run`，支持团 + instruction）；`/mention` 的 `kind` 现在认 `role`（不再静默降级成 expert），目标不认识直接 400。
 
+## [0.16.1] — 2026-11-25
+
+### 文档：换 session cookie 的做法改成两条 curl
+
+0.16.0 的说明里让脚本去用 `tools/lib/studio-auth.mjs`——那是**源码检出**才有的文件：`files` 白名单不含 `tools/`，从 npm 装下来的 `node_modules/@marsken/dsh-studio` 里没有这个目录（实测）。现在 README 与 `docs/manual.md` 直接给协议级做法：
+
+```bash
+curl -c jar.txt "http://<host>:<port>/?token=<启动 token>"   # 303 + Set-Cookie
+curl -b jar.txt http://<host>:<port>/studio-api/state        # 之后每个请求都带上
+```
+
+源码检出里的 `studioFetch()` 封装保留，给仓库自己的脚本用。
+
+顺带记一条安装实测：把 0.16.0 从 npm 装进干净 profile 后，`--dump-config` 认到了 `@marsken/dsh-studio`，起实例验 `/health` 200、无凭据 `/state` 401、伪造 `Host` 403、跨站 403、公开提单 200——**发布出去的包确实带着这次修复**（0.5.1 那种「装完不加载」没有复现）。
+
+
 ## [0.16.0] — 2026-11-25
 
 ### `/studio-api` 接上宿主信任栅栏：浏览器里的网页再也调不动它
