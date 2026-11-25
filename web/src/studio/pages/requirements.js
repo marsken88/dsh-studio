@@ -1052,8 +1052,26 @@ export     function RequirementsPage({ state, onOpenTask, onChanged, createSigna
                   h('div', { className: HINT },
                     `${pct}% · ${done}/${tasks.length} 张卡完成 · 功能点覆盖 ${covered}/${pointTotal} · 用例通过 ${casePass}/${caseTotal}`),
                 ),
-                (gate.blockers ?? []).map(line => h('div', { key: line, className: 'text-caption-1-regular text-text-error-primary', 'data-kind': 'block' }, `${line}`)),
-                (gate.warnings ?? []).map(line => h('div', { key: line, className: 'text-caption-1-regular text-status-yellow-text', 'data-kind': 'warn' }, `${line}`)),
+                (() => {
+                  /* blocker + warning 一多就是十几行：先露 5 条，其余折叠，避免首屏只剩一片字。 */
+                  const items = [
+                    ...(gate.blockers ?? []).map(line => ({ kind: 'block', line })),
+                    ...(gate.warnings ?? []).map(line => ({ kind: 'warn', line })),
+                  ]
+                  const head = items.slice(0, 5)
+                  const rest = items.slice(5)
+                  const row = item => h('div', {
+                    key: item.kind + ':' + item.line,
+                    className: item.kind === 'block' ? 'text-caption-1-regular text-text-error-primary' : 'text-caption-1-regular text-status-yellow-text',
+                    'data-kind': item.kind,
+                  }, item.line)
+                  return [
+                    head.map(row),
+                    rest.length === 0 ? null : h('details', { key: 'gate-rest', 'data-gate-more': String(rest.length) },
+                      h('summary', { className: 'cursor-pointer text-caption-1-medium text-text-secondary' }, `展开其余 ${rest.length} 条`),
+                      h('div', { className: 'mt-1 flex min-w-0 flex-col gap-1' }, rest.map(row))),
+                  ]
+                })(),
                 gate.ready ? h('div', { className: HINT }, '门禁已通过：签完字这条需求就算交付。') : null,
                 signoff === null
                   ? h('div', { className: 'flex flex-wrap items-center gap-3 rounded-lg bg-background-secondary-default px-3 py-2' },

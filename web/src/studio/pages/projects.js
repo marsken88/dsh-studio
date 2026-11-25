@@ -110,7 +110,7 @@ export function createProjectsPage({ h, React, api }) {
       /* 项目页以前只能看、不能建：新建/编辑入口藏在设置里，人找不到。 */
       h('div', { className: 'flex flex-wrap items-center justify-between gap-2' },
         h('div', { className: 'flex min-w-0 flex-col gap-1' },
-          h('span', { className: 'text-body-2-medium text-text-primary' }, `${projects.length} 个业务项目`),
+          h('span', { className: 'text-body-2-medium text-text-primary' }, `${projects.length} 个业务项目${hasUnassigned ? ' + 1 个未归属分组' : ''}`),
           h('span', { className: HINT }, '项目 → 迭代 → 卡；本机代码目录与服务在「设置 → 项目与迭代」里维护')),
         h(Button, { variant: 'secondary', size: 'sm', onClick: () => { if (typeof onOpenSettings === 'function') onOpenSettings() } }, '＋ 新建 / 管理项目'),
       ),
