@@ -83,7 +83,7 @@ export const ADMIN_ROUTES = new Set([
   '/config', '/access/save', '/access/delete',
   '/task/delete', '/experts/delete', '/teams/delete', '/skills/delete', '/experts/save', '/teams/save', '/skills/upload',
   '/projects/delete', '/repos/delete', '/bots/delete', '/requirement/delete', '/projects/save',
-  '/release/delete', '/release/approve', '/release/publish', '/release/rollback', '/release/gray', '/workspace/delete',
+  '/release/delete', '/release/approve', '/release/publish', '/release/rollback', '/release/gray', '/workspace/delete', '/workspace/detach',
   '/market/install', '/market/uninstall', '/audit/clear', '/snapshot/restore', '/task/merge', '/reset',
 ])
 

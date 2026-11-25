@@ -49,10 +49,25 @@ if (method === 'POST' && route === '/workspace/list') {
       title: String(item.title ?? ''),
       path: String(item.path ?? ''),
       sessions: Array.isArray(item.sessionIds) ? item.sessionIds.length : 0,
+      sessionIds: Array.isArray(item.sessionIds) ? item.sessionIds.map(String) : [],
       createdAt: String(item.createdAt ?? ''),
       updatedAt: String(item.updatedAt ?? ''),
     })),
   })
+  return true
+}
+if (method === 'POST' && route === '/workspace/detach') {
+  const body = await host.readJsonBody(req)
+  const workspaceId = String(body.workspaceId ?? '').trim()
+  const sessionId = String(body.sessionId ?? '').trim()
+  const registry = host.getWorkspaceRegistry()
+  const workspace = workspaceId === '' ? undefined : (typeof registry?.get === 'function' ? registry.get(workspaceId) : undefined)
+  if (workspace === undefined || typeof workspace?.detachSession !== 'function' || sessionId === '') {
+    host.sendJson(res, 400, { ok: false, error: '缺 workspaceId/sessionId，或宿主没提供 workspaceRegistry' })
+    return true
+  }
+  await workspace.detachSession(sessionId)
+  host.sendJson(res, 200, { ok: true })
   return true
 }
 if (method === 'POST' && route === '/workspace/delete') {
