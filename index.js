@@ -58,6 +58,7 @@ import { configureAuthRoutes, handleAuthRoute } from './src/host/routes/auth.js'
 import { configureExportRoutes, handleExportRoute } from './src/host/routes/exports.js'
 import { integrateFeaturedPlugins, FEATURED_SOURCE } from './src/host/featured-source.js'
 import { findSession, sessionKeyFor, sessionTokenHash } from './src/host/sessions.js'
+import { ensureRequirementWorktree as ensureRequirementWorktreeIn } from './src/host/requirement-worktree.js'
 import { releaseGate, releaseNotes } from './src/host/release-model.js'
 import { INTAKE_HTML, MINE_HTML, STATUS_HTML } from './src/host/intake-pages.js'
 import { configureTaskRoutes, handleTaskRoute } from './src/host/routes/tasks.js'
@@ -1151,6 +1152,7 @@ async function applyConfig(store, patch) {
       if (SANDBOX_MODES.includes(String(a.sandbox ?? ''))) config.agents.sandbox = String(a.sandbox)
       if (ESCALATION_MODES.includes(String(a.escalation ?? ''))) config.agents.escalation = String(a.escalation)
       if (ISOLATION_MODES.includes(String(a.isolation ?? ''))) config.agents.isolation = String(a.isolation)
+      if (['card', 'requirement'].includes(String(a.workspaceGrouping ?? ''))) config.agents.workspaceGrouping = String(a.workspaceGrouping)
       if (typeof a.worktreeRoot === 'string') config.agents.worktreeRoot = a.worktreeRoot.trim().slice(0, 400)
       if (['on_done', 'manual'].includes(String(a.cleanupWorktree ?? ''))) config.agents.cleanupWorktree = String(a.cleanupWorktree)
       if (Array.isArray(a.autoStatuses)) {
@@ -1522,7 +1524,7 @@ async function ensureWorktree(store, task, config) {
   const probe = await runCommand('git', ['-C', repo, 'rev-parse', '--is-inside-work-tree'], 20000)
   if (!probe.ok) return { skipped: `${repo} 不是 git 仓库（${(probe.stderr || '').trim().split('\n')[0] ?? ''}）`.slice(0, 300) }
   const existing = task?.worktree
-  if (existing !== undefined && existing !== null && String(existing.path ?? '').length > 0) {
+  if (existing !== undefined && existing !== null && existing.shared !== true && String(existing.path ?? '').length > 0) {
     const alive = await runCommand('git', ['-C', repo, 'worktree', 'list', '--porcelain'], 20000)
     if (alive.ok && String(alive.stdout).includes(`worktree ${existing.path}`)) return existing
   }
@@ -1570,10 +1572,16 @@ async function ensureWorktree(store, task, config) {
   return info
 }
 
+/** 需求级共享 worktree 的实现在 src/host/requirement-worktree.js（index 行数棘轮）。 */
+async function ensureRequirementWorktree(store, task, config) {
+  return ensureRequirementWorktreeIn({ store, task, config, workProjectOf, serviceOf, runCommandFn: runCommand })
+}
+
 /** 回收 worktree（卡已完成且策略是 on_done 时调用）。 */
 async function removeWorktree(store, task, config) {
   const info = task?.worktree
   if (info === undefined || info === null) return { ok: false, skipped: '没有 worktree' }
+  if (info.shared === true) return { ok: false, skipped: '需求级共享 worktree 不随单卡回收' }
   const repo = String(info.repo ?? '').trim()
   if (repo.length === 0) return { ok: false, skipped: 'worktree 记录里没有仓库' }
   const removed = await runCommand('git', ['-C', repo, 'worktree', 'remove', '--force', String(info.path)], 60000)
@@ -2564,7 +2572,7 @@ export function apply(ctx) {
   })
 
   ctx.inject(['agents', 'sessionController', 'workspaceRegistry', 'permissionPresets', 'agentDefaultModel', 'sessionProjections'], dispatcherCtx => {
-    configureDispatcher({ getActiveSkills: () => activeSkills, sessionProjections: dispatcherCtx.sessionProjections, commentTask, feishuBroadcast, INTEGRATION, bugSla, removeWorktree, ensureWorktree, serviceOf, workProjectOf, serviceConflicts })
+    configureDispatcher({ getActiveSkills: () => activeSkills, sessionProjections: dispatcherCtx.sessionProjections, commentTask, feishuBroadcast, INTEGRATION, bugSla, removeWorktree, ensureWorktree, ensureRequirementWorktree, serviceOf, workProjectOf, serviceConflicts })
     configureIntegrations({ newTaskId, serviceOf, getStore: () => activeStore })
   // 集成健康是旁路数据，启动时读回来，重启后不再显示成「还没用过」。
   restoreHealth()

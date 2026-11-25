@@ -107,6 +107,7 @@ AI 是执行手，判定权在确定性规则和人手里。要变成 AI Native�
 | 23 | **文档改版后用例复跑** | PRD / 验收标准文档更新时间晚于用例最后一次通过执行 → 该用例在矩阵、抽屉测试页、影响面三处都标「需复跑」；**只标不改**（结果与状态不动，避免自动把通过改成待执行） | ✅ 已做（2026-11-24：`impact.js` 的 `requirementDocUpdatedAt` / `caseNeedsRerun` + `/task/parts`、`requirementMatrix`、`/requirement/impact`；`tests/acceptance.test.mjs` 2 条 + panel-probe ②c/③b） |
 | 24 | **矩阵行内编辑与批量验收** | 点「编辑」在矩阵表格上方就地展开表单（不跳页、自动滚动）；勾选多个功能点可批量替换验收条件（一行一条，id 按位置复用；删掉的条件上的用例变「未挂条件」，操作前有确认） | ✅ 已做（2026-11-24：`pages/requirements.js` 就地表单 + 选择列 + 批量表单；panel-probe ③c 3 条） |
 | 25 | **设置保存体验** | 页面级草稿（看板外观 / 角色与模型 / 自动派单）的保存条粘在面板底部、脏了标「未保存」，保存成功自动清脏；切分区前确认丢弃。分区保存 / 即时保存的开关不强行合并（不同对象、不同权限，避免误保存） | ✅ 已做（2026-11-24：`SettingsSaveBar` sticky + `dirty` 透传；panel-probe ④g 4 条） |
+| 26 | **工作区按需求分组** | 自动派单可选「一个需求一个文件夹」：同一需求的产品/架构/测试与单张研发卡共用一个需求 worktree，侧栏只出现一个文件夹；同需求多张研发卡并发时研发卡仍走卡级 git worktree，文件级隔离不丢 | ✅ 已做（2026-11-25：`workspaceGrouping` 配置 + `requirement-worktree.js` + `dispatchDirFor` 分组；单测 2 条；.218 已切 requirement） |
 
 ## 5. 落地顺序
 

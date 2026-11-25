@@ -805,11 +805,40 @@ export class Dispatcher {
     const live = ctx.agents.get(sessionId)
     if (live !== undefined) return live
     const base = (cfg.workspaceDir ?? '').trim() || join(homedir(), 'dsh-workspace')
-    // 一卡一 worktree：配了 project.repoPath 且 isolation=worktree 时，这个会话
-    // 只看得到自己那张卡的分支，互不踩文件。
+    const cfgNow = this.config()
+    const snapshot = this.store.snapshot()
+    /* 工作区分组：card = 一卡一 worktree；requirement = 一个需求一个文件夹。
+       requirement 模式下产品/架构/测试跑需求共享 worktree；同一需求有多张研发卡在
+       dev/review 时，研发卡仍各自建卡级 worktree（用户要的文件级隔离）。 */
+    const grouping = String(cfgNow?.agents?.workspaceGrouping ?? 'card') === 'requirement' ? 'requirement' : 'card'
+    const requirement = (snapshot.requirements ?? []).find(item => item.id === String(task.requirementId ?? ''))
+    const isDevRole = String(task.role ?? '') === 'dev'
     let worktree
+    let requirementWorktree
     try {
-      worktree = await host.ensureWorktree(this.store, task, this.config())
+      if (grouping === 'requirement' && requirement !== undefined) {
+        const concurrentDev = isDevRole && (snapshot.tasks ?? []).some(other => other.id !== task.id
+          && String(other.requirementId ?? '') === String(task.requirementId ?? '')
+          && String(other.role ?? '') === 'dev'
+          && ['dev', 'review'].includes(String(other.status ?? '')))
+        if (concurrentDev) {
+          worktree = await host.ensureWorktree(this.store, task, cfgNow)
+        } else if (typeof host.ensureRequirementWorktree === 'function') {
+          requirementWorktree = await host.ensureRequirementWorktree(this.store, task, cfgNow)
+          if (requirementWorktree?.skipped !== undefined) this.note(`requirement worktree skipped: ${requirementWorktree.skipped}`)
+          if (isDevRole && String(requirementWorktree?.path ?? '') !== '') {
+            worktree = requirementWorktree
+            try {
+              await this.store.mutate(draft => {
+                const target = draft.tasks.find(entry => entry.id === task.id)
+                if (target !== undefined) target.worktree = requirementWorktree
+              })
+            } catch (error) { this.note(`record shared worktree: ${error?.message ?? error}`) }
+          }
+        }
+      } else {
+        worktree = await host.ensureWorktree(this.store, task, cfgNow)
+      }
     } catch (error) {
       this.note(`worktree: ${error?.message ?? error}`)
     }
@@ -817,8 +846,8 @@ export class Dispatcher {
     /* 会话跑在哪个目录，决定了它在 DSH 侧栏里属于哪个工作区（按 canonical cwd 归属）：
        项目配了「本机代码目录」就跑到那个仓库里，会话才落在项目工作区下；否则退回工作区目录。
        以前一律跑 workspaceDir 的临时目录，派出去的会话只能落在「未分组」。 */
-    const context = projectContext(this.config(), task, this.store.snapshot().requirements)
-    const plan = dispatchDirFor({ task, worktree, context, fallbackDir: base })
+    const context = projectContext(cfgNow, task, snapshot.requirements)
+    const plan = dispatchDirFor({ task, worktree, context, fallbackDir: base, grouping, requirement, requirementWorktree })
     let dir = plan.dir !== '' ? plan.dir : base
     let title = plan.title
     if (plan.kind === 'repo' && !(await directoryExists(dir))) {

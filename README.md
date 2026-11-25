@@ -99,7 +99,9 @@ flowchart LR
 | --- | --- |
 | ![settings-cost](https://raw.githubusercontent.com/marsken88/dsh-studio/main/docs/images/settings-cost.png) | ![settings-experts](https://raw.githubusercontent.com/marsken88/dsh-studio/main/docs/images/settings-experts.png) |
 
-| 设置·列的负责人：**设计闸门 / 评审闸门**（默认开）+ 每列候选人 | 设置·技能库：沉淀的技能、被用上几张卡、返工率 |
+| 设置·列的负责人：**设计闸门 / 评审闸门**（默认开）+ 每列候选人
+
+**工作区分组**：自动派单可配「一卡一个文件夹」或「一个需求一个文件夹」——后者让产品/架构/测试与单张研发卡的会话落在同一个侧栏工作区；同需求多张研发卡并发时仍各自 git worktree 隔离。 | 设置·技能库：沉淀的技能、被用上几张卡、返工率 |
 | --- | --- |
 | ![settings-gates](https://raw.githubusercontent.com/marsken88/dsh-studio/main/docs/images/settings-gates.png) | ![settings-skills](https://raw.githubusercontent.com/marsken88/dsh-studio/main/docs/images/settings-skills.png) |
 

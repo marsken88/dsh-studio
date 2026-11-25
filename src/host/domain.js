@@ -215,6 +215,9 @@ export function defaultConfig() {
       escalation: 'allow',
       /** 隔离：none = 所有卡共用 workspaceDir；worktree = 每张卡一个 git worktree。 */
       isolation: 'none',
+      /** 工作区分组：card = 一个 worktree 一个侧栏文件夹；requirement = 一个需求一个文件夹
+       *  （产品/架构/测试共用需求 worktree，研发卡并发时再按卡隔离）。 */
+      workspaceGrouping: 'card',
       worktreeRoot: '',
       /** on_done = 卡进「已完成」时回收 worktree；manual = 留着等人看。 */
       cleanupWorktree: 'manual',

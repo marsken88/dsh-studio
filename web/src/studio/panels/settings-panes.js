@@ -147,6 +147,11 @@ export function AutoDispatchPane({ form, setForm, saveBar }) {
         ['worktree', '一卡一个 git worktree（推荐给多卡并行）'],
       ]),
       h('div', { className: HINT }, '开启后，卡要挂在配了「本机代码目录」的项目上，派单时会为它切一条 task/<编号> 分支。'),
+      selectOf('工作区分组', 'agentsGrouping', [
+        ['card', '一卡一个文件夹：每张卡独立 worktree（默认）'],
+        ['requirement', '一个需求一个文件夹：产品/架构/测试共用需求 worktree；同需求多张研发卡并发时仍各自 worktree 隔离'],
+      ]),
+      h('div', { className: HINT }, 'DSH 的工作区按会话 cwd 精确归属：一个文件夹只能挂 cwd 相同的会话。选「按需求」后，同一需求的产品/架构/测试会话会落在同一个侧栏文件夹里。'),
       field('agentsWorktreeRoot', 'worktree 根目录', '留空 = 仓库内 .agents/worktrees'),
       h('div', { className: HINT }, '留空时 worktree 建在仓库的 .agents/worktrees 下，侧栏里挂在项目工作区下；项目没配代码目录时退回工作区同级的 dsh-worktrees。'),
       selectOf('卡完成时', 'agentsCleanup', [
