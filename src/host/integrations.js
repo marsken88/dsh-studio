@@ -5,6 +5,7 @@ import { randomBytes } from 'node:crypto'
 import { STATUSES, mergeCoding } from './domain.js'
 import { MERGE_GATE_NAME, mergeGateFor, mergeGateLine, mergeGateNeedsRefresh, sanitizeMergeGate } from './merge-gate.js'
 import { emitEvent } from './events.js'
+import { withClarifyHistoryItem } from './acceptance.js'
 
 let host = { newTaskId: () => '', serviceOf: () => null, getStore: () => null }
 
@@ -589,6 +590,11 @@ export async function gitlabSync(store, projectId) {
           const entryStatus = isBug ? 'dev_ready' : 'clarify'
           // 从 GitLab 拉进来的卡也照模板铺验收清单，不然它一进流程就是个没有「做完」定义的空卡。
           const template = state.config.templates[isBug ? 'bug' : 'requirement'] ?? []
+          // GitLab 导入是另一条建卡路径：漏了它，导进来的澄清卡就没有这道门禁（REQ-2026-001 / p3）。
+          const checklist = withClarifyHistoryItem(
+            template.map((text, index) => ({ id: `c${index + 1}`, text, done: false, by: '', at: 0, note: '' })),
+            entryStatus,
+          )
           state.tasks.unshift({
             id: host.newTaskId(),
             title: `#${issue.iid} ${issue.title}`.slice(0, 200),
@@ -612,7 +618,7 @@ export async function gitlabSync(store, projectId) {
             blocked: null,
             blockedReason: '',
             artifacts: [],
-            checklist: template.map((text, index) => ({ id: `c${index + 1}`, text, done: false, by: '', at: 0, note: '' })),
+            checklist,
             cases: [],
             tags: labels.slice(0, 12),
             createdAt: now,

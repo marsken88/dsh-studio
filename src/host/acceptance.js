@@ -28,3 +28,32 @@ export function checklistFromAcceptance(acceptance) {
     .filter(item => item !== undefined)
     .map(item => ({ id: item.id, text: item.text.slice(0, 200), done: false, by: '', at: 0, note: '' }))
 }
+
+/** 澄清卡固定要求「先检索历史」的那一项（REQ-2026-001 / p3）。
+ *
+ * 为什么必须落成清单项：派单提示词只是软约束，准出闸门（executor.taskExitGate）
+ * 只拦「清单还有 N 项没勾」——只写提示词的话，模型跳过检索，卡也照样能推走。
+ *
+ * 三种情况不加：不是澄清列；清单里已经有人写了带「检索」的验收条件（拆卡继承的优先）；
+ * 清单已到 30 条上限（sanitizeChecklist 的上限），加了也会被截掉。
+ * 返回新数组，不改入参。
+ */
+export const CLARIFY_HISTORY_ITEM_ID = 'c-history'
+
+export function withClarifyHistoryItem(checklist, status) {
+  const list = Array.isArray(checklist) ? checklist : []
+  const next = list.slice()
+  if (status !== 'clarify') return next
+  if (next.length >= 30) return next
+  if (next.some(item => String(item?.id ?? '') === CLARIFY_HISTORY_ITEM_ID)) return next
+  if (next.some(item => String(item?.text ?? '').includes('检索'))) return next
+  next.push({
+    id: CLARIFY_HISTORY_ITEM_ID,
+    text: '已检索历史结论（命中写清沿用/推翻，没命中写「已检索，无命中」）',
+    done: false,
+    by: '',
+    at: 0,
+    note: '',
+  })
+  return next
+}
