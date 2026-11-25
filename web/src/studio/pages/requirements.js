@@ -10,6 +10,30 @@ import { Button, Select, Chip } from '../../boardui/index'
 import { EmptyState } from '../../boardui/empty-state'
 import { ProgressTrack } from '../../components/base/progress/progress'
 
+/* 「先聊清楚」：用户还没想清楚时，用 5 个问题把需求聊成一份 PRD 草稿；不调模型、纯本地合成。 */
+const INTAKE_STEPS = [
+  { key: 'title', question: '这条需求一句话是什么？', hint: '例：管理后台登录失败要锁定账号，防止暴力破解' },
+  { key: 'who', question: '谁在用？他们现在是怎么做的？', hint: '例：运营同学现在只能反复试密码，锁没锁只能靠猜' },
+  { key: 'goal', question: '你希望他们能做什么？做到什么程度？', hint: '例：连续错 5 次锁 10 分钟，锁定期间正确密码也拒绝' },
+  { key: 'scope', question: '这次明确不做什么？', hint: '例：不做图形验证码，不做异地登录提醒' },
+  { key: 'accept', question: '怎么算完成？写一条能验收的标准。', hint: '例：第 6 次请求返回 423，锁定期内正确密码仍 423' },
+]
+const composeIntake = answers => [
+  '## 背景',
+  String(answers.who ?? '').trim() || '（待补充）',
+  '',
+  '## 目标',
+  String(answers.goal ?? '').trim() || '（待补充）',
+  '',
+  '## 范围与不做什么',
+  String(answers.scope ?? '').trim() || '（待补充）',
+  '',
+  '## 验收',
+  String(answers.accept ?? '').trim() || '（待补充）',
+  '',
+  '> 本稿由「先聊清楚」的 5 个回答整理而成，保存后可在需求详情里继续补功能点、文档与验收条件。',
+].join('\n')
+
 /* 整页 BoardUI：面板 / 表单 / 列表 / 徽标 / 动作全部换成 token + Tailwind（4px 档位）。
    Markdown 正文不是组件：renderMarkdown 的产物挂语义类 md-content，排版规则（标题/列表/表格/代码）
    写在 client.src.js 的 CSS 段里——BoardUI 没有等价的富文本作用域，删了正文就没样式了。 */
@@ -159,12 +183,17 @@ export     function RequirementsPage({ state, onOpenTask, onChanged, createSigna
       // 从顶部「＋ 新建 → 新建需求」进来时，展开新建表单（form 为 null 时不显示面板）。
       const openNew = () => {
         setForm({ title: '', description: '', project: '', iteration: '', owner: '', priority: 'normal', status: 'draft', links: {} })
+        setIntake(null)
         setError(null)
       }
       React.useEffect(() => { if (Number(createSignal) > 0) openNew() }, [createSignal])
       // 从全局搜索跳过来时，直接选中那一条需求。
       React.useEffect(() => { if (focusReq && focusReq.id) setSelected(focusReq.id) }, [focusReq])
       const [form, setForm] = React.useState(null)
+      /* 对话澄清：null = 直接填写；对象 = 正在一步步聊。 */
+      const [intake, setIntake] = React.useState(null)
+      /* 对话生成的草稿要建 PRD 文档：用 ref 记一下，避免保存按钮拿到旧闭包里的 form。 */
+      const fromChatRef = React.useRef(false)
       const [error, setError] = React.useState(null)
       /* 需求详情分区：概览 / 沟通 / 任务与验收 / 交付物。只切显示，数据仍整页加载。 */
       const [reqPane, setReqPane] = React.useState('overview')
@@ -347,12 +376,75 @@ export     function RequirementsPage({ state, onOpenTask, onChanged, createSigna
         if (current !== null) void loadMatrix(current.id)
       }, [current === null ? '' : current.id, loadMatrix])
 
+      const startIntake = () => setIntake({ step: 0, answers: {}, input: '', done: false })
+      const submitIntake = () => {
+        if (intake === null) return
+        const value = String(intake.input ?? '').trim()
+        if (value === '') return
+        const answers = { ...intake.answers, [INTAKE_STEPS[intake.step].key]: value }
+        if (intake.step >= INTAKE_STEPS.length - 1) setIntake({ ...intake, answers, input: '', done: true })
+        else setIntake({ ...intake, answers, input: '', step: intake.step + 1 })
+      }
+      const finishIntake = () => {
+        if (intake === null) return
+        const answers = intake.answers
+        fromChatRef.current = true
+        setForm({
+          title: String(answers.title ?? '').trim(),
+          description: composeIntake(answers),
+          project: '', iteration: '', owner: '', priority: 'normal', status: 'draft',
+          links: {}, fromChat: true,
+        })
+        setIntake(null)
+      }
+      const renderIntake = () => {
+        if (intake === null) return null
+        const step = INTAKE_STEPS[intake.step]
+        const done = intake.done === true
+        const transcript = []
+        for (let i = 0; i < intake.step; i++) {
+          transcript.push(h('div', { key: 'q' + i, className: 'rounded-xl bg-background-secondary-default px-3 py-2 text-body-2-regular text-text-primary' }, INTAKE_STEPS[i].question))
+          transcript.push(h('div', { key: 'a' + i, className: 'self-end rounded-xl bg-accent-600 px-3 py-2 text-body-2-regular text-text-white' }, intake.answers[INTAKE_STEPS[i].key]))
+        }
+        transcript.push(h('div', { key: 'q-now', className: 'rounded-xl bg-background-secondary-default px-3 py-2 text-body-2-regular text-text-primary' }, step.question))
+        transcript.push(h('div', { key: 'hint', className: HINT }, step.hint))
+        if (done) {
+          transcript.push(h('div', { key: 'done', className: 'rounded-xl bg-status-lime-background px-3 py-2 text-body-2-regular text-text-primary' }, '收到，我按这些回答整理成需求文档草稿；保存后还能改。'))
+          transcript.push(h('div', { key: 'preview', className: 'md-content rounded-xl border border-separator-border p-3 text-body-2-regular text-text-primary' }, renderMarkdown(composeIntake(intake.answers))))
+        }
+        return h('div', { 'data-intake-ui': '', className: 'flex min-w-0 flex-col gap-2' },
+          h('div', { className: HINT }, done ? '回答完了，检查一下草稿' : `第 ${intake.step + 1} / ${INTAKE_STEPS.length} 个问题`),
+          h('div', { className: 'flex min-w-0 flex-col gap-2', 'data-intake-transcript': '' }, transcript),
+          done
+            ? h('div', { className: 'flex flex-wrap items-center gap-2' },
+              h(Button, { variant: 'secondary', size: 'sm', onClick: () => setIntake({ ...intake, done: false, step: INTAKE_STEPS.length - 1 }) }, '改最后一条'),
+              h(Button, { variant: 'primary', size: 'sm', onClick: finishIntake }, '生成文档并继续编辑'))
+            : h('div', { className: 'flex min-w-0 flex-col gap-2' },
+              h(TextAreaField, {
+                rows: 3, value: intake.input, 'aria-label': '回答当前问题',
+                placeholder: '用自己的话写，想到多少写多少',
+                onChange: event => setIntake({ ...intake, input: event.target.value }),
+                onKeyDown: event => {
+                  if ((event.metaKey || event.ctrlKey) && (event.key === 'Enter' || event.key === 'NumpadEnter')) {
+                    event.preventDefault(); submitIntake()
+                  }
+                },
+              }),
+              h('div', { className: 'flex flex-wrap items-center gap-2' },
+                intake.step > 0 ? h(Button, { variant: 'ghost', size: 'sm', onClick: () => setIntake({ ...intake, step: intake.step - 1, input: intake.answers[INTAKE_STEPS[intake.step - 1].key] ?? '' }) }, '上一条') : null,
+                h(Button, { variant: 'primary', size: 'sm', disabled: String(intake.input ?? '').trim() === '', onClick: submitIntake }, intake.step >= INTAKE_STEPS.length - 1 ? '看草稿' : '下一条'))))
+      }
       const save = async () => {
         if (form === null) return
         if (String(form.title ?? '').trim() === '') { setError('需求标题不能为空'); return }
         setBusy(true)
         try {
+          /* 先记下「这是新建 + 来自对话」：保存后再拿响应里的 created 判断，
+             出现过字段不在回包里导致 PRD 草稿没建的情况。 */
+          const isNew = form.id === undefined || form.id === null || form.id === ''
+          const fromChat = fromChatRef.current === true || form.fromChat === true || String(form.description ?? '').includes('本稿由「先聊清楚」')
           const payload = await api('/requirement/save', {
+            intake: fromChat,
             requirement: {
               id: form.id,
               title: form.title,
@@ -367,9 +459,19 @@ export     function RequirementsPage({ state, onOpenTask, onChanged, createSigna
             },
           })
           setSelected(payload.requirement.id)
+          let docNote = ''
+          if (isNew && fromChat) {
+            try {
+              await api('/requirement/doc', {
+                id: payload.requirement.id, action: 'add', by: '需求澄清',
+                doc: { kind: 'prd', title: `${form.title} PRD`, version: 'v1.0', content: form.description },
+              })
+            } catch (cause) { docNote = '；PRD 草稿没建成：' + (cause instanceof Error ? cause.message : String(cause)) }
+          }
+          fromChatRef.current = false
           setForm(null)
           setError(null)
-          toast(payload.created === true ? '需求已创建' : '需求已保存')
+          toast((payload.created === true ? '需求已创建' : '需求已保存') + docNote)
         } catch (err) {
           setError(err.message)
         } finally {
@@ -599,14 +701,20 @@ export     function RequirementsPage({ state, onOpenTask, onChanged, createSigna
       /* 新建/编辑需求走侧滑块：页面本体只留列表与详情，不再把一长串表单铺在顶部。 */
       const formPanel = form === null ? null : h(SideDrawer, {
         title: form.id === undefined ? '新建需求' : `编辑 ${current?.code ?? ''}`,
-        hint: '先写标题与澄清三问；保存后可在需求详情里继续补功能点、文档与验收条件。',
+        hint: intake !== null ? '回答 5 个问题，自动整理成 PRD 草稿；也可以随时切回「直接填写」。' : '先写标题与澄清三问；保存后可在需求详情里继续补功能点、文档与验收条件。',
         onClose: closeForm,
         footer: [
           h(Button, { key: 'cancel', variant: 'secondary', size: 'sm', onClick: closeForm }, '取消'),
-          h(Button, { key: 'save', variant: 'primary', size: 'sm', disabled: busy, onClick: () => void save() }, busy ? '保存中…' : '保存需求'),
+          /* 对话还没生成草稿时别给「保存需求」：标题/正文还空着，点了只会报错。 */
+          intake === null ? h(Button, { key: 'save', variant: 'primary', size: 'sm', disabled: busy, onClick: () => void save() }, busy ? '保存中…' : '保存需求') : null,
         ],
       },
-        h('div', { className: 'flex min-w-0 flex-col gap-3' },
+        h('div', { className: 'flex min-w-0 flex-col gap-3', 'data-intake': intake === null ? '0' : '1', 'data-form-id': form.id ?? 'new', 'data-chat-draft': form.fromChat === true ? '1' : '0' },
+          h('div', { className: 'flex flex-wrap items-center gap-2', 'data-intake-switch': '' },
+            h(Button, { variant: intake === null ? 'secondary' : 'ghost', size: 'sm', onClick: startIntake }, '先聊清楚'),
+            h(Button, { variant: intake === null ? 'ghost' : 'secondary', size: 'sm', onClick: () => setIntake(null) }, '直接填写'),
+            h('span', { className: HINT }, intake === null ? '不知道怎么填？用 5 个问题把需求聊成文档' : '答完会生成一份可编辑的 PRD 草稿')),
+          renderIntake(),
           h('div', { className: FIELD },
             h('div', { className: LABEL }, '需求标题'),
             h(TextField, { 'aria-label': '需求标题', value: form.title, onChange: e => setForm({ ...form, title: e.target.value }) }),

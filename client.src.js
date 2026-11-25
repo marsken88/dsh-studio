@@ -538,6 +538,9 @@ html[data-dsh-theme="light"] [class*="rightbarCol"] { background: #fafafa !impor
 [data-analytics-pane="ai"] > [data-analytics-panel]:not([data-analytics-panel="ai"]),
 [data-analytics-pane="context"] > [data-analytics-panel]:not([data-analytics-panel="context"]) { display:none; }
 
+/* 需求「先聊清楚」：对话时只显示对话区与模式切换，表单字段先藏起来。 */
+[data-intake="1"] > *:not([data-intake-ui]):not([data-intake-switch]) { display:none; }
+
 /* 需求详情分区：只显示当前 pane 的直接子块；顶部标题与 tab 栏没有 data-req-panel，始终可见。 */
 [data-req-pane="overview"] > [data-req-panel]:not([data-req-panel="overview"]),
 [data-req-pane="discuss"] > [data-req-panel]:not([data-req-panel="discuss"]),

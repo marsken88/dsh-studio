@@ -609,6 +609,22 @@ try {
     return { border: cs.borderTopWidth, bg: cs.backgroundColor, radius: cs.borderRadius, shadow: cs.boxShadow }
   })
   /* Select 与 Input 的官方视觉不同：白底 + 1px 边框 + shadow/xs（Figma trigger 规格），别统一改成灰底。 */
+  /* 新建需求的「先聊清楚」：不要求用户一上来就填完整表 */
+  const chatOpened = await page.evaluate(() => {
+    const button = [...document.querySelectorAll('button')].find(node => (node.textContent || '').trim() === '先聊清楚')
+    if (button === undefined) return false
+    button.click()
+    return true
+  })
+  await new Promise(resolve => setTimeout(resolve, 500))
+  const chatState = await page.evaluate(() => ({
+    ui: document.querySelector('[data-intake-ui]') !== null,
+    question: String(document.body.innerText ?? '').includes('这条需求一句话是什么'),
+    fieldsHidden: (document.querySelector('[data-intake="1"] input[aria-label="需求标题"]')?.getBoundingClientRect().width ?? 1) === 0,
+  }))
+  check('③d 新建需求支持「先聊清楚」对话', chatOpened === true && chatState.ui === true && chatState.question === true && chatState.fieldsHidden === true, JSON.stringify(chatState))
+  await page.evaluate(() => [...document.querySelectorAll('button')].find(node => (node.textContent || '').trim() === '直接填写')?.click())
+  await new Promise(resolve => setTimeout(resolve, 300))
   check('③d Select 保持 BoardUI 官方样式（白底/1px 边框/阴影）', selectBox !== null && selectBox.border === '1px' && selectBox.bg === 'rgb(255, 255, 255)' && selectBox.radius === '10px' && selectBox.shadow !== 'none', JSON.stringify(selectBox))
   await page.keyboard.press('Escape')
   await new Promise(resolve => setTimeout(resolve, 400))
@@ -888,9 +904,10 @@ try {
   check('⑥d 效能页有 4 个分区页签', analyticsTabs.length === 4 && analyticsTabs.includes('总览') && analyticsTabs.includes('上下文'), JSON.stringify(analyticsTabs))
   check('⑥d 效能页顶部有「现在最该看」结论条', focusBanner === 'warn' || focusBanner === 'ok', focusBanner)
   await page.evaluate(() => document.querySelector('[data-analytics-tab="ai"]')?.click())
-  await new Promise(resolve => setTimeout(resolve, 500))
+  await new Promise(resolve => setTimeout(resolve, 1400))
   const analyticsVisible = await page.evaluate(() => [...new Set([...document.querySelectorAll('[data-analytics-panel]')].filter(node => getComputedStyle(node).display !== 'none').map(node => node.getAttribute('data-analytics-panel')))])
   check('⑥d 切「AI 与成本」只显示对应分区', analyticsVisible.length === 1 && analyticsVisible[0] === 'ai', JSON.stringify(analyticsVisible))
+  await page.waitForFunction(() => document.querySelectorAll('[role="meter"]').length > 0, { timeout: 6000 }).catch(() => {})
   const meterCount = await page.evaluate(() => document.querySelectorAll('[role="meter"]').length)
   check('⑥d AI 与成本有官方 Meter（负载/预算）', meterCount > 0, String(meterCount))
   await page.evaluate(() => document.querySelector('[data-analytics-tab="overview"]')?.click())

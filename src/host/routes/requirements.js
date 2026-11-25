@@ -206,9 +206,16 @@ export async function handleRequirementRoute({ method, route, req, res, store, u
     const beforeRecord = typeof incoming.id === 'string' ? store.snapshot().requirements.find(item => item.id === incoming.id) : undefined
     /* 字段级历史统一由 saveRequirement 写（issue #116：原来这里只盯 7 个标量字段）。 */
     const requirement = await saveRequirement(store, incoming)
+    /* 「先聊清楚」生成的新需求：把正文顺手落成一份 PRD 草稿文档，用户不用再手工建。 */
+    if (body.intake === true && beforeRecord === undefined && String(requirement.description ?? '').trim() !== '') {
+      await mutateReqDoc(store, {
+        id: requirement.id, action: 'add', by: '需求澄清',
+        doc: { kind: 'prd', title: `${requirement.title} PRD`, version: 'v1.0', content: requirement.description },
+      })
+    }
     const snapshot = store.snapshot()
     const saved = snapshot.requirements.find(item => item.id === requirement.id) ?? requirement
-    host.sendJson(res, 200, { ok: true, requirement, progress: requirementProgress(snapshot, saved), state: host.publicState(store) })
+    host.sendJson(res, 200, { ok: true, created: beforeRecord === undefined, requirement, progress: requirementProgress(snapshot, saved), state: host.publicState(store) })
     return true
   }
   if (method === 'POST' && route === '/requirement/review') {
