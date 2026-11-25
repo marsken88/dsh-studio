@@ -719,9 +719,9 @@ export     function RequirementsPage({ state, onOpenTask, onChanged, createSigna
               { id: 'accept', label: '任务与验收' },
               { id: 'artifacts', label: '交付物' + (artifacts.length > 0 ? ' ' + artifacts.length : '') },
             ]
-            return h('div', { className: 'flex flex-wrap items-center gap-1 border-b border-separator-border pb-2', role: 'tablist', 'aria-label': '需求详情分区' },
+            return h('div', { className: 'flex flex-wrap items-center gap-1 border-b border-separator-border pb-2', role: 'group', 'aria-label': '需求详情分区' },
               tabs.map(tab => h(Button, {
-                key: tab.id, role: 'tab', 'aria-selected': reqPane === tab.id ? 'true' : 'false', 'data-req-tab': tab.id,
+                key: tab.id, 'aria-pressed': reqPane === tab.id ? 'true' : 'false', 'data-req-tab': tab.id,
                 variant: reqPane === tab.id ? 'secondary' : 'ghost', size: 'sm',
                 onClick: () => setReqPane(tab.id),
               }, tab.label)))

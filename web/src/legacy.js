@@ -1874,7 +1874,7 @@ function installKeyboardActivation() {
             : tab === 'releases'
               ? h(ReleasesPage, { state, onOpenTask: setOpenId })
             : tab === 'projects'
-              ? h(ProjectsOverview, { state, onOpenBoard: () => setTab('board') })
+              ? h(ProjectsOverview, { state, onOpenBoard: () => setTab('board'), onOpenSettings: () => { setSettingsSection('projects'); setTab('settings') } })
               : tab === 'analytics'
                 ? h(AnalyticsPage, { state, onOpenTask: setOpenId, onFixPrices: models => { setCostSuggest(Array.isArray(models) ? models : []); setSettingsSection('costs'); setTab('settings') } })
               : tab === 'market'

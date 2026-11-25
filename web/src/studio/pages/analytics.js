@@ -43,6 +43,7 @@ export function AnalyticsPage({ state, onOpenTask, onFixPrices }) {
   /* 次数据（负载/燃尽/成本/质量）以前 catch(()=>{})，接口一挂就显示成「还没有数据」。
      现在记下失败原因，在页面上和「真的没数据」分开说。 */
   const [secondaryError, setSecondaryError] = React.useState(null)
+  const [secondaryLoading, setSecondaryLoading] = React.useState(true)
   const [load, setLoad] = React.useState(null)
   const [burn, setBurn] = React.useState(null)
   const [costs, setCosts] = React.useState(null)
@@ -82,6 +83,7 @@ export function AnalyticsPage({ state, onOpenTask, onFixPrices }) {
       .then(out => { if (alive) { setData(out.analytics); setError(null) } })
       .catch(cause => { if (alive) setError(cause instanceof Error ? cause.message : String(cause)) })
     const suffix = project === '' ? '' : `&project=${encodeURIComponent(project)}`
+    setSecondaryLoading(true)
     Promise.all([api('/workload'), api(`/burndown?days=14${suffix}`), api('/costs'), api('/quality')])
       .then(([loadOut, burnOut, costOut, qualityOut]) => {
         if (!alive) return
@@ -92,6 +94,7 @@ export function AnalyticsPage({ state, onOpenTask, onFixPrices }) {
         setSecondaryError(null)
       })
       .catch(cause => { if (alive) setSecondaryError(cause instanceof Error ? cause.message : String(cause)) })
+      .finally(() => { if (alive) setSecondaryLoading(false) })
     return () => { alive = false }
   }, [days, project, state.revision])
 
@@ -245,9 +248,9 @@ export function AnalyticsPage({ state, onOpenTask, onFixPrices }) {
         { id: 'ai', label: 'AI 与成本' },
         { id: 'context', label: '上下文' },
       ]
-      return h('div', { className: 'flex flex-wrap items-center gap-1 border-b border-separator-border pb-2', role: 'tablist', 'aria-label': '效能分区' },
+      return h('div', { className: 'flex flex-wrap items-center gap-1 border-b border-separator-border pb-2', role: 'group', 'aria-label': '效能分区' },
         tabs.map(tab => h(Button, {
-          key: tab.id, role: 'tab', 'aria-selected': pane === tab.id ? 'true' : 'false', 'data-analytics-tab': tab.id,
+          key: tab.id, 'aria-pressed': pane === tab.id ? 'true' : 'false', 'data-analytics-tab': tab.id,
           variant: pane === tab.id ? 'secondary' : 'ghost', size: 'sm',
           onClick: () => setPane(tab.id),
         }, tab.label)))
@@ -428,7 +431,7 @@ export function AnalyticsPage({ state, onOpenTask, onFixPrices }) {
         h('div', { className: PANEL_HEAD }, '按专家看质量', h('span', { className: HINT }, '派单量来自运行日志（内存最近 300 条）')),
         h('div', { className: PANEL_BODY },
           quality === null
-            ? h('div', { className: HINT }, '还没算出来')
+            ? h('div', { className: HINT }, secondaryLoading ? '正在算…' : '还没算出来')
             : (quality.experts ?? []).length === 0
               ? h('div', { className: HINT }, '还没有派出过活')
               : h('div', null,
@@ -458,7 +461,9 @@ export function AnalyticsPage({ state, onOpenTask, onFixPrices }) {
       h('div', { className: `${PANEL} xl:col-span-4` },
         h('div', { className: PANEL_HEAD }, '团队负载', h('span', { className: HINT, style: { marginLeft: 'auto' } }, `${load?.busy ?? 0} 位在跑`)),
         h('div', { className: PANEL_BODY },
-          (load?.experts ?? []).filter(item => item.enabled).length === 0
+          load === null
+            ? h('div', { className: HINT }, secondaryLoading ? '正在加载团队负载…' : '负载数据没加载出来。')
+            : (load.experts ?? []).filter(item => item.enabled).length === 0
             ? h(EmptyState, { title: '还没有启用的专家。' })
             : (load?.experts ?? []).filter(item => item.enabled).map(item => h('div', { key: item.id, className: 'grid grid-cols-[106px_minmax(0,1fr)_84px] items-center gap-2 py-1 text-body-2-regular' },
               h('span', { className: 'text-text-secondary' }, `${item.name}`),

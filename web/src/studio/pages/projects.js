@@ -18,7 +18,7 @@ const STAT_VALUE = 'text-title-2-semibold text-text-primary tabular-nums'
 const HINT = 'text-caption-1-regular text-text-tertiary'
 
 export function createProjectsPage({ h, React, api }) {
-  return function ProjectsOverview({ state, onOpenBoard }) {
+  return function ProjectsOverview({ state, onOpenBoard, onOpenSettings }) {
     const [metrics, setMetrics] = React.useState(null)
     const [error, setError] = React.useState(null)
     React.useEffect(() => {
@@ -107,6 +107,13 @@ export function createProjectsPage({ h, React, api }) {
     const hasUnassigned = unassigned !== null && unassigned !== undefined && unassigned.total > 0
 
     return h('div', { className: 'flex flex-col gap-4 p-4', 'data-projects-page': '' },
+      /* 项目页以前只能看、不能建：新建/编辑入口藏在设置里，人找不到。 */
+      h('div', { className: 'flex flex-wrap items-center justify-between gap-2' },
+        h('div', { className: 'flex min-w-0 flex-col gap-1' },
+          h('span', { className: 'text-body-2-medium text-text-primary' }, `${projects.length} 个业务项目`),
+          h('span', { className: HINT }, '项目 → 迭代 → 卡；本机代码目录与服务在「设置 → 项目与迭代」里维护')),
+        h(Button, { variant: 'secondary', size: 'sm', onClick: () => { if (typeof onOpenSettings === 'function') onOpenSettings() } }, '＋ 新建 / 管理项目'),
+      ),
       h('div', { className: 'grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3' },
         projects.map(project => card(
           `${project.key ? `[${project.key}] ` : ''}${project.name}`,
