@@ -1,20 +1,25 @@
 // 端到端验证「MR 事实 vs 自报执行记录」：不依赖真实 GitLab。
 // 前置：在跑 dsh 的那台机器上起打桩 —— node tools/mock-gitlab.mjs
 //
-//   STUDIO_BASE=http://<host>:18080 node tools/verify-gitlab-facts.mjs
+// 关于鉴权：`/studio-api` 过宿主的信任栅栏，没有已认证的浏览器会话一律 401。
+// 脚本没有浏览器，得用 dsh web 的启动 token 换 cookie —— 所以现在还要给 STUDIO_TOKEN：
+//   STUDIO_TOKEN=<dsh web 启动 token> STUDIO_BASE=http://<host>:18080 node tools/verify-gitlab-facts.mjs
+import { launchTokenFromEnv, studioFetch } from './lib/studio-auth.mjs'
+
 const BASE = process.env.STUDIO_BASE ?? 'http://127.0.0.1:18080'
+const api = studioFetch(BASE, launchTokenFromEnv())
 const MOCK = process.env.MOCK_GITLAB ?? 'http://127.0.0.1:18098'
 const IID = Number(process.env.MOCK_GITLAB_IID ?? 7)
 
 const post = async (path, body) => {
-  const res = await fetch(BASE + '/studio-api' + path, {
+  const res = await api('/studio-api' + path, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify(body ?? {}),
   })
   return { status: res.status, body: await res.json().catch(() => ({})) }
 }
-const stateOf = async () => (await (await fetch(BASE + '/studio-api/state')).json()).state
+const stateOf = async () => (await (await api('/studio-api/state')).json()).state
 
 const before = await stateOf()
 const gitlabBefore = before.config.gitlab ?? {}

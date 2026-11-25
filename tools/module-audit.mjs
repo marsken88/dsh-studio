@@ -1,11 +1,16 @@
 // 数据层逐模块体检：页面不崩 ≠ 数据对。这里检查各模块之间的引用是否断裂、
 // 枚举值是否越界、必填项是否缺失。只读，不改任何东西。
 //
-// 用法：STUDIO_BASE=http://host:18080 STUDIO_TOKEN=xxx node tools/module-audit.mjs
+// 用法：STUDIO_BASE=http://host:18080 STUDIO_TOKEN=<dsh web 启动 token> node tools/module-audit.mjs
+//   `/studio-api` 过宿主的信任栅栏，没有已认证的浏览器会话就 401。以前这里发
+//   `authorization: Bearer …`——宿主只认 cookie，那头发过去从来没被认过；现在由
+//   studio-auth 用启动 token 换 cookie。
+import { launchTokenFromEnv, studioFetch } from './lib/studio-auth.mjs'
+
 const BASE = process.env.STUDIO_BASE ?? 'http://192.168.120.218:18080'
-const TOKEN = process.env.STUDIO_TOKEN ?? ''
+const api = studioFetch(BASE, launchTokenFromEnv())
 const get = async path => {
-  const res = await fetch(BASE + path, { headers: { authorization: `Bearer ${TOKEN}` } })
+  const res = await api(path)
   if (res.ok === false) throw new Error(`${path} → HTTP ${res.status}`)
   return res.json()
 }

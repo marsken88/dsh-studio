@@ -6,8 +6,14 @@
 //
 // 判据：任务分支上的提交数、卡最终停在哪一列、代码事实核对、耗时。
 // 完成判定读宿主 session 日志的 turn/end（/agents 不报手动派单）。
+//
+// 关于鉴权：`/studio-api` 过宿主的信任栅栏，没有已认证的浏览器会话一律 401。
+// 脚本没有浏览器，得用 dsh web 的启动 token 换 cookie —— 所以现在还要给 STUDIO_TOKEN：
+//   STUDIO_TOKEN=<dsh web 启动 token> STUDIO_BASE=http://<host>:18080 node tools/prompt-ab.mjs --variant '...'
 import { Client } from 'ssh2'
+import { launchTokenFromEnv, studioFetch } from './lib/studio-auth.mjs'
 const BASE = process.env.STUDIO_BASE ?? 'http://192.168.120.218:18080'
+const api = studioFetch(BASE, launchTokenFromEnv())
 const SSH = { host: process.env.DSH_DEPLOY_HOST ?? '192.168.120.218', username: process.env.DSH_DEPLOY_USER ?? 'lyf', password: process.env.DSH_DEPLOY_PASSWORD ?? '1234', readyTimeout: 15000 }
 const REPO = process.env.AB_REPO ?? '/home/lyf/repos/admin-portal'
 const argv = process.argv.slice(2)
@@ -21,10 +27,10 @@ const TIMEOUT_MS = Number(value('timeout', '1800')) * 1000
 const SPEC = value('spec', '给订单列表页加一列「备注」，只读展示 orders.note（GET /api/orders 已返回该字段）。改完跑 pnpm test。')
 const sleep = (ms) => new Promise(r => setTimeout(r, ms))
 const post = async (path, body) => {
-  const res = await fetch(BASE + '/studio-api' + path, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body ?? {}) })
+  const res = await api('/studio-api' + path, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body ?? {}) })
   return res.json().catch(() => ({}))
 }
-const state = async () => (await (await fetch(BASE + '/studio-api/state')).json()).state
+const state = async () => (await (await api('/studio-api/state')).json()).state
 const ssh = (command) => new Promise((resolve, reject) => {
   const client = new Client()
   client.on('ready', () => client.exec(command, (err, stream) => {

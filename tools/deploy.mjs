@@ -96,8 +96,12 @@ for i in $(seq 1 25); do if ss -ltn 2>/dev/null | grep -q ':18080'; then break; 
 echo "active=$(systemctl is-active dsh-web)"
 echo "files=$(find "$DEST/src/host" -name '*.js' | wc -l)"
 STATE=000
+# 探 /health 而不是 /studio-api/state：/studio-api 现在过宿主的信任栅栏
+# （没有已认证的浏览器会话就 401），拿它当探活只会把「服务起来了」误判成 401。
+# 先打 127.0.0.1（回环 Host 永远在栅栏的可信名单里），连不上再试部署地址。
 for i in $(seq 1 20); do
-  STATE=$(curl -s --max-time 5 -o /dev/null -w '%{http_code}' http://${HOST}:18080/studio-api/state 2>/dev/null)
+  STATE=$(curl -s --max-time 5 -o /dev/null -w '%{http_code}' http://127.0.0.1:18080/studio-api/health 2>/dev/null)
+  [ "\${STATE}" = "200" ] || STATE=$(curl -s --max-time 5 -o /dev/null -w '%{http_code}' http://${HOST}:18080/studio-api/health 2>/dev/null)
   [ "\${STATE}" = "200" ] && break
   sleep 2
 done

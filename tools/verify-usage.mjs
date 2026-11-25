@@ -2,11 +2,15 @@
 // /costs 走的是 session-usage.js（zstd 解压 + 按 mtime 缓存 + 过滤会话名），这里走「ssh 取原文 + usage.js 解析」，
 // 两条路径不同，对上才说明没有重复计、没有漏计。
 //
-//   STUDIO_BASE=http://<host>:18080 node tools/verify-usage.mjs [taskId]
+// 关于鉴权：`/studio-api` 过宿主的信任栅栏，没有已认证的浏览器会话一律 401。
+// 脚本没有浏览器，得用 dsh web 的启动 token 换 cookie —— 所以现在还要给 STUDIO_TOKEN：
+//   STUDIO_TOKEN=<dsh web 启动 token> STUDIO_BASE=http://<host>:18080 node tools/verify-usage.mjs [taskId]
 import { Client } from 'ssh2'
 import { parseUsageLines, summarizeUsage } from '../src/host/usage.js'
+import { launchTokenFromEnv, studioFetch } from './lib/studio-auth.mjs'
 
 const BASE = process.env.STUDIO_BASE ?? 'http://192.168.120.218:18080'
+const api = studioFetch(BASE, launchTokenFromEnv())
 const HOST = process.env.DSH_DEPLOY_HOST ?? '192.168.120.218'
 const USER = process.env.DSH_DEPLOY_USER ?? 'lyf'
 const PASS = process.env.DSH_DEPLOY_PASSWORD ?? ''
@@ -24,7 +28,7 @@ const sshExec = (command) => new Promise((resolve, reject) => {
   client.connect({ host: HOST, username: USER, password: PASS, readyTimeout: 15000 })
 })
 
-const costs = await (await fetch(BASE + '/studio-api/costs')).json()
+const costs = await (await api('/studio-api/costs')).json()
 const cards = costs.usage?.cards ?? []
 if (cards.length === 0) { console.log('没有可核对的卡（/costs 没有 usage.cards）'); process.exit(1) }
 const target = process.argv[2] ?? cards[0].taskId

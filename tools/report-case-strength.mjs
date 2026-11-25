@@ -1,10 +1,15 @@
 import { readFileSync } from 'node:fs'
 import { COVERAGE_TARGET, coverageStrength } from '../src/host/case-strength.js'
+import { launchTokenFromEnv, studioFetch } from './lib/studio-auth.mjs'
 
 /* 现场算用例强度：多少条能真的验、多少条只是标题。
  *
  *   node tools/report-case-strength.mjs http://<host>:18080      # 直接打接口（推荐）
  *   node tools/report-case-strength.mjs <cases.json>             # 用 /cases 的返回存成的文件
+ *
+ * 打接口那一支要带 STUDIO_TOKEN（`/studio-api` 过宿主的信任栅栏，脚本得用 dsh web 的启动 token 换 cookie）；
+ * 读本地 json 文件不需要：
+ *   STUDIO_TOKEN=<dsh web 启动 token> node tools/report-case-strength.mjs http://<host>:18080
  *
  * 注意：**不能**拿 /state 里的 task.cases 算 —— 那是空数组，正文不随轮询下发
  * （见 domain.js 的 publicCases：只给 caseSummary 计数，抽屉打开时才取正文）。
@@ -18,7 +23,8 @@ if (target === '') {
 
 let payload
 if (/^https?:\/\//.test(target)) {
-  const response = await fetch(target.replace(/\/$/, '') + '/studio-api/cases', {
+  const api = studioFetch(target.replace(/\/$/, ''), launchTokenFromEnv())
+  const response = await api('/studio-api/cases', {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: '{}',

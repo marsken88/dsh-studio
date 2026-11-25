@@ -26,6 +26,7 @@ import { dirname, extname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 import { formRowIndex, isProbeCard, normalizePointValue } from '../lib/panel-selectors.mjs'
+import { studioFetch } from '../lib/studio-auth.mjs'
 
 const here = dirname(fileURLToPath(import.meta.url))
 const repo = join(here, '..', '..')
@@ -40,9 +41,16 @@ const keep = argv.includes('--keep')
 // 视口可调：真宿主里面板宽度不一定是 1400（窄侧栏/小窗口时排版会变）
 const viewportWidth = Math.max(375, Number(argOf('width', '1400')) || 1400)
 const viewportHeight = Math.max(600, Number(argOf('height', '1100')) || 1100)
-/* 目标机开了登录时，探针也要带身份：STUDIO_TOKEN = 登录拿到的会话令牌（/auth/login 返回的 token，
-   或浏览器 cookie `dsh-auth-*` 的值）。本机免登录的实例不用设。 */
-const studioToken = String(process.env.STUDIO_TOKEN ?? '').trim()
+/* 两级身份，别混：
+   · STUDIO_TOKEN   = **dsh web 的启动 token**（启动 URL 上那个 `?token=`）。`/studio-api` 现在过
+                       宿主的信任栅栏，没有已认证的浏览器会话就 401；探针跑在假宿主上，浏览器在
+                       这个站点没有 cookie，所以由 Node 这侧换一次再转给上游。
+   · STUDIO_SESSION = 插件自己开了统一登录（LDAP）时的会话令牌（`/auth/login` 返回的 token），
+                       以 `x-studio-session` 头发出去。免登录的实例不用设。 */
+const launchToken = String(process.env.STUDIO_TOKEN ?? '').trim()
+const studioSession = String(process.env.STUDIO_SESSION ?? '').trim()
+/* 换到 cookie 后所有对上游的请求都走它：api() 与假宿主代理层共用一次会话。 */
+const authedFetch = studioFetch(base, launchToken)
 if (base === '') {
   console.error('用法：node tools/visual/panel-probe.mjs --base http://127.0.0.1:<dsh 端口> [--keep]')
   process.exit(2)
@@ -72,9 +80,9 @@ if (CHROME === undefined) {
 }
 
 const api = async (path, body) => {
-  const res = await fetch(base + '/studio-api' + path, {
+  const res = await authedFetch('/studio-api' + path, {
     method: body === undefined ? 'GET' : 'POST',
-    headers: { 'content-type': 'application/json', ...(studioToken === '' ? {} : { 'x-studio-session': studioToken }) },
+    headers: { 'content-type': 'application/json', ...(studioSession === '' ? {} : { 'x-studio-session': studioSession }) },
     body: body === undefined ? undefined : JSON.stringify(body),
   })
   return { status: res.status, json: await res.json().catch(() => ({})) }
@@ -114,11 +122,12 @@ const server = createServer(async (req, res) => {
     const chunks = []
     for await (const chunk of req) chunks.push(chunk)
     try {
-      const upstream = await fetch(base + url.pathname + url.search, {
+      /* 假宿主自己不持有会话：用 Node 侧换到的 cookie 打上游，页面才看得到真数据。 */
+      const upstream = await authedFetch(url.pathname + url.search, {
         method: req.method,
         headers: {
           'content-type': req.headers['content-type'] ?? 'application/json',
-          ...(studioToken === '' ? {} : { 'x-studio-session': studioToken }),
+          ...(studioSession === '' ? {} : { 'x-studio-session': studioSession }),
         },
         body: req.method === 'GET' || req.method === 'HEAD' ? undefined : (chunks.length > 0 ? Buffer.concat(chunks) : undefined),
       })

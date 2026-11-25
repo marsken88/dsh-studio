@@ -1,7 +1,10 @@
 // 让智能体真的参与：结构化需求描述 + 新建一张卡，派专家发言
+import { launchTokenFromEnv, studioFetch } from './lib/studio-auth.mjs'
+
 const BASE = process.env.STUDIO_BASE ?? 'http://192.168.120.218:18080'
-const post = async (p, b) => { const res = await fetch(BASE + '/studio-api' + p, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(b ?? {}) }); return { status: res.status, body: await res.json().catch(() => ({})) } }
-const state = async () => (await (await fetch(BASE + '/studio-api/state')).json()).state
+const api = studioFetch(BASE, launchTokenFromEnv())
+const post = async (p, b) => { const res = await api('/studio-api' + p, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(b ?? {}) }); return { status: res.status, body: await res.json().catch(() => ({})) } }
+const state = async () => (await (await api('/studio-api/state')).json()).state
 const show = (label, ok, detail) => console.log((ok ? 'ok   ' : 'FAIL ') + label + (detail === undefined ? '' : ' — ' + detail))
 const sleep = (ms) => new Promise(r => setTimeout(r, ms))
 

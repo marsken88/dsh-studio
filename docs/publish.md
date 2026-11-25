@@ -164,7 +164,32 @@ npm publish（几分钟生效，以 registry 为准）
 
 市场版本只是下游展示，滞后是正常的，不需要为此重发或改仓库。
 
-**投稿进度**：2026-11-17 已提 PR —— [awesome-dsh-plugin#16102](https://github.com/awesome-dsh-plugin/awesome-dsh-plugin/pull/16102)（分支 `marsken88:add-dsh-studio`，只加 `data/plugins/marsken88__dsh-studio.yml` 一个文件）。合并后 dsh-m 社区目录同步即可搜到 `dsh-studio`，届时再跑 `dshm_install` 从市场装一次 + `tools/visual/smoke.mjs` 收尾。
+**投稿进度**：**已收录。** [awesome-dsh-plugin#16102](https://github.com/awesome-dsh-plugin/awesome-dsh-plugin/pull/16102) 于 2026-11-17T17:00Z 合并，只加了 `data/plugins/marsken88__dsh-studio.yml` 一个文件；生成的 README 里有我们那一行，dsh-m 社区目录搜得到（2026-11-25 实测 `dshm_search` 显示 `dsh-studio · 社区 · v0.15.0`）。
+
+### 收录之后发生的事：条目被维护者加了「路由披露」
+
+合并 **24 分钟后**，维护者 `fkysly` 一个 **88 个文件**的批量提交（`Disclose routes, fix names, pin renamed dates, drop fixed caveat`）把我们的 `description` 改成了带披露的版本：
+
+> … quality is reported per expert. **Its HTTP routes have no DSH access check, so a web page open in your browser could call them.**
+
+这不是针对我们：生成后的 README 里 **541 条**带同一句话，是全表普查。但对本站这条，它是**成立的**——2026-11-25 实测：
+
+| 探测 | 结果 |
+| --- | --- |
+| `GET /studio-api/state` 不带任何凭据 | **200，88 KB 全量台账** |
+| 同上，`Host` 伪造成 `evil.example.com` | **200**（没有 Host 校验） |
+| 跨站 POST（`Origin` 与 `Host` 不同） | 403 `bad_origin`（CSRF 守卫有效） |
+| POST 但 `Host` 与 `Origin` 同为攻击者域名（DNS rebinding 的形状） | **进到业务逻辑**——守卫一起失效 |
+
+**摘掉这句话的路径（不是重投一次）：改代码 → 发版 → 只改自己那条 yml 的 PR。** 上游已有两次先例：
+
+- [#18520](https://github.com/awesome-dsh-plugin/awesome-dsh-plugin/pull/18520) `dsh-syncthing-pair v1.0.1`：作者把路由接进 `ctx.connection.requestRejection`，PR 正文贴了 401/403/200 三条实测，合并；
+- `bcd738dd` `nuclearmilk/dsh-hud`：修好之后维护者直接 `drop HTTP access check caveat`。
+
+本站的实现见「未发布」的 `CHANGELOG` 与 `src/host/access.js` 的 `trustRejectionOutcome`：403（Host/Origin）谁都不豁免，401（没有已认证会话）只豁免公开自助提单面与 `/health`。对应 PR 的写法照 #18520：正文写清**改了什么、release 链接、commit 链接、401/200/403 三条实测**，并声明「只改自己那一条」。不要动别人的条目，一个 PR 最多 3 条。
+
+> 判断「收录是否生效」只看三处：`npm view @marsken/dsh-studio version`、`npm run verify:release`、以及上游 `data/plugins/marsken88__dsh-studio.yml` 的内容。市场页面显示哪个版本只是下游展示，滞后是正常的。
+
 
 ## 3. 自查清单（收录前逐条过）
 
@@ -311,4 +336,4 @@ token 只写进临时 npmrc（放在仓库外或 `tmp/` 且不提交），发完
    **刚 publish 完那几分钟 registry 还看不到新版本**，这时用 `npm run verify:release -- --wait 180` 让它自己轮询等待，别把「还没同步」当成「没发」。
    这条是因为 0.1.15/0.1.16 真的发到 npm 了、git 却没推上去：`git tag -f vX.Y.Z && git push ... | tail -1` 会把 push 的失败吞掉。
    npm latest 滞后（刚发几分钟）只算 warn，不算失败。
-4. 部署脚本退出码 0 **不等于服务活着**——它打印的 `state=` 要自己看一眼，再单独 `curl -o /dev/null -w '%{http_code}' <host>/studio-api/state` 确认 200（2026-11-13 有过一次 `state=404` 被当成成功，线上挂了十分钟）。
+4. 部署脚本退出码 0 **不等于服务活着**——它打印的 `state=` 要自己看一眼（探的是 `/studio-api/health`），再单独 `curl -o /dev/null -w '%{http_code}' <host>/studio-api/health` 确认 200（2026-11-13 有过一次 `state=404` 被当成成功，线上挂了十分钟）。**别用 `/studio-api/state` 探活**：那份台账要求已登录的浏览器会话，裸 curl 会拿到 401。

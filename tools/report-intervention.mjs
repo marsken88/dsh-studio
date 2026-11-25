@@ -6,7 +6,7 @@ import { automationRate, requirementInterventions } from '../src/host/interventi
  * 不给文件就读 STUDIO_STATE 指向的文件；都没有就提示用法。 */
 const file = process.argv[2] ?? process.env.STUDIO_STATE ?? ''
 if (file === '') {
-  console.error('用法：node tools/report-intervention.mjs <state.json>\n       （用 curl /studio-api/state 存一份）')
+  console.error('用法：node tools/report-intervention.mjs <state.json>\n       （state.json 是 GET /studio-api/state 的响应。该接口要求已登录的浏览器会话，\n        裸 curl 会 401；脚本可用 tools/lib/studio-auth.mjs 换 cookie 再取）')
   process.exit(2)
 }
 

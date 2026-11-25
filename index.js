@@ -28,7 +28,7 @@ export const inject = ['tools', 'systemPrompt']
 
 
 import { sanitizeProjectFolders, ACCESS_ROLE_LABEL, ACCESS_ROLES, ADMIN_ROUTES, ARTIFACT_KINDS, ARTIFACT_STATUS, CASE_HTTP_METHODS, CASE_PRIORITIES, CASE_RESULTS, CASE_TYPE_LABEL, CASE_TYPES, cleanId, CODE_PREFIX, CODING_FILE_CHANGES, CODING_REVIEW_STATUS, codingSummary, COLUMN_STRATEGIES, DEFAULT_ROLES, defaultColumns, defaultConfig, defaultDeployEnvs, defaultTemplates, DEPLOY_ENV_KINDS, FALLBACK_AGENT_MODEL, hashLocalPassword, ISOLATION_MODES, LEGACY_BLOCKED_STATUS, LEVEL_RANK, LOCAL_DEFAULT_PASSWORD, mergeCoding, mergeConfig, mergeSection, nextRequirementCode, nextTaskCode, normalizePatch, normalizeStrategy, publicArtifact, publicCases, publicChecklist, publicComments, PRIORITIES, ROLE_LABELS, canonicalAuthor, RELEASE_STATUSES, RELEASE_STATUS_LABEL, REQ_DOC_KIND_LABEL, REQ_DOC_KINDS, REQ_DOC_STATUS, REQ_REVIEW_LABEL, REQ_REVIEW_STATUS, REQ_STATUS_LABEL, REQ_STATUSES, ROLE_IDS, ROLE_LEVEL, SANDBOX_MODES, sanitizeAccess, sanitizeAllowHosts, sanitizeArtifact, sanitizeArtifacts, sanitizeBaseline, sanitizeBots, sanitizeBugSource, sanitizeCase, sanitizeCaseHttp, sanitizeCaseRun, sanitizeCases, sanitizeChangedFile, sanitizeChangedFiles, sanitizeChecklist, sanitizeChecklistItem, sanitizeCaseGate, sanitizeCoding, sanitizeColumns, sanitizeCommit, sanitizeCommits, sanitizeCosts, sanitizeDeployEnvs, sanitizeEnvs, sanitizeExperts, sanitizeIterations, sanitizeLdap, sanitizeLocalAuth, sanitizeProjects, sanitizeReqDoc, sanitizeReqDocs, sanitizeRelease, sanitizeRequirement, sanitizeRequirementChange, sanitizeRequirementGate, sanitizeRequirementHistory, sanitizeRequirementPoint, sanitizeRequirementPoints, sanitizeRequirementPool, sanitizeRequirementQuestions, sanitizeRequirementReview, sanitizeRequirements, sanitizeReviewGate, sanitizeServices, sanitizeSla, sanitizeTeams, sanitizeTemplates, sanitizeTesting, sanitizeTestRun, sanitizeTestRuns, sanitizeUsers, sanitizeWorkProjects, seedExperts, SEVERITIES, STATUS_IDS, STATUS_SET, STATUSES, TASK_TYPES, text, verifyLocalPassword, worktreeRoot } from './src/host/domain.js'
-import { accessLevelFor, checkAccess, isCrossSiteRequest, isLoopbackRequest, needsConfirm, needsLocalSource, READ_ONLY_POST_ROUTES } from './src/host/access.js'
+import { accessLevelFor, checkAccess, isCrossSiteRequest, isLoopbackRequest, needsConfirm, needsLocalSource, READ_ONLY_POST_ROUTES, trustOutcomeFor } from './src/host/access.js'
 import { Dispatcher, RUN_LOG, attachRunLog, claimDispatchLock, clearAgentFailure, configureDispatcher, noteAgentFailure, parseMentions, runSummary } from './src/host/dispatcher.js'
 import { worktreeBaseFor } from './src/host/dispatch-cwd.js'
 import { mirrorCards } from './src/host/bitable.js'
@@ -2209,7 +2209,7 @@ function registerRoutes(webCtx, store, ctx, getDispatcher = () => undefined) {
         /* /auth/ldap/test 从常开名单里拿掉：它会用**已存储的 LDAP 服务账号口令**
            向调用方给的地址做 simple bind，匿名可调等于把域口令明文送到任意主机。
            导出的两个 CSV 也拿掉（handler 自己已有会话校验，留着这层等于白名单绕过）。 */
-        const openRoutes = new Set(['/intake', '/intake/requirement', '/intake/status', '/intake/query', '/intake/mine', '/intake/mine/query', '/auth/login', '/auth/me', '/auth/logout', '/auth/password', '/state', '/'])
+        const openRoutes = new Set(['/intake', '/intake/requirement', '/intake/status', '/intake/query', '/intake/mine', '/intake/mine/query', '/auth/login', '/auth/me', '/auth/logout', '/auth/password', '/health', '/state', '/'])
         const session = sessionOf(req, configNow)
         if (session !== null) {
           req.studioActor = String(session.user.name ?? session.user.id ?? '').slice(0, 40)
@@ -2227,6 +2227,9 @@ function registerRoutes(webCtx, store, ctx, getDispatcher = () => undefined) {
       }
 
       // /state 在 routes/state.js（带 ETag：上千张卡时轮询没变就 304，不再整包重传）。
+      /* 探活：部署脚本与运维只想知道「服务活着」，不该为此拿到一份台账，
+         也不该为了探活去换会话 cookie。刻意**只回 ok**，不带任何数据。 */
+      if (method === 'GET' && route === '/health') { sendJson(res, 200, { ok: true }); return }
       if (method === 'GET' && (route === '/' || route === '/state')) { handleStateRoute({ method, route, req, res, store }); return }
       if (await handleAuthRoute({ method, route, req, res, store, url })) return
       if (method === 'GET' && route === '/agents/probe') {
@@ -2286,6 +2289,15 @@ function registerRoutes(webCtx, store, ctx, getDispatcher = () => undefined) {
     const url = new URL(req.url ?? '/', 'http://studio.local')
     const route = url.pathname.replace(/^\/studio-api/, '') || '/'
     const method = (req.method ?? 'GET').toUpperCase()
+    /* 宿主信任栅栏放在最前面：Host/Origin 不对、或没有已认证的浏览器会话的请求，
+       连审计都不该记（记审计要写库，等于让陌生人的每次探测都冲掉所有客户端的 ETag）。
+       这一层以前完全没有：`/studio-api` 挂在宿主端口上，谁连得上谁就能调，
+       浏览器里一个网页也能借 DNS rebinding 打进来（awesome-dsh-plugin 的条目就写着这条）。 */
+    const distrust = trustOutcomeFor(ctx?.get?.('connection'), req, route)
+    if (distrust !== null) {
+      sendJson(res, distrust.status, { ok: false, code: distrust.code, error: distrust.error })
+      return
+    }
     const resolved = resolveActor(req, store.snapshot().config)
     if (resolved !== '') req.studioActor = resolved
     const operator = operatorOf(req)
