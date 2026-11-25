@@ -6,12 +6,12 @@
 
 | 项 | 值 |
 | --- | --- |
-| dsh-studio | `package.json` `version: 0.12.2` |
+| dsh-studio | `package.json` `version: 0.13.0` |
 | DeepSeek Harness | `0.2.2-rc.1`（`dsh --version`） |
 | Node | `v24.22.2`（Linux 目标机）；本机 Windows `v24.19.0` |
 | 目标系统 | Ubuntu 24.04，`dsh web` 监听 `18080`，nginx `:80` 反代并注入 `dsh-auth-*` cookie |
 | 插件安装方式 | npm：`dsh plugin --profile web add @marsken/dsh-studio`；本地开发：`add link:~/dsh-studio`（profile `web`） |
-| 验证范围 | 0.12.2：**本机 Windows desktop 活实例（代码同版）+ CI**（492 单测 / 48 项页面与 AX 探针 / `probe:panel` 34 项 / `verify:tiers` 32 项）；**真机核对**：重启后 `~/.dsh/storages/workspace.json` 里「Studio 工作区」`sessionIds` 0→6、「（自检）四棒接力」1→4（3 个 `studio-*`），侧栏里这 9 个派单会话出现在各自工作区下、「未分组」分组消失；**目标机已部署 0.12.2**（`tools/deploy.mjs --key/密码`，`version=0.12.2 restart=sudo active=active files=88 state=200`，直连 `/studio-api/state` 200 且 revision 25390，`dispatcher.js` 里含 `healWorkspaceMembership`） |
+| 验证范围 | 0.13.0：**目标机部署 + CI**（515 单测 / 48 项页面与 AX 探针 / `probe:panel` 89 项 / `audit:ui` 30 模块 0 违规 / `review:layout` 0 溢出 / mobile 375 无错误）；**目标机已部署 0.13.0**（`tools/deploy.mjs`，`restart=sudo active=active files=90 state=200`，直连 `/studio-api/state` 200；`package.json` version 0.13.0） |
 | 兼容声明 | `engines.dsh: ">=0.2.2-rc.1"`、`dsh.compatibility.dshReleases: { "0.2.2-rc.1+": "compatible" }` |
 
 > 结论：只在 **0.2.2-rc.1** 上做过端到端验证。0.2.2 正式版、以及 `<0.2.2` 均未验证。
