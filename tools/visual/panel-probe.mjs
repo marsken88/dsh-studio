@@ -880,6 +880,20 @@ try {
   }
   check('⑥b 命令面板能打开并搜到卡', paletteOpen === true && paletteHit !== null && paletteHit.count > 0 && paletteHit.text.some(text => text.includes('BUG-041')), JSON.stringify(paletteHit))
 
+  /* ⑥d 效能页分区：总览 / 交付效率 / AI 与成本 / 上下文 */
+  await clickExact('效能')
+  await new Promise(resolve => setTimeout(resolve, 1500))
+  const analyticsTabs = await page.evaluate(() => [...document.querySelectorAll('[data-analytics-tab]')].map(node => String(node.textContent ?? '').trim()))
+  const focusBanner = await page.evaluate(() => document.querySelector('[data-analytics-focus]')?.getAttribute('data-analytics-focus') ?? '')
+  check('⑥d 效能页有 4 个分区页签', analyticsTabs.length === 4 && analyticsTabs.includes('总览') && analyticsTabs.includes('上下文'), JSON.stringify(analyticsTabs))
+  check('⑥d 效能页顶部有「现在最该看」结论条', focusBanner === 'warn' || focusBanner === 'ok', focusBanner)
+  await page.evaluate(() => document.querySelector('[data-analytics-tab="ai"]')?.click())
+  await new Promise(resolve => setTimeout(resolve, 500))
+  const analyticsVisible = await page.evaluate(() => [...new Set([...document.querySelectorAll('[data-analytics-panel]')].filter(node => getComputedStyle(node).display !== 'none').map(node => node.getAttribute('data-analytics-panel')))])
+  check('⑥d 切「AI 与成本」只显示对应分区', analyticsVisible.length === 1 && analyticsVisible[0] === 'ai', JSON.stringify(analyticsVisible))
+  await page.evaluate(() => document.querySelector('[data-analytics-tab="overview"]')?.click())
+  await new Promise(resolve => setTimeout(resolve, 300))
+
   /* ⑦ 可选：打开一张**真卡**（已经跑过研发、有 worktree）看逐文件 diff。
      探针自己造的卡没有仓库，只能验空态；真 diff 的渲染要靠这条（STUDIO_DIFF_CARD=标题片段）。 */
   const diffCardTitle = String(process.env.STUDIO_DIFF_CARD ?? '').trim()

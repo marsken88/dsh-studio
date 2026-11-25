@@ -35,6 +35,8 @@ const KPI_GRID = 'grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-5'
 export function AnalyticsPage({ state, onOpenTask, onFixPrices }) {
   const { h, React, api } = client()
   const [days, setDays] = React.useState(30)
+  /* 效能页分区：总览 / 交付效率 / AI 与成本 / 上下文。只切显示，数据仍一次加载。 */
+  const [pane, setPane] = React.useState('overview')
   const [project, setProject] = React.useState('')
   const [data, setData] = React.useState(null)
   const [error, setError] = React.useState(null)
@@ -218,10 +220,10 @@ export function AnalyticsPage({ state, onOpenTask, onFixPrices }) {
     const body = contexts === null ? h('div', { className: HINT }, '正在读会话日志…')
       : rows.length === 0 ? h('div', { className: HINT }, '还没有专家会话记录。')
         : h('div', null, kpis, rows.map(renderContextRow))
-    return h('div', { className: `${PANEL} mt-3` }, head, h('div', { className: PANEL_BODY }, body))
+    return h('div', { className: `${PANEL} mt-3`, 'data-analytics-panel': 'context' }, head, h('div', { className: PANEL_BODY }, body))
   }
 
-  return h('div', { className: PAGE, 'data-analytics-page': '' },
+  return h('div', { className: PAGE, 'data-analytics-page': '', 'data-analytics-pane': pane },
     secondaryError === null ? null : h('div', { className: 'mb-2 text-caption-1-regular text-text-error-primary' }, `部分数据没加载出来：${secondaryError}（负载 / 燃尽 / 成本 / 质量可能是空的或旧的）`),
     h('div', { className: ROW },
       h('span', { className: HINT }, `统计口径：最近 ${data.days} 天 · ${data.scope.tasks} 张卡（${data.scope.done} 张已完成）`),
@@ -236,11 +238,42 @@ export function AnalyticsPage({ state, onOpenTask, onFixPrices }) {
         onChange: event => setDays(Number(event.target.value)),
       }),
     ),
-    h('div', { className: SECTION },
+    (() => {
+      const tabs = [
+        { id: 'overview', label: '总览' },
+        { id: 'efficiency', label: '交付效率' },
+        { id: 'ai', label: 'AI 与成本' },
+        { id: 'context', label: '上下文' },
+      ]
+      return h('div', { className: 'flex flex-wrap items-center gap-1 border-b border-separator-border pb-2', role: 'tablist', 'aria-label': '效能分区' },
+        tabs.map(tab => h(Button, {
+          key: tab.id, role: 'tab', 'aria-selected': pane === tab.id ? 'true' : 'false', 'data-analytics-tab': tab.id,
+          variant: pane === tab.id ? 'secondary' : 'ghost', size: 'sm',
+          onClick: () => setPane(tab.id),
+        }, tab.label)))
+    })(),
+    (() => {
+      /* 先把「现在最该看什么」顶到最上面：指标很多，但不该让人自己在一屏 KPI 里找红字。 */
+      const focus = []
+      const coverage = data.cases?.rate ?? null
+      if (coverage !== null && coverage < 0.6) focus.push('用例可执行覆盖 ' + pct(coverage) + '（目标 ≥60%）')
+      if (data.rework?.rate > 0.3) focus.push('返工率 ' + pct(data.rework.rate) + '（>30%）')
+      if (gate.rate !== null && (gate.rate < 0.3 || gate.rate > 0.9)) focus.push('门禁一次通过率 ' + pct(gate.rate) + '（目标 40–70%）')
+      if (au.rate !== null && au.rate < 0.5) focus.push('自动化率 ' + pct(au.rate) + '（已交付需求里零人工介入偏少）')
+      if (dispatchData.weeks.length > 0 && dispatchData.latest < dispatchData.target) focus.push('派单周活 ' + dispatchData.latest + ' 张（目标 ≥' + dispatchData.target + '）')
+      return h('div', {
+        'data-analytics-focus': focus.length > 0 ? 'warn' : 'ok',
+        className: 'flex min-w-0 flex-wrap items-baseline gap-2 rounded-xl border px-3 py-2 text-body-2-regular '
+          + (focus.length > 0 ? 'border-status-yellow-text/40 bg-status-yellow-background/40 text-text-primary' : 'border-separator-border bg-background-secondary-default text-text-secondary'),
+      },
+        h('b', { className: 'text-body-2-semibold' }, focus.length > 0 ? '现在最该看' : '关键指标'),
+        h('span', null, focus.length > 0 ? focus.join(' · ') : '没有触发告警线：门禁、返工、覆盖、自动化率、派单周活都在目标区间内。'))
+    })(),
+    h('div', { className: SECTION, 'data-analytics-panel': 'overview' },
       '质量',
       h('span', { className: HINT }, '产品定义第 4 节那五条可断言的指标：门禁一次通过率、自动化率、需求交付时长、用例覆盖强度、派单周活'),
     ),
-    h('div', { className: KPI_GRID },
+    h('div', { className: KPI_GRID, 'data-analytics-panel': 'overview' },
       kpi('门禁一次通过率', gate.rate === null ? '—' : pct(gate.rate), gate.cards === 0 ? '还没有走到验收的卡' : `${gate.firstPass}/${gate.cards} 张第一次进待验收就完成 · 目标 40–70%`, gate.rate !== null && (gate.rate < 0.3 || gate.rate > 0.9)),
       kpi('自动化率', au.rate === null ? '—' : pct(au.rate), au.rate === null ? '还没有已交付的需求' : `零人工介入 ${au.untouched}/${au.delivered} 条已交付需求`),
       kpi('需求交付时长', delivery.medianDays === null ? '—' : fmtSpan(delivery.medianDays), delivery.count === 0 ? '还没有签过字的需求' : `中位 ${delivery.count} 条需求 · 创建到签字`),
@@ -260,7 +293,7 @@ export function AnalyticsPage({ state, onOpenTask, onFixPrices }) {
       const cases = data.cases ?? {}
       const rows = Array.isArray(cases.byCard) ? cases.byCard : []
       if (rows.length === 0) return null
-      return h('div', { className: `${PANEL} mt-3` },
+      return h('div', { className: `${PANEL} mt-3`, 'data-analytics-panel': 'overview' },
         h('div', { className: PANEL_HEAD },
           '用例缺口',
           h('span', { className: HINT, style: { marginLeft: 'auto' } }, '点一行跳到那张卡去补可执行断言')),
@@ -279,14 +312,14 @@ export function AnalyticsPage({ state, onOpenTask, onFixPrices }) {
         ),
       )
     })(),
-    h('div', { className: SECTION }, h('span', {}, '其它读数（不进门槛，供参考）')),
-    h('div', { className: KPI_GRID },
+    h('div', { className: SECTION, 'data-analytics-panel': 'overview' }, h('span', {}, '其它读数（不进门槛，供参考）')),
+    h('div', { className: KPI_GRID, 'data-analytics-panel': 'overview' },
       kpi('一次通过率', pct(data.rework.firstPassRate), '完成的卡里，从没被退回过的比例', data.rework.firstPassRate < 0.6),
       kpi('返工率', pct(data.rework.rate), `${data.rework.reworked}/${data.rework.moved} 张卡倒退过`, data.rework.rate > 0.3),
       kpi('中位周期', fmtSpan(data.cycle.medianDays), `平均 ${fmtSpan(data.cycle.avgDays)} · P90 ${fmtSpan(data.cycle.p90Days)}`),
       kpi('AI 交付物采纳率', pct(data.ai.acceptedRate), `${data.ai.accepted}/${data.ai.artifactsAi} 件已被验收 · 占全部交付物 ${pct(data.ai.aiShare)}`),
     ),
-    h('div', { className: `${PANEL} mt-3` },
+    h('div', { className: `${PANEL} mt-3`, 'data-analytics-panel': 'overview' },
       h('div', { className: PANEL_HEAD },
         '自动化率',
         h('span', { className: HINT }, '已交付需求里，全程没有人工介入（评论/换列/签字）的占比')),
@@ -301,7 +334,7 @@ export function AnalyticsPage({ state, onOpenTask, onFixPrices }) {
             ...(au.perRequirement ?? []).slice(0, 6).map(item => h('div', { key: item.id, className: FOOT, title: item.interventions === 0 ? '全程没人工介入' : '有人工介入点' },
               `${item.code || item.id} · 卡 ${item.tasks} 张 · 人工介入 ${item.interventions} 次${item.interventions === 0 ? '（零介入）' : ''}`)),
           ])),
-    h('div', { className: `${PANEL} mt-3` },
+    h('div', { className: `${PANEL} mt-3`, 'data-analytics-panel': 'overview' },
       h('div', { className: PANEL_HEAD },
         '交付节奏',
         h('span', { className: HINT }, 'AI 每周碰到几张卡 · 需求从创建到签字花多久 · 验收第一次就过多少')),
@@ -318,7 +351,7 @@ export function AnalyticsPage({ state, onOpenTask, onFixPrices }) {
       )),
     ov.total === 0
       ? null
-      : h('div', { className: `${PANEL} mt-3` },
+      : h('div', { className: `${PANEL} mt-3`, 'data-analytics-panel': 'overview' },
         h('div', { className: PANEL_HEAD },
           `${ov.overLimit ? '超限 · ' : ''}强制放行 ${ov.total} 次`,
           h('span', { className: HINT }, `卡 ${ov.cards} · 需求 ${ov.requirements}${ov.noReason > 0 ? ` · ${ov.noReason} 次没写原因` : ''}（区间内）`)),
@@ -336,11 +369,11 @@ export function AnalyticsPage({ state, onOpenTask, onFixPrices }) {
             title: item.reason === '' ? '这次没写原因' : item.reason,
           }, `${item.kind === 'card' ? '卡' : '需求'} ${item.code || item.id} ${item.title} · ${item.by || '（没记签名人）'} · ${fmtTime(item.at)} — ${item.reason === '' ? '（没写原因）' : item.reason}`)),
         )),
-    h('div', { className: SECTION },
+    h('div', { className: SECTION, 'data-analytics-panel': 'efficiency' },
       '流程与产能',
       h('span', { className: HINT }, '完成的卡各花了多久 · 时间都卡在哪一列 · 最近每天完成几张'),
     ),
-    h('div', { className: GRID },
+    h('div', { className: GRID, 'data-analytics-panel': 'efficiency' },
       h('div', { className: 'xl:col-span-4', style: { display: 'grid', gap: 12, gridTemplateRows: 'auto 1fr', alignContent: 'stretch' } },
         h(ChartCard, {
           title: '周期分布',
@@ -386,11 +419,11 @@ export function AnalyticsPage({ state, onOpenTask, onFixPrices }) {
         ),
       ),
     ),
-    h('div', { className: SECTION },
+    h('div', { className: SECTION, 'data-analytics-panel': 'ai' },
       '交付、成本与返工',
       h('span', { className: HINT }, 'AI 交的东西被验收多少 · 谁手上压得最多 · 派单花了多少 · 哪些卡来回折腾'),
     ),
-    h('div', { className: GRID },
+    h('div', { className: GRID, 'data-analytics-panel': 'ai' },
       h('div', { className: `${PANEL} xl:col-span-4` },
         h('div', { className: PANEL_HEAD }, '按专家看质量', h('span', { className: HINT }, '派单量来自运行日志（内存最近 300 条）')),
         h('div', { className: PANEL_BODY },
