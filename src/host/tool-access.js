@@ -25,6 +25,8 @@ export const TOOL_ACCESS = {
   studio_task_create: 'write',
   studio_task_update: 'write',
   studio_task_comment: 'write',
+  /** 把卡当场派给某人/团/角色位：会起会话（花 token），按写操作记账。 */
+  studio_task_mention: 'write',
   studio_task_block: 'write',
   studio_task_unblock: 'write',
   studio_task_check: 'write',

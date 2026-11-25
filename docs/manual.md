@@ -143,11 +143,11 @@ studio_task_check          { id, itemId, note }         // 清单逐项勾，附
 - **没登记也不会空着**：卡进「待评审」时，研发若没调 `studio_task_coding`，平台会从 worktree 的 `git log` / `git diff --numstat` 补一条执行记录（`agent = git 自动采集（研发没登记执行记录）`）并留一条评论；研发自报的字段一个都不覆盖，只补空着的部分。
 - **评审意见进讨论区**：`studio_task_coding action=review`（agent 走工具）与面板上的「评审通过 / 要求修改」两条路都会**自动补一条评论**（`代码评审 · 通过（评审人）` + 意见正文），所以讨论区里一定看得到架构的意见；不再只躺在 `coding.review.note` 里。意见里 @ 开发工程师 仍会照常派单。每条评论右上角有「编辑 / 删除」：编辑就地改成 textarea 保存，删除先确认；改删都留历史。
 
-### 5.4 工具清单（53 个，按用途分组）
+### 5.4 工具清单（54 个，按用途分组）
 
 | 组 | 工具 |
 | --- | --- |
-| 看板/卡 | `studio_task_list` `studio_task_get` `studio_task_create` `studio_task_update` `studio_task_block` `studio_task_unblock` `studio_task_comment` `studio_task_check` |
+| 看板/卡 | `studio_task_list` `studio_task_get` `studio_task_create` `studio_task_update` `studio_task_block` `studio_task_unblock` `studio_task_comment` `studio_task_check` `studio_task_mention`（按名字/id 把卡当场派给专家/团/角色位，带开场白——不用写评论碰运气） |
 | 会话（无卡） | `studio_session_start`（选专家或专家团，说一句想聊什么就开聊：不建卡、不派单、不写看板评论，transcript 是普通会话） |
 | 需求 | `studio_requirement_list` `studio_requirement_get` `studio_requirement_save` `studio_requirement_review` `studio_requirement_split` `studio_requirement_signoff` `studio_requirement_folder` `studio_requirement_questions` `studio_requirement_comment` `studio_requirement_doc` `studio_requirement_requester` `studio_requirement_assist`（需求对话澄清，和模型聊；只读，与面板的「需求对话澄清」同一份实现） |
 | 设计/交付物 | `studio_task_design` `studio_task_artifact` |
@@ -277,6 +277,9 @@ studio_task_check          { id, itemId, note }         // 清单逐项勾，附
 | 浏览器打开面板正常，但脚本/探针全 401 | 脚本有没有换 cookie | 浏览器靠 `?token=` 那条 URL 自动拿到 cookie，脚本没有；按上一条用启动 token 换。换不到会明确报「换不到会话 cookie（HTTP 401）」 |
 | 改了代码重启没生效 | `npm run sync:profile` 的版本输出 | 确认 profile 版本 = 仓库版本；前端改动还要 `cd web && pnpm build` |
 | 派单没反应/没留言 | 会话日志 `turn/end`、集成健康 | 常见是无可用模型通道（503）；先看「集成健康」 |
+| 看板一直显示「处理中」，但「集成健康 → 派单运行状态」的 running 是空的 | 这张卡的 `dispatch`（`/state` 里看 `state/status/at`） | `state=running` 但会话早就没了（进程重启/会话崩）时，tick 每轮会按「真会话表优先、10 分钟超时兜底」判一次：挂死的印记自动收回（清 `status`、历史里写「派单印记已收回…」），下一轮重新派。历史里没有这句，说明还没超时或会话其实还活着 |
+| 评论里 @ 了人却没派单 | 是不是全角 ＠、名字是不是全名、是不是写在代码块里 | `@` 与 `＠` 都认；必须写**全名或专家 id**（`@架构` 不算）；代码块与行内代码里的 @ 一律不算（那是引用）。现在 `@dev` 也不会误命中 `@developer`。要稳定派活可以直接用工具 `studio_task_mention` 或卡详情的「派给谁」下拉 |
+| 想让另一个专家接手，但不想写评论 | 卡详情「AI 处理 → 派给谁」 | 下拉现在有**专家与专家团**（团 = 团长接活），下面还有「开场白」；脚本/agent 用 `POST /mention {taskId, kind, id, instruction}` 或工具 `studio_task_mention`。`kind` 可以是 `expert` / `team` / `role`（角色位），不认识的目标会 400 |
 | 改了列负责人，5 秒内一批老卡自己开跑 | 设置 → 列的负责人；`/columns/save` 的返回值 | **这是设计如此**：列 owner 一旦能解析，下一轮 tick 就把存量卡派出去。保存前面板会先 `dryRun` 算出「会让哪几张卡被派给谁」并要求确认，返回值里也带 `affected.cards[].willDispatch` 与 `warning`。只想预览不落库传 `dryRun:true`；不想让某张卡被带走就先把它标阻塞或换列 |
 | 专家的 role 存进去是空的，永远选不到它 | `config.roles` 里有没有这个岗位（`GET /studio-api/state` 的 `roles`） | 以前白名单写死四岗，`role:'ops'` 之类的自定义岗位会被静默清空。现在：默认白名单是 产品/架构/研发/测试/**运营**，在「设置 → 专家 → 角色位（岗位白名单）」里就能加财务等岗位（等价 `POST /config {roles:[…]}`）；`/experts/save` 传不认识的 role 直接 400 并列出可选值。老数据里被清空过的专家，到「设置 → 专家」重选角色位保存即可。删角色前会检查「还有专家或列负责人在用它」 |
 | `/agents/run` 回「这一列还没人负责」，可列明明配了人 | 传的 `expert` 是专家 id 还是专家团 id；卡 id 对不对 | 以前三种不同的错（卡不存在 / 专家 id 写错 / 传的是团）共用这一句文案。现在分开报：卡不存在、目标不存在（或已停用、团里没有成员）、这一列没人负责；`expert` 传专家团 id 也认（派给团长）。要「不建卡先聊」用 `/agents/chat` 或 `studio_session_start` |

@@ -9,7 +9,7 @@ import {
   buildDashboard, commentTask, ensureReqFolder, requirementMatrix, requirementProgress, requirementRollup,
   mutateReqDoc, runSuite, runTaskCases, childSignoffBlockers, runTaskQuality, saveRequirement, syncArtifact, syncRequirementArtifacts, taskExitGate, updateTask,
 } from './executor.js'
-import { parseMentions, runSummary } from './dispatcher.js'
+import { parseMentions, resolveMentionTarget, runSummary } from './dispatcher.js'
 import { publishNoteMentions } from './mention-note.js'
 import { mineSkillFromCard } from './skill-mine.js'
 import { removeTaskComment, updateTaskComment } from './comments.js'
@@ -60,7 +60,7 @@ export function configureToolHost(services) {
   host = { ...host, ...(services ?? {}) }
 }
 
-/** 注册 53 个 studio_* 工具。 */
+/** 注册 54 个 studio_* 工具。 */
 export function registerTools(ctx, store) {
   const disposers = []
   /* 写操作的返回值要能对账：读回**库里那份**，而不是回显入参。
@@ -1163,6 +1163,31 @@ export function registerTools(ctx, store) {
     async execute(args) {
       const task = await updateTask(store, args.id, { blocked: false, by: 'agent' })
       return `已解除阻塞 ${task.id}：${task.title}`
+    },
+  }))
+
+  register(defineStudioTool({
+    name: 'studio_task_mention',
+    description: '把一张卡当场派给某位专家 / 某个专家团 / 某个角色位（等于在评论里 @ 对方，但不用写评论碰运气）。'
+      + 'target 接受名字或 id；kind 可限定 expert / team / role。instruction 是这次派活的开场白。'
+      + '注意：这仍是**派活**（工位提示词），不是「和专家开会话」——后者用 studio_session_start。',
+    parameters: {
+      id: { type: 'string', required: true, description: 'Task id.' },
+      target: { type: 'string', required: true, description: '专家名 / 专家 id / 专家团名 / 专家团 id（首位的 @ 会被忽略）' },
+      kind: { type: 'string', description: '限定目标类型：expert | team | role（省略 = 名字/id 匹配专家与专家团）' },
+      instruction: { type: 'string', description: '这次派活的开场白（会拼进提示词）' },
+    },
+    async execute(args) {
+      const dispatcher = host.getActiveDispatcher()
+      if (dispatcher === undefined) throw new Error('派单引擎还没就绪（刚启动时会有几秒），稍后再试')
+      const config = store.snapshot().config
+      const resolved = resolveMentionTarget(config, args.target, String(args.kind ?? ''))
+      if (resolved.error !== undefined) throw new Error(resolved.error)
+      const mention = resolved.mention
+      const instruction = String(args.instruction ?? '')
+      await dispatcher.dispatchMention(String(args.id ?? ''), mention, instruction)
+      const tail = instruction.trim() === '' ? '' : `，开场白：${instruction.trim().slice(0, 80)}`
+      return `已把 ${String(args.id ?? '')} 派给 ${resolved.label}（${mention.kind}:${mention.id}）${tail}`
     },
   }))
 

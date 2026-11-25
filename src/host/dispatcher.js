@@ -1,7 +1,7 @@
 // ------------------------------------------------------------------ dispatcher
 import { DEFAULT_ROLES, FALLBACK_AGENT_MODEL, ROLE_IDS, SANDBOX_MODES, STATUSES, codingSummary, normalizeStrategy, worktreeRoot } from './domain.js'
 import { effectiveConcurrency } from './parallel-guard.js'
-import { abandonedRetry } from './dispatch-state.js'
+import { abandonedRetry, dispatchPhase } from './dispatch-state.js'
 import { driftNote, isModelDrift, sessionDirOf } from './model-drift.js'
 import { stripQuotedCode } from './mention-note.js'
 import { handoffBlock } from './handoff.js'
@@ -88,6 +88,33 @@ export function resolveOwner(config, owner, domain) {
 }
 
 /**
+ * 直接把「派给谁」解析成一个 mention 目标（不走 `@名字` 文本解析）。
+ * 给工具 studio_task_mention 用：agent 让另一位专家接手时，不必写评论碰运气（issue #148 评论第 1 条）。
+ * target 接受专家/专家团的名字或 id；kind 可以限定 expert / team / role。
+ */
+export function resolveMentionTarget(config, rawTarget, kind = '') {
+  const raw = String(rawTarget ?? '').trim().replace(/^[@＠]/u, '').trim()
+  const wantKind = String(kind ?? '').trim().toLowerCase()
+  if (raw === '') return { error: '没说派给谁：target 传专家名 / 专家 id / 专家团名 / 专家团 id' }
+  if (wantKind === 'role') {
+    const roles = Array.isArray(config?.roles) && config.roles.length > 0 ? config.roles : ROLE_IDS
+    if (!roles.includes(raw)) return { error: `角色「${raw}」不在 config.roles 里（可选：${roles.join(' / ')}）` }
+    return { mention: { kind: 'role', id: raw }, label: `角色位 ${raw}` }
+  }
+  const candidates = [
+    ...(config?.experts ?? []).filter(entry => entry.enabled !== false).map(entry => ({ kind: 'expert', id: entry.id, name: entry.name })),
+    ...(config?.teams ?? []).filter(entry => entry.enabled !== false).map(entry => ({ kind: 'team', id: entry.id, name: entry.name })),
+  ]
+  const pool = wantKind === '' ? candidates : candidates.filter(entry => entry.kind === wantKind)
+  const hit = pool.find(entry => entry.id === raw || entry.name === raw)
+  if (hit === undefined) {
+    const names = pool.slice(0, 12).map(entry => `${entry.name}（${entry.kind === 'team' ? '团' : '专家'} ${entry.id}）`).join(' / ')
+    return { error: `没有名字或 id 为「${raw}」的${wantKind === 'team' ? '专家团' : wantKind === 'expert' ? '专家' : '专家/专家团'}${names === '' ? '' : `；现有：${names}`}` }
+  }
+  return { mention: { kind: hit.kind, id: hit.id }, label: hit.kind === 'team' ? `专家团 · ${hit.name}` : hit.name }
+}
+
+/**
  * 无卡会话由谁接话：专家就是它本人；专家团默认团长，也可以用 `member` 指定团里的某一位
  * （issue #148：「和团队聊」实际上常常只想找团队里的某个人）。
  * 纯函数，路由 / 工具 / dispatcher 共用；解析不出就返回 error。
@@ -158,7 +185,7 @@ export function ownerFor(config, task, column, load, state) {
   const raw = config.columns?.[column.id]
   const domain = taskDomain(task, state)
   const candidates = columnCandidates(config, column, domain)
-  let resolved = pickFromPool(candidates, raw, task, column, load)
+  let resolved = pickFromPool(candidates, raw, task, column, load, domain)
   // 卡片标了业务领域、而挑出来的这位没有领域归属时，去全员里找同领域、角色位对得上的。
   if (domain.length > 0 && resolved?.kind !== 'team' && (resolved === undefined || (resolved.expert?.domain ?? '') === '')) {
     const sameDomain = (config.experts ?? []).filter(entry => entry.enabled !== false && entry.domain === domain)
@@ -208,7 +235,7 @@ export function columnCandidates(config, column, domain) {
 }
 
 /** 按策略从候选池里挑一个：轮询看手上活多少，匹配看专长，或交给专家团团长。 */
-export function pickFromPool(candidates, raw, task, column, load) {
+export function pickFromPool(candidates, raw, task, column, load, domain = '') {
   if (candidates.length === 0) return undefined
   if (candidates.length === 1) return candidates[0]
   const strategy = normalizeStrategy(raw?.strategy)
@@ -217,7 +244,8 @@ export function pickFromPool(candidates, raw, task, column, load) {
     return team ?? leastLoaded(candidates, load)
   }
   if (strategy === 'best_match') {
-    const scored = candidates.map(entry => ({ entry, score: matchScore(entry, task, column) }))
+    // 打分按「有效领域」（含从需求继承的那一份），与 columnCandidates 展开候选池的口径一致（issue #155）。
+    const scored = candidates.map(entry => ({ entry, score: matchScore(entry, task, column, domain) }))
     const top = Math.max(...scored.map(item => item.score))
     return leastLoaded(scored.filter(item => item.score === top).map(item => item.entry), load)
   }
@@ -235,11 +263,14 @@ export function leastLoaded(candidates, load) {
   return best
 }
 
-export function matchScore(entry, task, column) {
+export function matchScore(entry, task, column, domain = '') {
   const expert = entry.expert
   if (expert === undefined) return 0
   let score = 0
-  if (expert.domain && task.domain && expert.domain === task.domain) score += 50
+  // domain 是「有效领域」：调用方传了就信它（通常是 taskDomain 的结果，含需求继承），
+  // 不传才退回卡自己的 domain（老调用方/tests 兼容）。
+  const wanted = String(domain ?? '').trim() || String(task?.domain ?? '').trim()
+  if (expert.domain && wanted && expert.domain === wanted) score += 50
   if ((column?.role ?? '') !== '' && (expert.role ?? '') === column.role) score += 20
   const text = `${task.title ?? ''} ${task.requirement ?? ''}`.toLowerCase()
   if (text.trim() !== '') {
@@ -260,15 +291,39 @@ export function parseMentions(body, config) {
      真机踩过——开发工程师在评论里转述「@开发工程师」的用法，平台又派了一轮单。 */
   const source = stripQuotedCode(body)
   if (source.length === 0) return []
+  /* 全角 ＠ → 半角 @：中文输入法默认打出来的就是全角，以前静默失效（issue #156）。 */
+  const text = source.replace(/\uFF20/g, '@')
   const candidates = [
     ...(config.experts ?? []).filter(expert => expert.enabled).map(expert => ({ kind: 'expert', id: expert.id, name: expert.name })),
     ...(config.teams ?? []).filter(team => team.enabled).map(team => ({ kind: 'team', id: team.id, name: team.name })),
   ].sort((a, b) => b.name.length - a.name.length)
+  /** 这段文字里这个候选人的第一次命中（不与已命中的更长候选重叠）。 */
+  const hitOf = (needle, used) => {
+    const token = String(needle ?? '')
+    if (token.length === 0) return null
+    const ascii = /^[A-Za-z0-9_-]+$/.test(token)
+    let from = 0
+    while (from <= text.length) {
+      const at = text.indexOf(token, from)
+      if (at < 0) return null
+      const end = at + token.length
+      // @dev 不能命中 @developer：ASCII 名字/ID 后面紧跟字母数字时不算命中。
+      const next = text.charAt(end)
+      const boundaryOk = !ascii || next === '' || !/[A-Za-z0-9_-]/.test(next)
+      const overlap = used.some(([start, stop]) => at < stop && end > start)
+      if (boundaryOk && !overlap) return [at, end]
+      from = at + 1
+    }
+    return null
+  }
   const hits = []
   const seen = new Set()
+  const used = []
   for (const candidate of candidates) {
-    if (candidate.name.length === 0) continue
-    if (!source.includes(`@${candidate.name}`) && !source.includes(`@${candidate.id}`)) continue
+    if (candidate.name.length === 0 && candidate.id.length === 0) continue
+    const spot = hitOf(`@${candidate.name}`, used) ?? hitOf(`@${candidate.id}`, used)
+    if (spot === null) continue
+    used.push(spot)
     const key = `${candidate.kind}:${candidate.id}`
     if (seen.has(key)) continue
     seen.add(key)
@@ -737,7 +792,20 @@ export class Dispatcher {
       if (ownerFor(state.config, task, column, this.loadByExpert(), state) === undefined) continue
       // One hand-off per (card, column): after that the card waits for a human
       // or for the agent to move it on. "马上处理" is the way to run it again.
-      if (task.dispatch?.status === task.status) continue
+      if (task.dispatch?.status === task.status) {
+        /* 但「印记说在跑、会话其实早就没了」必须先收回来（issue #157）：
+           否则这张卡既不会重派、也不会给任何提示，看板一直显示「处理中」。
+           判据与工作台的「停摆」同一份（dispatch-state.js）：真会话表优先，其次 10 分钟超时。 */
+        const phase = dispatchPhase(task, { isLive: sessionId => this.hasLiveSession(sessionId) })
+        if (phase === 'stalled') {
+          const minutes = Math.max(1, Math.round((Date.now() - (Number(task.dispatch.at) || Date.now())) / 60000))
+          const retry = abandonedRetry(task.dispatch)
+          await markDispatch(this.store, task.id, { ...task.dispatch, state: 'stopped', status: '', at: Date.now(), attempts: retry.attempts })
+          await this.appendHistory(task.id, `派单印记已收回：会话 ${String(task.dispatch.sessionId ?? '')} 约 ${minutes} 分钟前就没有在跑了，下一轮会重新派单`)
+          this.note(`reclaim stale dispatch ${task.id}（${minutes} 分钟）`)
+        }
+        continue
+      }
       const key = `${task.id}:${task.status}`
       await this.launch(task, column, key).then(async () => {
         // 派单成功：把失败计数清掉，避免历史失败影响下一次判断。
@@ -884,6 +952,27 @@ export class Dispatcher {
     })
     this.deliveryVia = 'followup'
     return 'followup'
+  }
+
+  /** 会话是否真的还活着：先看本进程的槽位，再问宿主（issue #157 的判定靠它）。 */
+  hasLiveSession(sessionId) {
+    const id = String(sessionId ?? '')
+    if (id === '') return false
+    for (const info of this.running.values()) if (String(info.sessionId ?? '') === id) return true
+    try { return this.ctx?.agents?.get?.(id) !== undefined } catch { return false }
+  }
+
+  /** 卡片历史里补一句（列没变，但要让后翻的人看到发生过什么）。 */
+  async appendHistory(taskId, note) {
+    const text = String(note ?? '').slice(0, 400)
+    if (text === '') return
+    try {
+      await this.store.mutate(state => {
+        const found = state.tasks.find(item => item.id === taskId)
+        if (found === undefined) return
+        found.history = [...(found.history ?? []), { at: Date.now(), status: found.status, by: '系统', note: text }]
+      })
+    } catch { /* 历史写不进去不影响派单决策 */ }
   }
 
   /** 每个专家手上正在跑几张卡——轮询策略靠它挑人。 */

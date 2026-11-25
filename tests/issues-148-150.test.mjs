@@ -17,7 +17,10 @@ import { buildRoster } from '../web/src/studio/roster.js'
 import { configureToolHost, registerTools } from '../src/host/tools.js'
 import { toolAccessTable } from '../src/host/tool-access.js'
 import { describeOwner, dispatchPreview, previewWarning } from '../src/host/column-preview.js'
-import { Dispatcher, buildChatPrompt, resolveChatSpeaker, resolveDispatchTarget, resolveOwner } from '../src/host/dispatcher.js'
+import {
+  Dispatcher, buildChatPrompt, columnCandidates, configureDispatcher, matchScore, parseMentions,
+  pickFromPool, resolveChatSpeaker, resolveDispatchTarget, resolveMentionTarget, resolveOwner, taskDomain,
+} from '../src/host/dispatcher.js'
 import { parseStudioSession } from '../src/host/agent-feed.js'
 import { parseSessionName } from '../src/host/session-usage.js'
 import { configureTaskRoutes, handleTaskRoute } from '../src/host/routes/tasks.js'
@@ -452,5 +455,150 @@ test('#148 无卡会话进运行态、能被 /agents/stop 按 sessionId 停掉',
     assert.deepEqual(aborted, ['studio-chat-dev-ab12cd34'], '要真的 abort 那个会话')
     assert.equal(dispatcher.status().chats.length, 0, '停掉后运行态里不再有它')
     assert.equal(dispatcher.abortSession('studio-chat-nope-000000'), false, '不存在的会话返回 false，不抛')
+  })
+})
+
+// ------------------------------------------------------------------ #148 评论补充：mention 入口
+
+test('#148 resolveMentionTarget：按名字或 id 认专家/团，role 走白名单，找不到列出可选项', () => {
+  const config = {
+    roles: ['product', 'dev'],
+    experts: [
+      { id: 'dev', name: '开发工程师', enabled: true },
+      { id: 'qa1', name: '测试工程师', enabled: true },
+      { id: 'off', name: '停用的专家', enabled: false },
+    ],
+    teams: [{ id: 'team1', name: '结算团', enabled: true }],
+  }
+  assert.deepEqual(resolveMentionTarget(config, '开发工程师').mention, { kind: 'expert', id: 'dev' })
+  assert.deepEqual(resolveMentionTarget(config, '@qa1').mention, { kind: 'expert', id: 'qa1' }, '首位的 @ 要忽略')
+  assert.deepEqual(resolveMentionTarget(config, '结算团', 'team').mention, { kind: 'team', id: 'team1' })
+  assert.deepEqual(resolveMentionTarget(config, 'dev', 'role').mention, { kind: 'role', id: 'dev' })
+  assert.match(resolveMentionTarget(config, 'qa1', 'team').error, /没有名字或 id 为「qa1」的专家团/, 'kind 限定时另一个类型不算命中')
+  assert.match(resolveMentionTarget(config, 'off').error, /没有名字或 id 为「off」/, '停用的专家不参与')
+  assert.match(resolveMentionTarget(config, 'ghost').error, /现有：开发工程师/, '要列出可选项')
+})
+
+test('#148 /mention 认 kind:role（不再降级成 expert），目标不存在直接 400', async () => {
+  await withStore(async store => {
+    const calls = []
+    stubTaskRoutes(store, {
+      dispatcher: {
+        running: new Map(),
+        loadByExpert: () => new Map(),
+        status: () => ({ running: [], chats: [] }),
+        dispatchMention: async (...args) => { calls.push(args) },
+        abortTask: () => 0,
+      },
+    })
+    const { res } = await callTask(store, '/mention', { taskId: 't-1ade5b86', kind: 'role', id: 'dev', instruction: '先看边界' })
+    assert.equal(res.status, 200)
+    assert.deepEqual(calls[0], ['t-1ade5b86', { kind: 'role', id: 'dev' }, '先看边界'], 'role 要原样传下去')
+    await assert.rejects(() => callTask(store, '/mention', { taskId: 't-1ade5b86', kind: 'role', id: 'nobody' }), /不在 config.roles 里/)
+    await assert.rejects(() => callTask(store, '/mention', { taskId: 't-1ade5b86', kind: 'expert', id: 'ghost' }), /没有 id 为「ghost」/)
+  })
+})
+
+test('#148 工具层有 studio_task_mention：按名字派出并把 instruction 传下去', async () => {
+  await withStore(async store => {
+    const calls = []
+    const registered = []
+    const ctx = { tools: { register: tool => { registered.push(tool); return () => {} } }, effect: () => () => {} }
+    configureToolHost({
+      toolOperator: () => '自检',
+      toolLevel: () => 'write',
+      checkToolAccess: () => ({ level: 'write', denial: null }),
+      recordAudit: async () => {},
+      publicConfig: config => config,
+      getActiveDispatcher: () => ({ dispatchMention: async (...args) => { calls.push(args) } }),
+      getActiveSkills: () => undefined,
+      getLlm: () => undefined,
+      getDefaultModel: () => undefined,
+    })
+    registerTools(ctx, store)
+    const mention = registered.find(tool => tool.name === 'studio_task_mention')
+    assert.ok(mention !== undefined, 'agent 要能直接派活，不用写评论碰运气')
+    assert.equal(toolAccessTable().studio_task_mention, 'write')
+    const out = await mention.execute({ id: 't-1ade5b86', target: '开发工程师', instruction: '只改路由' }, {})
+    assert.match(out, /派给 开发工程师/)
+    const expert = store.snapshot().config.experts.find(item => item.name === '开发工程师')
+    assert.deepEqual(calls[0], ['t-1ade5b86', { kind: 'expert', id: expert?.id }, '只改路由'])
+    await assert.rejects(() => mention.execute({ id: 't-1ade5b86', target: '不存在的人' }, {}), /没有名字或 id 为「不存在的人」/)
+  })
+})
+
+// ------------------------------------------------------------------ #155 / #156 / #157
+
+/* issue #155 的口径不一致：展开候选池用「有效领域」（含需求继承），打分只看卡自己的 domain。
+   注意触发面：拆卡出来的卡由 createTask 回填了 domain，正常链路不受影响；
+   会暴露的是「需求 domain 后补 / 卡没挂需求 / 卡被清空 domain」——这里用「卡没写、需求上有」这条形状断言契约。 */
+test('#155 best_match 按「有效领域」打分（卡没写 domain 时继承需求的），不再退化成取第一个', () => {
+  const config = {
+    roles: ['dev'],
+    experts: [
+      { id: 'general', name: '通用开发', role: 'dev', domain: '', enabled: true },
+      { id: 'settle', name: '结算开发', role: 'dev', domain: '促销返利结算', enabled: true },
+    ],
+    teams: [],
+  }
+  const column = { id: 'dev', label: '开发中', role: 'dev' }
+  const pool = { kind: 'pool', id: '', strategy: 'best_match', members: [{ kind: 'expert', id: 'general' }, { kind: 'expert', id: 'settle' }] }
+  const configWithPool = { ...config, columns: { dev: pool } }
+  const task = { id: 't-syn', title: '结算补差', domain: '', requirementId: 'r1' }
+  const st = { config: configWithPool, requirements: [{ id: 'r1', domain: '促销返利结算' }], tasks: [task] }
+  const domain = taskDomain(task, st)
+  assert.equal(domain, '促销返利结算', '卡没写 domain 时继承需求的')
+  const candidates = columnCandidates(configWithPool, column, domain)
+  const picked = pickFromPool(candidates, pool, task, column, new Map(), domain)
+  assert.equal(picked?.expert?.id, 'settle', '有效领域要参与打分（以前只看 task.domain，永远 0 分 → 取第一个）')
+  // 不传 domain 的老调用方式保持兼容：退回卡自己的 domain
+  assert.equal(matchScore({ expert: config.experts[1] }, task, column, ''), 20, '只有角色位那 20 分')
+  assert.equal(matchScore({ expert: config.experts[1] }, task, column, domain), 70, '角色位 20 + 领域 50')
+})
+
+test('#156 评论里的 @ 认全角 ＠；@dev 不会被 @developer 命中', () => {
+  const config = {
+    experts: [
+      { id: 'dev', name: '开发工程师', enabled: true },
+      { id: 'developer-2', name: 'developer', enabled: true },
+      { id: 'arch', name: '架构师', enabled: true },
+      { id: 'arch2', name: '架构师助理', enabled: true },
+    ],
+    teams: [],
+  }
+  assert.equal(parseMentions('＠架构师 看一下', config).length, 1, '中文输入法的全角 ＠ 也要生效')
+  assert.deepEqual(parseMentions('＠架构师 看一下', config).map(hit => hit.name), ['架构师'])
+  assert.deepEqual(parseMentions('@dev 看一下', config).map(hit => hit.id), ['dev'], '@dev 不该顺带命中 developer')
+  assert.deepEqual(parseMentions('@developer 看一下', config).map(hit => hit.id), ['developer-2'])
+  assert.deepEqual(parseMentions('@架构师助理 看一下', config).map(hit => hit.name), ['架构师助理'], '长名字优先，短的不要重复命中')
+  assert.equal(parseMentions('`@架构师` 只是引用', config).length, 0, '行内代码里的不算')
+})
+
+test('#157 tick 收回「state=running 但会话早没了」的派单印记，下一轮重派', async () => {
+  await withStore(async store => {
+    configureDispatcher({ bugSla: () => null })
+    const qa = store.snapshot().config.experts.find(expert => expert.role === 'qa')
+    const owner = qa === undefined ? { kind: 'none', id: '' } : { kind: 'expert', id: qa.id }
+    await store.mutate(state => {
+      state.config.agents.enabled = true
+      state.config.agents.autoStatuses = ['test']
+      if (qa !== undefined) state.config.columns.test = owner
+      state.tasks.push({
+        id: 't-stale001', code: 'DEV-STALE', title: '印记没回收的卡', status: 'test', type: 'dev', role: 'qa',
+        comments: [], history: [], checklist: [], cases: [], artifacts: [], blocked: null, retryAt: 0,
+        dispatch: { state: 'running', status: 'test', expert: String(qa?.id ?? ''), sessionId: 'studio-t-stale001-dev', key: 'k', at: Date.now() - 20 * 60 * 1000 },
+      })
+    })
+    const dispatcher = new Dispatcher({ agents: { get: () => undefined } }, store)
+    const launched = []
+    dispatcher.launch = async task => { launched.push(task.id) }
+    await dispatcher.tick()
+    const after = store.snapshot().tasks.find(task => task.id === 't-stale001')
+    assert.equal(after.dispatch.state, 'stopped', '挂死的 running 印记要收回来')
+    assert.equal(after.dispatch.status, '', '清掉 status，下一轮才会重派')
+    assert.ok((after.history ?? []).some(item => String(item.note ?? '').includes('派单印记已收回')), '历史里要说明发生了什么')
+    assert.deepEqual(launched, [], '收回的这一轮不急着重派')
+    await dispatcher.tick()
+    assert.deepEqual(launched, ['t-stale001'], '下一轮重新派出去')
   })
 })

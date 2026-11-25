@@ -5,7 +5,7 @@ import { designPatchFrom } from '../design.js'
 import { rejectUnknownFields } from '../route-contract.js'
 import { resolveRequirement, requirementRefHint, saveTaskDesign } from '../reviews.js'
 import { publishNoteMentions } from '../mention-note.js'
-import { parseMentions, ownerFor } from '../dispatcher.js'
+import { parseMentions, ownerFor, resolveDispatchTarget } from '../dispatcher.js'
 import { dispatchPreview, previewWarning } from '../column-preview.js'
 import { emitEvent } from '../events.js'
 import { collectCases, groupCaseKeys, loadSuites, resolveSuiteKeys, sanitizeSuite, saveSuites, summarizeRun } from '../cases.js'
@@ -242,8 +242,19 @@ export async function handleTaskRoute({ method, route, req, res, store, url }) {
     const dispatcher = host.getDispatcher()
     if (dispatcher === undefined) throw new Error('dispatcher not available yet')
     const body = await host.readJsonBody(req)
-    const mention = { kind: body.kind === 'team' ? 'team' : 'expert', id: String(body.id ?? '') }
-    await dispatcher.dispatchMention(String(body.taskId ?? ''), mention, String(body.instruction ?? ''))
+    rejectUnknownFields('/mention', body)
+    /* kind 以前只认 team/expert，role 被静默降级成 expert（与 #149 同一段代码模式，issue #148 评论）。
+       现在三条路都认，但**先按白名单校验**：不认识的角色/专家/团直接 400，不再降级。 */
+    const kind = body.kind === 'team' ? 'team' : body.kind === 'role' ? 'role' : 'expert'
+    const id = String(body.id ?? '').trim()
+    if (kind === 'role') {
+      const roles = roleIdsOf(store.snapshot().config)
+      if (!roles.includes(id)) throw new Error(`角色「${id}」不在 config.roles 里（可选：${roles.join(' / ')}）`)
+    } else {
+      const target = resolveDispatchTarget(store.snapshot().config, id)
+      if (target.error !== undefined) throw new Error(target.error)
+    }
+    await dispatcher.dispatchMention(String(body.taskId ?? ''), { kind, id }, String(body.instruction ?? ''))
     host.sendJson(res, 200, { ok: true, state: host.publicState(store), agents: dispatcher.status() })
     return true
   }

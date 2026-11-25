@@ -42,6 +42,7 @@ declareRoute('/columns/save', ['status', 'kind', 'id', 'owner', 'members', 'stra
 declareRoute('/agents/run', ['id', 'expert', 'instruction'])
 declareRoute('/agents/chat', ['expert', 'team', 'member', 'topic', 'instruction', 'workdir'])
 declareRoute('/agents/stop', ['id', 'expert', 'sessionId'])
+declareRoute('/mention', ['taskId', 'kind', 'id', 'instruction'])
 
 /** 诊断用：当前登记了哪些路由。 */
 export function declaredRoutes() {

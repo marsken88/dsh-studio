@@ -66,7 +66,7 @@
 ```mermaid
 flowchart LR
   UI["浏览器<br/>client.js + web/src<br/>看板 · 需求 · 用例 · 版本 · 效能 · 设置"]
-  API["index.js<br/>apply(ctx) · 53 个 studio_* 工具 · /studio-api 前缀路由"]
+  API["index.js<br/>apply(ctx) · 54 个 studio_* 工具 · /studio-api 前缀路由"]
   HOST["src/host/*<br/>domain · dispatcher · executor · integrations · routes"]
   DB[("SQLite<br/>state · 快照 · side 键")]
   AGENT["专家会话<br/>studio-任务-专家"]

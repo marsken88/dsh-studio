@@ -136,6 +136,8 @@ function Drawer({ task, state, onClose, onChanged }) {
   const [comment, setComment] = React.useState('')
   const [notice, setNotice] = React.useState(null)
   const [picked, setPicked] = React.useState('')
+  /* 「马上处理」可以带一句开场白（拼进提示词）；issue #148 评论：以前卡上派单没法交代这次要干什么。 */
+  const [dispatchNote, setDispatchNote] = React.useState('')
   /* 这次派单实际会用哪套权限（沙箱 + 提权审批）。只对 studio-* 派单会话生效，
      手动新开的会话仍归 DSH 自己的权限档位——写清楚，免得上一次「设置里选了全权限
      为什么还弹审批」的误会再发生。 */
@@ -545,8 +547,12 @@ function Drawer({ task, state, onClose, onChanged }) {
 
   const runAgent = async () => {
     setBusy(true); setError(null)
-    try { await api('/agents/run', { id: task.id, expert: picked }); await onChanged() }
-    catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)) } finally { setBusy(false) }
+    try {
+      // 下拉里专家团的值带 `team:` 前缀（专家 id 与团 id 可能同名），发出去时去掉。
+      const target = picked.startsWith('team:') ? picked.slice('team:'.length) : (picked.startsWith('expert:') ? picked.slice('expert:'.length) : picked)
+      await api('/agents/run', { id: task.id, expert: target, instruction: dispatchNote.trim() })
+      await onChanged()
+    } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)) } finally { setBusy(false) }
   }
 
   const blocked = task.blocked ?? null
@@ -1517,7 +1523,7 @@ function Drawer({ task, state, onClose, onChanged }) {
                   : '这张卡还没有派给 AI'),
           policy === null ? null : (() => {
             const cfg = policy.configured ?? {}
-            const expertId = picked || task.dispatch?.expert || task.expert || ''
+            const expertId = (picked.startsWith('expert:') ? picked.slice('expert:'.length) : picked) || task.dispatch?.expert || task.expert || ''
             const expert = (state.config?.experts ?? []).find(item => item.id === expertId)
             const sandbox = String(expert?.sandbox ?? '').trim() || String(cfg.sandbox ?? '').trim() || 'workspace-write'
             const forced = String(cfg.isolation ?? '') === 'worktree' && sandbox !== 'danger-full-access'
@@ -1536,8 +1542,18 @@ function Drawer({ task, state, onClose, onChanged }) {
             },
               h('option', { value: '' }, '用本列负责人'),
               (state.config?.experts ?? []).filter(expert => expert.enabled !== false).map(expert =>
-                h('option', { key: expert.id, value: expert.id }, expert.name)),
+                h('option', { key: expert.id, value: `expert:${expert.id}` }, expert.name)),
+              (state.config?.teams ?? []).filter(team => team.enabled !== false).map(team =>
+                h('option', { key: team.id, value: `team:${team.id}` }, `👥 ${team.name}（团长接活）`)),
             ),
+          ),
+          h('div', { className: FIELD, style: { marginTop: 4 } },
+            h('div', { className: LABEL }, '开场白（可选）'),
+            h(TextField, {
+              value: dispatchNote, disabled: busy,
+              placeholder: '这次先做什么 / 不要动哪些文件',
+              onChange: e => setDispatchNote(e.target.value),
+            }),
           ),
           h('div', { className: ACTIONS, style: { marginTop: 8 } },
             h(Button, { variant: 'primary', size: 'sm', disabled: busy, onClick: () => void runAgent() }, '马上处理'),

@@ -27,12 +27,14 @@ test('parseMentions：引用代码块里的 @ 不再触发派单（开发工程�
   assert.deepEqual(parseMentions('@开发工程师 这里要改', config).map(m => m.name), ['开发工程师'])
 })
 
-test('parseMentions：四位专家的名字都能命中，短写与全角 @ 不命中', () => {
+test('parseMentions：四位专家的名字都能命中，短写不命中，全角 @ 也命中', () => {
   for (const expert of config.experts) {
     assert.equal(parseMentions(`@${expert.name} 看一下`, config).length, 1, expert.name)
   }
   assert.equal(parseMentions('@架构 看一下', config).length, 0, '短写不命中（要写全名）')
-  assert.equal(parseMentions('＠架构师', config).length, 0, '全角 @ 不命中')
+  /* issue #156：中文输入法默认打出来的就是全角 ＠，以前静默失效（只认半角）。 */
+  assert.equal(parseMentions('＠架构师', config).length, 1, '全角 ＠ 也要命中')
+  assert.equal(parseMentions('＠开发工程师 看下', config).length, 1, '全角 ＠ 也要命中')
 })
 
 const makeStore = () => ({ snapshot: () => ({ config }) })
