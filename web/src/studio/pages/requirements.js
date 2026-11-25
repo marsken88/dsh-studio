@@ -35,7 +35,7 @@ const SECTION_BODY = 'flex min-w-0 flex-col gap-2'
 const MOUNT = 'rounded-xl border border-separator-border bg-background-secondary-default px-3 py-3'
 
 export     function IntakePage({ state, onChanged, mode }) {
-  const { h, React, api, toast, currentUser, confirmDialog, promptDialog, renderMarkdown, TextField, TextAreaField, SelectField, CheckField, MdField } = client()
+  const { h, React, api, toast, currentUser, confirmDialog, promptDialog, renderMarkdown, TextField, TextAreaField, SelectField, CheckField, MdField, SideDrawer } = client()
       const business = (state.requirements ?? []).filter(item => item.source === 'business')
       const [note, setNote] = React.useState('')
       const [result, setResult] = React.useState('')
@@ -124,7 +124,7 @@ h('div', { className: FIELD }, h('div', { className: LABEL }, '验收标准链�
     }
 
 export     function RequirementsPage({ state, onOpenTask, onChanged, createSignal, focusReq }) {
-  const { h, React, api, toast, currentUser, confirmDialog, promptDialog, renderMarkdown, TextField, TextAreaField, SelectField, CheckField, MdField } = client()
+  const { h, React, api, toast, currentUser, confirmDialog, promptDialog, renderMarkdown, TextField, TextAreaField, SelectField, CheckField, MdField, SideDrawer } = client()
       const requirements = state.requirements ?? []
       const projects = state.config.projects ?? []
       const statusOptions = REQ_STATUS_ORDER.map(id => ({ value: id, label: REQ_STATUS_LABEL[id] }))
@@ -593,9 +593,18 @@ export     function RequirementsPage({ state, onOpenTask, onChanged, createSigna
         }
       }
 
-      const formPanel = form === null ? null : h('div', { className: PANEL },
-        h('div', { className: PANEL_HEAD }, form.id === undefined ? '新建需求' : `编辑 ${current?.code ?? ''}`),
-        h('div', { className: PANEL_BODY },
+      const closeForm = () => { setForm(null); setError(null) }
+      /* 新建/编辑需求走侧滑块：页面本体只留列表与详情，不再把一长串表单铺在顶部。 */
+      const formPanel = form === null ? null : h(SideDrawer, {
+        title: form.id === undefined ? '新建需求' : `编辑 ${current?.code ?? ''}`,
+        hint: '先写标题与澄清三问；保存后可在需求详情里继续补功能点、文档与验收条件。',
+        onClose: closeForm,
+        footer: [
+          h(Button, { key: 'cancel', variant: 'secondary', size: 'sm', onClick: closeForm }, '取消'),
+          h(Button, { key: 'save', variant: 'primary', size: 'sm', disabled: busy, onClick: () => void save() }, busy ? '保存中…' : '保存需求'),
+        ],
+      },
+        h('div', { className: 'flex min-w-0 flex-col gap-3' },
           h('div', { className: FIELD },
             h('div', { className: LABEL }, '需求标题'),
             h(TextField, { 'aria-label': '需求标题', value: form.title, onChange: e => setForm({ ...form, title: e.target.value }) }),
@@ -661,10 +670,6 @@ export     function RequirementsPage({ state, onOpenTask, onChanged, createSigna
               value: form.description,
               onChange: e => setForm({ ...form, description: e.target.value }),
             }),
-          ),
-          h('div', { className: ROW, style: { justifyContent: 'flex-end', gap: 8 } },
-            h(Button, { variant: 'secondary', size: 'sm', onClick: () => { setForm(null); setError(null) } }, '取消'),
-            h(Button, { variant: 'primary', size: 'sm', disabled: busy, onClick: () => void save() }, busy ? '保存中…' : '保存需求'),
           ),
         ),
       )

@@ -580,6 +580,18 @@ try {
   }
   await page.screenshot({ path: join(outDir, 'requirement.png') })
 
+  // ③d 新建需求走侧滑块（不再把表单铺在页面顶部）
+  const newReqOpened = await clickExact('新建需求')
+  await new Promise(resolve => setTimeout(resolve, 700))
+  const newReqDrawer = await page.evaluate(() => ({
+    fallback: document.querySelector('[data-side-drawer]') !== null,
+    dialog: document.querySelector('[role="dialog"]') !== null,
+    text: String(document.body.innerText ?? '').includes('先写标题与澄清三问'),
+  }))
+  check('③d 新建需求用侧滑块打开', newReqOpened === true && (newReqDrawer.fallback === true || newReqDrawer.dialog === true) && newReqDrawer.text === true, JSON.stringify(newReqDrawer))
+  await page.keyboard.press('Escape')
+  await new Promise(resolve => setTimeout(resolve, 400))
+
   // ④ 设置 → 列的负责人：两道闸门开关
   await clickExact('设置')
   await clickExact('列的负责人')
