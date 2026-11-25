@@ -368,3 +368,28 @@ test('BUG-001：删旧成功（旧文档确实没了）+ 建文档失败 → 锚
     assert.deepEqual([...kb.live], [], '旧文档删掉了、新的没建成：库里应为空')
   })
 })
+
+test('BUG-001：删旧失败时中止本轮入库，绝不建第二份（先失效再入库）', async () => {
+  // 这里 DELETE 失败、POST 本来是能成功的 —— 旧实现就是在这种情形下把库堆成两份。
+  await withSeededKb({ deleteStatus: 500, manualStatus: 200 }, async ({ store, kb }) => {
+    await assert.rejects(() => syncArtifactWith(store, 't1', 'a1', MD_IO), /旧文档没删掉/)
+    assert.equal(kb.calls.filter(item => item.includes('/knowledge/manual')).length, 0, '删旧没成功就不许建新：两份并存时台账只能记一个，另一个永久孤儿')
+    assert.deepEqual([...kb.live], ['k-old'], '库里仍然只有原来那一份，没有第二份')
+    const doc = weknoraLedger(store)
+    assert.equal(doc.knowledgeId, 'k-old', '锚点保住，下一轮还能接着删它')
+    assert.match(doc.error, /旧文档没删掉/)
+  })
+})
+
+test('BUG-001：删旧恢复后重试命中旧锚点走替换，库里只留一份（不再每次重试漏一份）', async () => {
+  await withSeededKb({ deleteStatus: 500, manualStatus: 200 }, async ({ store, kb }) => {
+    await assert.rejects(() => syncArtifactWith(store, 't1', 'a1', MD_IO), /旧文档没删掉/)
+    assert.equal(weknoraLedger(store).knowledgeId, 'k-old', '失败那轮不许把锚点弄丢')
+    kb.control.deleteStatus = 200      // 远端删除恢复（瞬时 5xx / 异步删除任务失败后再来一轮）
+    const out = await syncArtifactWith(store, 't1', 'a1', MD_IO)
+    assert.equal(out.sinks.weknora.replaced, true, '重试要命中台账里的旧 id 走「替换」，不是「新增」')
+    const doc = weknoraLedger(store)
+    assert.deepEqual([...kb.live], [doc.knowledgeId], '库里只剩台账指向的那一份，没有孤儿')
+    assert.equal(doc.error, '', '这一轮成功了，error 位要清干净')
+  })
+})

@@ -57,11 +57,15 @@ export async function uploadToWeknora({ sink, title, markdown, previousKnowledge
      注意：WeKnora 的删除是**异步任务**（202 + `Delete task submitted`），刚删完立刻 GET 仍可能 200，别拿它判成败。 */
   const previous = trim(previousKnowledgeId, 80)
   let replaced = false
-  let replaceWarning = ''
   if (previous !== '') {
     const removed = await callJson(doFetch, `${base}/knowledge/${encodeURIComponent(previous)}`, { method: 'DELETE', headers }, timeoutMs)
     replaced = removed.ok === true || removed.status === 404
-    if (replaced !== true) replaceWarning = `旧文档没删掉（${removed.error}）`
+    /* 先失效再入库：旧文档没被确认失效，就绝不能建新的一份。
+       两份并存时台账只能记一个，另一份永久孤儿 —— 而且每次重试再漏一份（BUG-001）。
+       这里中止本轮，回 replaced=false，让调用方保住台账里的旧锚点，下一轮还能接着删它。 */
+    if (replaced !== true) {
+      return { ok: false, replaced: false, error: `旧文档没删掉（${removed.error}），本轮未入库` }
+    }
   }
 
   const created = await callJson(doFetch, `${base}/knowledge-bases/${encodeURIComponent(kb)}/knowledge/manual`, {
@@ -84,6 +88,6 @@ export async function uploadToWeknora({ sink, title, markdown, previousKnowledge
     knowledgeId,
     replaced,
     url: `${base}/knowledge/${knowledgeId}`,
-    warning: [replaceWarning, reparsed.ok === true ? '' : `已入库但触发解析失败（${reparsed.error}），需要人工 reparse`].filter(Boolean).join('；'),
+    warning: reparsed.ok === true ? '' : `已入库但触发解析失败（${reparsed.error}），需要人工 reparse`,
   }
 }
