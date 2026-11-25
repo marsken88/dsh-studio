@@ -4,7 +4,7 @@
  *
  * 断言：
  *   1 table.bui-table 存在，表头 5 列（时间/操作人/动作/详情/结果）
- *   2 每页行数 = 50（分页生效），且没有旧的 div 网格残留（[data-audit-row] 只能是 <tr>）
+ *   2 每页行数 = 25（分页生效；权限页在 2026-11-24 从 50 调到 25），且没有旧的 div 网格残留（[data-audit-row] 只能是 <tr>）
  *   3 分页控件存在（上一页 / 下一页 / 页码）
  *   4 点「下一页」后内容真的换了
  *   5 全程无 pageerror
@@ -27,6 +27,15 @@ const check = (label, ok, detail = '') => {
 
 const browser = await puppeteer.launch({ executablePath: CHROME, headless: 'new', args: ['--no-sandbox'], defaultViewport: { width: 1680, height: 1000 } })
 const page = await browser.newPage()
+const cookieSpec = String(process.env.STUDIO_COOKIE ?? '').trim()
+if (cookieSpec !== '') {
+  const origin = new URL(BASE)
+  const parsed = cookieSpec.split(';').map(part => part.trim()).filter(Boolean).map(part => {
+    const at = part.indexOf('=')
+    return at > 0 ? { name: part.slice(0, at), value: part.slice(at + 1), domain: origin.hostname, path: '/' } : null
+  }).filter(Boolean)
+  if (parsed.length > 0) await page.setCookie(...parsed)
+}
 const errors = []
 page.on('pageerror', (e) => errors.push(String(e).slice(0, 200)))
 await page.goto(`${BASE}/?token=${TOKEN}`, { waitUntil: 'networkidle2', timeout: 60000 })
@@ -58,7 +67,7 @@ const first = await page.evaluate(() => {
 })
 check('审计日志是官方 Table', first.table === true)
 check('表头 5 列', first.headers.length === 5, first.headers.join(' / '))
-check('每页 50 行（分页生效）', first.rows === 50, `${first.rows} 行`)
+check('每页 25 行（分页生效）', first.rows === 25, `${first.rows} 行`)
 check('审计行是真表格行（旧的 div 网格已消失）', first.oldRows === 0 && first.tableRows > 0, `非 tr 行=${first.oldRows} / tr 行=${first.tableRows}`)
 check('分页控件存在', first.pager === true)
 

@@ -46,3 +46,17 @@ test('releaseNotes：按需求与卡类型分组，能直接贴群里', () => {
   assert.match(text, /## 研发/)
   assert.match(text, /DEV-1 库存预占/)
 })
+
+test('releaseGate：approvable 只看「除审批外」的门禁（审批动作不能死锁）', () => {
+  const draft = releaseGate(state, { ...release })
+  assert.equal(draft.approvable, true, '只缺审批时应该允许点审批')
+  assert.equal(draft.ready, false, '但还不能发布')
+  const openTask = releaseGate({ ...state, tasks: [{ ...task, status: 'dev' }] }, { ...release })
+  assert.equal(openTask.approvable, false, '还有别的 blocker 时审批也该拦住')
+  const approved = releaseGate(state, { ...release, approvals: [{ id: 'ap-1', by: '人', at: 1, note: '' }] })
+  assert.equal(approved.approvable, true)
+  const approveAction = releaseGate(state, { ...release }, { ignoreApproval: true })
+  assert.equal(approveAction.ready, true, '审批动作只看除审批外的门禁，否则死锁')
+  const approveWithOpen = releaseGate({ ...state, tasks: [{ ...task, status: 'dev' }] }, { ...release }, { ignoreApproval: true })
+  assert.equal(approveWithOpen.ready, false, '其它门禁没过时审批也要拦')
+})

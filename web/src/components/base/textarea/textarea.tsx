@@ -128,6 +128,13 @@ export function TextareaBase({
 
   const attachRef = (node: HTMLTextAreaElement | null) => {
     innerRef.current = node;
+    if (node !== null) {
+      /* 与 Input 同一个原因：宿主全局 textarea 样式带 !important。 */
+      node.style.setProperty("border", "0", "important");
+      node.style.setProperty("background-color", "transparent", "important");
+      node.style.setProperty("border-radius", "0", "important");
+      node.style.setProperty("box-shadow", "none", "important");
+    }
     if (typeof ref === "function") ref(node);
     else if (ref) (ref as { current: HTMLTextAreaElement | null }).current = node;
   };

@@ -2,8 +2,12 @@
  * 也让「审批是门禁」这条能被单测直接断言（不用起整个宿主）。
  */
 
-/** 一个版本能不能发：卡全做完、没阻塞、缺陷关闭、用例没有失败、有人在版本上审批过。 */
-export function releaseGate(state, release) {
+/** 审批这条 blocker：发布要它，但「点审批」本身不能被它挡住（否则永远批不了）。 */
+export const RELEASE_APPROVAL_BLOCKER = '还没有发布审批：先在版本上点「审批通过」并写结论'
+
+/** 一个版本能不能发：卡全做完、没阻塞、缺陷关闭、用例没有失败、有人在版本上审批过。
+ *  options.ignoreApproval 只在「审批动作」里用：其它门禁都过了就该允许批。 */
+export function releaseGate(state, release, options = {}) {
   const tasks = state.tasks.filter(task => task.releaseId === release.id)
   const open = tasks.filter(task => task.status !== 'done')
   const blocked = tasks.filter(task => task.blocked !== null && task.blocked !== undefined)
@@ -29,7 +33,7 @@ export function releaseGate(state, release) {
   if (String(release.tagName ?? '').trim() === '') blockers.push('还没有填发布标签（tag）：发布要能对应到一段确定的代码')
   if (smokeOpen.length > 0) blockers.push(`${smokeOpen.length} 项冒烟还没过：${smokeOpen.slice(0, 3).map(item => item.text).join('、')}`)
   /* 审批是门禁，不是提示：没有人在版本上点过「审批通过」，就不许发。 */
-  if ((release.approvals ?? []).length === 0) blockers.push('还没有发布审批：先在版本上点「审批通过」并写结论')
+  if ((release.approvals ?? []).length === 0) blockers.push(RELEASE_APPROVAL_BLOCKER)
   const warnings = []
   if (emptyArtifacts.length > 0) warnings.push(`${emptyArtifacts.length} 件交付物缺正文`)
   if (tasks.length > 0 && tasks.every(task => (task.artifacts ?? []).length === 0)) warnings.push('这批卡一件交付物都没登记')
@@ -39,8 +43,15 @@ export function releaseGate(state, release) {
   if (gray.length > 0 && grayPending.length > 0 && release.status === 'released') {
     warnings.push(`还有 ${grayPending.length} 批灰度没走完`)
   }
+  // approvable：除了「还没审批」之外没有别的 blocker —— 面板据此决定「审批通过」按钮是否可点。
+  const blockingWithoutApproval = blockers.filter(item => item !== RELEASE_APPROVAL_BLOCKER)
+  const approvable = blockingWithoutApproval.length === 0 && release.status !== 'released'
+  /* 审批动作（ignoreApproval）只看「除审批外」的门禁；发布（默认）仍然要求审批。
+     2026-11-24 e2e 自检抓到：只算 approvable、不改 ready，审批接口还是会说「还没有发布审批」。 */
+  const effective = options.ignoreApproval === true ? blockingWithoutApproval : blockers
   return {
-    ready: blockers.length === 0 && release.status !== 'released',
+    ready: effective.length === 0 && release.status !== 'released',
+    approvable,
     blockers,
     warnings,
     stats: {

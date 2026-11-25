@@ -28,23 +28,32 @@ export async function publishNoteMentions(deps, options = {}) {
   const taskId = String(options.taskId ?? '')
   const note = String(options.note ?? '').trim()
   const by = String(options.by ?? '人').slice(0, 40)
-  if (taskId === '' || note === '' || typeof parseMentions !== 'function') {
+  /* forceComment：评审结论必须留下痕迹——哪怕备注为空，或备注里没写「评审 / 打回 / 要改」
+     这些词。以前只按关键词猜，于是「LGTM，可以进测试」这种通过结论永远不进讨论区，
+     人翻卡片时只看到研发说了什么，看不到评审说了什么。 */
+  const forceComment = options.forceComment === true
+  const verdict = String(options.verdict ?? '').trim().slice(0, 20)
+  if (taskId === '' || typeof parseMentions !== 'function') {
+    return { mentions: [], dispatched: [], commented: false }
+  }
+  if (note === '' && forceComment === false) {
     return { mentions: [], dispatched: [], commented: false }
   }
   const config = store.snapshot().config
-  const mentions = parseMentions(note, config)
+  const mentions = note === '' ? [] : parseMentions(note, config)
   const looksLikeReview = /评审|驳回|打回|要改|不通过/.test(note) || mentions.length > 0
-  if (looksLikeReview === false) return { mentions: [], dispatched: [], commented: false }
+  if (forceComment === false && looksLikeReview === false) return { mentions: [], dispatched: [], commented: false }
   /* 评审意见要能在讨论区看到：以前它只躺在 coding.review.note 里，对方读卡时看不到。
      commentMode='mentions' 时只在有人被 @ 的情况才补评论（验收签字 / 清单备注这类
      本来就会显示在卡上的文字，不必每条都复制成评论）。 */
   const commentMode = String(options.commentMode ?? 'always')
-  const shouldComment = commentMode === 'mentions' ? mentions.length > 0 : true
+  const shouldComment = forceComment === true ? true : (commentMode === 'mentions' ? mentions.length > 0 : true)
   let commented = false
   if (shouldComment && typeof commentTask === 'function') {
     try {
       const label = String(options.label ?? '评审意见')
-      await commentTask(store, taskId, `**${label}（${by}）**\n\n${note}`, by, 'human')
+      const title = `${label}${verdict === '' ? '' : ` · ${verdict}`}（${by}）`
+      await commentTask(store, taskId, `**${title}**\n\n${note === '' ? '（没有填写评审意见）' : note}`, by, 'human')
       commented = true
     } catch { /* 留言失败不影响评审结论本身 */ }
   }

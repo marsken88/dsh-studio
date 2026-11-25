@@ -8,6 +8,7 @@
  *   - 动作：boardui/index 的 Button（variant/size 由适配层翻译）
  */
 import { Button } from '../../boardui/index'
+import { fmtTime } from '../format.js'
 import { EmptyState } from '../../boardui/empty-state'
 import { ProgressTrack } from '../../components/base/progress/progress'
 
@@ -17,7 +18,7 @@ const STAT_VALUE = 'text-title-2-semibold text-text-primary tabular-nums'
 const HINT = 'text-caption-1-regular text-text-tertiary'
 
 export function createProjectsPage({ h, React, api }) {
-  return function ProjectsOverview({ state, onOpenBoard }) {
+  return function ProjectsOverview({ state, onOpenBoard, onOpenSettings }) {
     const [metrics, setMetrics] = React.useState(null)
     const [error, setError] = React.useState(null)
     React.useEffect(() => {
@@ -90,11 +91,29 @@ export function createProjectsPage({ h, React, api }) {
       )
     }
 
+    /* 首屏下方那块 400px 的空白：用「未归属项目的卡 / 最近更新」填上。
+       项目页本来就是「哪些卡还没归属」最该被看到的地方，放一张清单比留白有用。 */
+    const statusLabel = id => (state.statuses ?? []).find(item => item.id === id)?.label ?? String(id ?? '')
+    const unassignedTasks = (state.tasks ?? [])
+      .filter(task => String(task.project ?? '') === '')
+      .sort((a, b) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0))
+    const recentTasks = [...(state.tasks ?? [])].sort((a, b) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0))
+    const taskPanel = unassignedTasks.length > 0
+      ? { title: `未归属项目的卡（${unassignedTasks.length}）`, subtitle: '还没挂到项目上的卡，先给它们选一个项目', rows: unassignedTasks.slice(0, 10) }
+      : { title: '最近更新', subtitle: '最近有动静的卡（按更新时间）', rows: recentTasks.slice(0, 8) }
+
     const projects = metrics.projects ?? []
     const unassigned = metrics.unassigned
     const hasUnassigned = unassigned !== null && unassigned !== undefined && unassigned.total > 0
 
     return h('div', { className: 'flex flex-col gap-4 p-4', 'data-projects-page': '' },
+      /* 项目页以前只能看、不能建：新建/编辑入口藏在设置里，人找不到。 */
+      h('div', { className: 'flex flex-wrap items-center justify-between gap-2' },
+        h('div', { className: 'flex min-w-0 flex-col gap-1' },
+          h('span', { className: 'text-body-2-medium text-text-primary' }, `${projects.length} 个业务项目${hasUnassigned ? ' + 1 个未归属分组' : ''}`),
+          h('span', { className: HINT }, '项目 → 迭代 → 卡；本机代码目录与服务在「设置 → 项目与迭代」里维护')),
+        h(Button, { variant: 'secondary', size: 'sm', onClick: () => { if (typeof onOpenSettings === 'function') onOpenSettings() } }, '＋ 新建 / 管理项目'),
+      ),
       h('div', { className: 'grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3' },
         projects.map(project => card(
           `${project.key ? `[${project.key}] ` : ''}${project.name}`,
@@ -114,6 +133,29 @@ export function createProjectsPage({ h, React, api }) {
           action: h(Button, { variant: 'secondary', size: 'sm', onClick: () => onOpenBoard('') }, '先去建卡'),
         })
         : null,
+      taskPanel.rows.length === 0
+        ? null
+        : h('div', { className: SURFACE, 'data-projects-tasklist': '' },
+          h('div', { className: 'flex min-w-0 flex-wrap items-center justify-between gap-3' },
+            h('div', { className: 'flex min-w-0 flex-col gap-1' },
+              h('div', { className: 'text-body-2-medium text-text-primary' }, taskPanel.title),
+              h('div', { className: HINT }, taskPanel.subtitle),
+            ),
+            h(Button, { variant: 'ghost', size: 'sm', onClick: () => onOpenBoard('') }, '去看板'),
+          ),
+          h('div', { className: 'flex min-w-0 flex-col' },
+            taskPanel.rows.map(task => h('div', {
+              key: task.id,
+              className: 'flex min-w-0 items-center gap-3 border-b border-separator-border py-2 last:border-b-0',
+              'data-project-task': task.id,
+            },
+              h('span', { className: 'shrink-0 font-mono text-caption-1-regular text-text-tertiary' }, task.code || task.id),
+              h('span', { className: 'min-w-0 flex-1 truncate text-body-2-regular text-text-primary', title: task.title }, task.title),
+              h('span', { className: 'shrink-0 text-caption-1-regular text-text-secondary' }, statusLabel(task.status)),
+              h('span', { className: 'shrink-0 text-caption-1-regular text-text-tertiary tabular-nums' }, fmtTime(task.updatedAt)),
+            )),
+          ),
+        ),
     )
   }
 }

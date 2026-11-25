@@ -117,3 +117,36 @@ test('补挂计划：空输入、没工作区、会话头没 cwd 都不炸也不
   assert.deepEqual(workspaceAttachPlan({ sessions: [{ id: 'studio-a' }, { id: 'studio-b', cwd: '' }], workspaces: [{ id: 'w', path: '/x' }] }), [])
 })
 
+
+test('派单目录：按需求分组时，产品/架构/测试与单张研发卡都落同一个需求 worktree', () => {
+  const requirement = { id: 'r1', code: 'REQ-2026-001' }
+  const requirementWorktree = { path: '/repos/order-api/.agents/worktrees/REQ-2026-001', shared: true }
+  const plan = dispatchDirFor({
+    task: CARD,
+    context: projectContext(CONFIG, CARD),
+    fallbackDir: '/tmp/ws',
+    grouping: 'requirement',
+    requirement,
+    requirementWorktree,
+  })
+  assert.equal(plan.kind, 'requirement')
+  assert.equal(plan.dir, requirementWorktree.path)
+  assert.equal(plan.title, '订单中心 · REQ-2026-001', '同一需求的会话要落同一个侧栏文件夹')
+})
+
+test('派单目录：按需求分组但研发卡并发时，仍给研发卡单独的 worktree 隔离', () => {
+  const requirement = { id: 'r1', code: 'REQ-2026-001' }
+  const requirementWorktree = { path: '/repos/order-api/.agents/worktrees/REQ-2026-001', shared: true }
+  const plan = dispatchDirFor({
+    task: CARD,
+    worktree: { path: '/repos/order-api/.agents/worktrees/DEV-001-abc12345' },
+    context: projectContext(CONFIG, CARD),
+    fallbackDir: '/tmp/ws',
+    grouping: 'requirement',
+    requirement,
+    requirementWorktree,
+  })
+  assert.equal(plan.kind, 'worktree')
+  assert.equal(plan.dir, '/repos/order-api/.agents/worktrees/DEV-001-abc12345')
+  assert.equal(plan.title, '订单中心 · REQ-2026-001 · DEV-001', '并发研发卡的标题要能区分')
+})

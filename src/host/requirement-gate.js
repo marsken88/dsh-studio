@@ -4,6 +4,7 @@
  */
 import { COVERAGE_TARGET, coverageStrength } from './case-strength.js'
 import { isAiSignoff } from './intervention.js'
+import { caseNeedsRerun, requirementDocUpdatedAt } from './impact.js'
 
 /**
  * 可追溯矩阵：需求的功能点 → 卡片（含状态）→ 用例（通过/失败/没跑）→ 交付物。
@@ -11,6 +12,8 @@ import { isAiSignoff } from './intervention.js'
  */
 export function requirementMatrix(state, requirement) {
   const tasks = state.tasks.filter(task => task.requirementId === requirement.id)
+  // 需求文档（PRD / 验收标准）最近一次改版的时间：用来标「通过过、但文档改版后还没复跑」的用例。
+  const docUpdatedAt = requirementDocUpdatedAt(requirement)
   const points = (requirement.points ?? []).map(point => {
     const cards = tasks.filter(task => task.pointId === point.id)
     const cardIds = new Set(cards.map(card => card.id))
@@ -21,7 +24,7 @@ export function requirementMatrix(state, requirement) {
            以前 undefined !== '' 成立，这类用例被整条丢掉，卡挂了 p1 也没用，需求覆盖永远 0。 */
         const casePoint = String(item.pointId ?? '').trim() === '' ? String(card.pointId ?? '').trim() : String(item.pointId).trim()
         if (casePoint !== '' && casePoint !== point.id) continue
-        cases.push({ ...item, taskId: card.id, taskCode: card.code || card.id, taskTitle: card.title })
+        cases.push({ ...item, taskId: card.id, taskCode: card.code || card.id, taskTitle: card.title, stale: caseNeedsRerun(item, docUpdatedAt) })
       }
     }
     // 用例可能挂在别的卡上（比如测试卡），按 pointId 全局找一遍。
@@ -29,7 +32,7 @@ export function requirementMatrix(state, requirement) {
       if (cardIds.has(card.id)) continue
       for (const item of card.cases ?? []) {
         if (item.pointId !== point.id) continue
-        cases.push({ ...item, taskId: card.id, taskCode: card.code || card.id, taskTitle: card.title })
+        cases.push({ ...item, taskId: card.id, taskCode: card.code || card.id, taskTitle: card.title, stale: caseNeedsRerun(item, docUpdatedAt) })
       }
     }
     const artifacts = cards.flatMap(card => (card.artifacts ?? []).map(item => ({ ...item, taskCode: card.code || card.id })))
@@ -58,7 +61,7 @@ export function requirementMatrix(state, requirement) {
       acceptance,
       unmappedCases: unmapped,
       cards: cards.map(card => ({ id: card.id, code: card.code, title: card.title, status: card.status, date: card.status === 'done' ? card.updatedAt : 0 })),
-      cases: { total: cases.length, pass, fail, pending },
+      cases: { total: cases.length, pass, fail, pending, stale: cases.filter(item => item.stale === true).length },
       artifacts: artifacts.length,
       doneCards,
       covered,
@@ -75,6 +78,8 @@ export function requirementMatrix(state, requirement) {
     cases: points.reduce((sum, point) => sum + point.cases.total, 0),
     pass: points.reduce((sum, point) => sum + point.cases.pass, 0),
     fail: points.reduce((sum, point) => sum + point.cases.fail, 0),
+    /* 文档改版后要复跑的用例：通过过、但最后一次执行早于文档更新时间。 */
+    staleCases: points.reduce((sum, point) => sum + (point.cases.stale ?? 0), 0),
     artifacts: points.reduce((sum, point) => sum + point.artifacts, 0),
   }
   /* 需求文档（requirement.docs）也是「这一棒产出的文档」：矩阵的交付物数要一起算，

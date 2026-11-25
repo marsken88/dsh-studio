@@ -39,6 +39,17 @@ const browser = await puppeteer.launch({
   defaultViewport: { width: 1600, height: 1000 },
 })
 const page = await browser.newPage()
+/* 宿主登录也可能只认 cookie（?token= 是 agent 面板的入口）。STUDIO_COOKIE 支持
+   「name=value; name2=value2」，在做登录的实例上跑探针时用（值从浏览器 cookie 里取）。 */
+const cookieSpec = String(process.env.STUDIO_COOKIE ?? "").trim()
+if (cookieSpec !== "") {
+  const origin = new URL(baseUrl)
+  const parsed = cookieSpec.split(";").map(part => part.trim()).filter(Boolean).map(part => {
+    const at = part.indexOf("=")
+    return at > 0 ? { name: part.slice(0, at), value: part.slice(at + 1), domain: origin.hostname, path: "/" } : null
+  }).filter(Boolean)
+  if (parsed.length > 0) await page.setCookie(...parsed)
+}
 const errors = []
 page.on('pageerror', error => errors.push(String(error).slice(0, 160)))
 
@@ -310,58 +321,32 @@ try {
   })
   await page.emulateMediaFeatures([{ name: 'prefers-reduced-motion', value: 'no-preference' }])
 
-  // 7) 弹窗（版本页的确认框在「⋯」菜单里，交互链路长；挂了只记一笔，不影响其它检查）
+  // 7) 弹窗（版本页的「删除」确认框：打开一次、量完就 Esc，不会真的删）
   try {
-    // 4) 弹窗：版本页的确认框 / 输入框（弹层最容易漏，而且它盖住整页）
     report.dialogs = { opened: 0, audits: [], names: [] }
-    for (const tab of await page.$('[data-dsh-studio] [data-head-tabs] button')) {
+    for (const tab of await page.$$('[data-dsh-studio] [data-head-tabs] button')) {
       if (((await tab.evaluate(node => node.textContent)) || '').trim() === '版本') { await tab.click(); break }
     }
     await sleep(1500)
-    // 版本页的按钮要先选中一个版本才出现（中间那块详情区）
-    await page.evaluate(() => { const row = document.querySelector('[data-dsh-studio] [data-requirement-row]'); if (row !== null) row.click() })
+    // 版本详情要先选中一个版本
+    await page.evaluate(() => { const row = document.querySelector('[data-dsh-studio] [data-release-row]'); if (row !== null) row.click() })
     await sleep(1200)
-    // 动作按钮在「⋯」菜单里：先点开菜单，再从菜单项里找会弹确认框的那几个
-    const moreButton = await page.evaluate(() => {
-      const btn = [...document.querySelectorAll('[data-dsh-studio] [data-variant]')].find(node => (node.textContent || '').trim() === '⋯')
-      if (btn === undefined) return false
+    const clicked = await page.evaluate(() => {
+      const btn = [...document.querySelectorAll('[data-dsh-studio] button')].find(node => (node.textContent || '').trim() === '删除')
+      if (btn === undefined || btn.disabled === true) return false
       btn.click()
       return true
     })
-    await sleep(800)
-    const menuItems = moreButton
-      ? await page.$eval('[role="menuitem"], [data-dsh-studio] [role="menuitem"], [data-dsh-studio] [role="menuitem"]', nodes => nodes.map(node => node.textContent.trim()))
-      : []
-    const dialogTriggers = []
-    for (const label of menuItems) {
-      if (!/发布|部署|回滚|灰度|重置|删除|发布说明/.test(label)) continue
-      dialogTriggers.push(label)
+    await sleep(900)
+    const opened = await page.evaluate(() => document.querySelector('[data-dsh-studio-portal] [role="dialog"], [data-dsh-studio] [role="dialog"], [role="alertdialog"]') !== null)
+    if (clicked === true && opened === true) {
+      report.dialogs.opened += 1
+      report.dialogs.names.push('删除版本确认框')
+      const audit = await page.evaluate(collectAudit)
+      report.dialogs.audits.push({ label: '删除版本确认框', contrastCount: audit.contrastCount, unnamedCount: audit.unnamedCount, contrast: audit.contrast.slice(0, 5), unnamed: audit.unnamed.slice(0, 5) })
     }
-    for (const label of dialogTriggers.slice(0, 4)) {
-      try {
-        await page.evaluate(target => {
-          const item = [...document.querySelectorAll('[role="menuitem"], [data-dsh-studio] [role="menuitem"]')].find(node => (node.textContent || '').trim() === target)
-          if (item !== undefined) item.click()
-        }, label)
-        await sleep(900)
-        const opened = await page.evaluate(() => document.querySelector('[role="dialog"], [role="alertdialog"]') !== null)
-        if (!opened) { await page.keyboard.press('Escape'); continue }
-        report.dialogs.opened += 1
-        report.dialogs.names.push(label)
-        const audit = await page.evaluate(collectAudit)
-        report.dialogs.audits.push({ label, contrastCount: audit.contrastCount, unnamedCount: audit.unnamedCount, contrast: audit.contrast.slice(0, 5), unnamed: audit.unnamed.slice(0, 5) })
-        await page.keyboard.press('Escape')
-        await sleep(500)
-        // 菜单关掉了，为下一个触发项重新展开
-        await page.evaluate(() => {
-          const btn = [...document.querySelectorAll('[data-dsh-studio] [data-variant]')].find(node => (node.textContent || '').trim() === '⋯')
-          if (btn !== undefined) btn.click()
-        })
-        await sleep(600)
-      } catch {
-        await page.keyboard.press('Escape').catch(() => {})
-      }
-    }
+    await page.keyboard.press('Escape')
+    await sleep(400)
   } catch (dialogError) {
     report.dialogs = { ...(report.dialogs ?? {}), error: String(dialogError?.message ?? dialogError).slice(0, 120) }
   }
@@ -419,7 +404,12 @@ const summary = {
   drawer: report.drawer,
   reflow: report.reflow ?? [],
   reducedMotion: report.reducedMotion ?? null,
-  dialogs: { opened: report.dialogs?.opened ?? 0, error: report.dialogs?.error ?? null },
+  dialogs: {
+    opened: report.dialogs?.opened ?? 0,
+    error: report.dialogs?.error ?? null,
+    contrast: (report.dialogs?.audits ?? []).reduce((sum, item) => sum + item.contrastCount, 0),
+    unnamed: (report.dialogs?.audits ?? []).reduce((sum, item) => sum + item.unnamedCount, 0),
+  },
   error: report.error ?? null,
 }
 console.log(JSON.stringify(summary, null, 2))
@@ -438,9 +428,10 @@ if (summary.drawer?.present === true && summary.drawer.closedByEscape !== true) 
 const reflowBad = summary.reflow.filter(item => item.overflow > 1)
 if (reflowBad.length > 0) failures.push(`重排横向溢出：${reflowBad.map(item => item.label + ' ' + item.overflow + 'px').join('、')}`)
 if (summary.reducedMotion?.supported === true && summary.reducedMotion.neutralized !== true) failures.push('设置了减少动态效果但动画没关')
+if (summary.dialogs.opened > 0 && (summary.dialogs.contrast > 0 || summary.dialogs.unnamed > 0)) failures.push(`弹窗里有 ${summary.dialogs.contrast} 处对比度不达标 / ${summary.dialogs.unnamed} 个无名称`)
 
 console.log('')
 console.log(failures.length === 0
-  ? `无障碍巡检通过（${summary.theme}）：对比度 0 处 · 名称 0 缺失 · 焦点 0 次不可见 · 抽屉 ok · 重排 ok（${summary.reflow.length} 档） · 减少动态效果 ${summary.reducedMotion?.neutralized === true ? 'ok' : '未测到'} · 弹窗未覆盖`
+  ? `无障碍巡检通过（${summary.theme}）：对比度 0 处 · 名称 0 缺失 · 焦点 0 次不可见 · 抽屉 ok · 重排 ok（${summary.reflow.length} 档） · 减少动态效果 ${summary.reducedMotion?.neutralized === true ? 'ok' : '未测到'} · 弹窗 ${summary.dialogs.opened > 0 ? `${summary.dialogs.opened} 个（零问题）` : '未覆盖'}`
   : `无障碍巡检不通过（${summary.theme}）：${failures.join('；')}`)
 process.exit(failures.length === 0 ? 0 : 1)

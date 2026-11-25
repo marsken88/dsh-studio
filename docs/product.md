@@ -103,6 +103,19 @@ AI 是执行手，判定权在确定性规则和人手里。要变成 AI Native�
 | 19 | **多稿并定案** | 一卡多稿可对比；被配成设计闸门的列要「评审通过 **且** 已定案」才进开发；定案稿写进研发的派单提示词；老数据只有 `link` 时加载期归一成一稿，不许把已通过的卡挡回去 | ✅ 已做（0.9.24：`design.js` 的 `drafts` / `chosenId` + 抽屉「设计」页签；`tests/design-drafts.test.mjs` 8 条，含「重开 store 后迁移生效」与「派单提示词带上定案稿」） |
 | 20 | **交接契约** | 卡上有结构化 `handoff`（决策 / 假设 / 未决 / 风险 / 影响面）；抽屉「交接」页签可写；**派单提示词先读契约、再读最近评论**；清空保存 = 删除契约 | ✅ 已做（`src/host/handoff.js` + `studio_task_update.handoff` + 抽屉「交接」页签；`tests/handoff.test.mjs` 5 条，含 HTTP / 工具两个入口与提示词顺序；panel-probe 覆盖「页签五段可提交」） |
 | 21 | **发布审批进门禁** | 没人点过「审批通过」的版本不能发布：`releaseGate.blockers` 含「还没有发布审批」，`/release/publish` 直接拒绝 | ✅ 已做（2026-11-21：`src/host/release-model.js` 的 `releaseGate`；`tests/release-gate.test.mjs` 4 条，覆盖未审批 / 已审批 / 已发布 / 发布说明） |
+| 22 | **代码改动与评审可见** | 研发干完活，卡面就能看到「代码 N 文件 +A −D」与「评审通过 / 评审要改」；抽屉「执行记录 → 代码改动」用 BoardUI 树形视图按目录列出改动文件（新增/修改/删除标记），点文件看**分支 vs 基线**的逐行 patch（或切「全文」读工作树里的文件本体），并提示「还有 N 个文件没提交」；**研发忘了登记执行记录**时，进「待评审」平台从 worktree 的 git 事实补一条（agent 标成「git 自动采集」，不覆盖自报）；代码评审结论（工具与面板两条路）一定补成讨论区里的评论 | ✅ 已做（2026-11-24：`src/host/task-diff.js` + 只读 `POST /task/diff` + 抽屉「代码改动」+ 生成式执行记录；`tests/task-diff.test.mjs` 14 条，真机 panel-probe ⑦ 用真卡验到逐文件 diff（9 文件 +800 −11）、e2e 验到自动采集与评论） |
+| 23 | **文档改版后用例复跑** | PRD / 验收标准文档更新时间晚于用例最后一次通过执行 → 该用例在矩阵、抽屉测试页、影响面三处都标「需复跑」；**只标不改**（结果与状态不动，避免自动把通过改成待执行） | ✅ 已做（2026-11-24：`impact.js` 的 `requirementDocUpdatedAt` / `caseNeedsRerun` + `/task/parts`、`requirementMatrix`、`/requirement/impact`；`tests/acceptance.test.mjs` 2 条 + panel-probe ②c/③b） |
+| 24 | **矩阵行内编辑与批量验收** | 点「编辑」在矩阵表格上方就地展开表单（不跳页、自动滚动）；勾选多个功能点可批量替换验收条件（一行一条，id 按位置复用；删掉的条件上的用例变「未挂条件」，操作前有确认） | ✅ 已做（2026-11-24：`pages/requirements.js` 就地表单 + 选择列 + 批量表单；panel-probe ③c 3 条） |
+| 25 | **设置保存体验** | 页面级草稿（看板外观 / 角色与模型 / 自动派单）的保存条粘在面板底部、脏了标「未保存」，保存成功自动清脏；切分区前确认丢弃。分区保存 / 即时保存的开关不强行合并（不同对象、不同权限，避免误保存） | ✅ 已做（2026-11-24：`SettingsSaveBar` sticky + `dirty` 透传；panel-probe ④g 4 条） |
+| 26 | **工作区按需求分组** | 自动派单可选「一个需求一个文件夹」：同一需求的产品/架构/测试与单张研发卡共用一个需求 worktree，侧栏只出现一个文件夹；同需求多张研发卡并发时研发卡仍走卡级 git worktree，文件级隔离不丢 | ✅ 已做（2026-11-25：`workspaceGrouping` 配置 + `requirement-worktree.js` + `dispatchDirFor` 分组；单测 2 条；.218 已切 requirement） |
+| 27 | **新建需求用侧滑块** | 需求页不再把一长串新建表单铺在顶部；「新建需求 / 编辑」从右侧滑块打开，页面本体只留列表与详情 | ✅ 已做（2026-11-25：`requirements.js` 表单改 `SideDrawer`；`probe:panel` ③d 断言侧滑块打开） |
+| 28 | **需求详情分区页签** | 需求详情不再一条长页滚到底：概览 / 沟通 / 任务与验收 / 交付物 四个页签，只渲染当前分区；标题与页签常驻 | ✅ 已做（2026-11-25：`requirements.js` 加 `reqPane` + `data-req-panel` + CSS 切换；`probe:panel` ③e 5 条断言 → 85/85） |
+| 29 | **效能页分区分层** | 效能页不再一屏长滚动：顶部先给「现在最该看」结论条，再按 总览 / 交付效率 / AI 与成本 / 上下文 四页签展示；指标告警线（覆盖<60%、返工>30%、门禁偏离 40–70%、派单周活<15）直接写在顶部 | ✅ 已做（2026-11-25：`analytics.js` 加 `pane` + `data-analytics-panel` + focus banner；`probe:panel` ⑥d 3 条断言 → 88/88） |
+| 30 | **项目页新建入口** | 项目页顶部显示项目数与「＋ 新建 / 管理项目」，直接跳到设置的项目与迭代分区；不再只能看不能建 | ✅ 已做（2026-11-25：projects.js 工具栏 + onOpenSettings） |
+| 31 | **分区页签语义与加载态** | 需求/效能的分区切换用 `group + aria-pressed`（不再冒充未实现键盘导航的 ARIA tab）；效能页次数据加载中显示「正在算…/正在加载团队负载…」而不是像空数据 | ✅ 已做（2026-11-25：audit 违规 12→0；analytics loading） |
+| 32 | **门禁提示折叠** | 需求准出面板的 blocker/warning 超过 5 条时只露 5 条，其余折叠成「展开其余 N 条」，避免首屏一片红/黄 | ✅ 已做（2026-11-25：requirements gate details） |
+| 33 | **看板横向滚动提示** | 列多时看板右侧/左侧出现渐变边缘，提示还有列；方向键左右可滚动（aria-label 说的方向键以前是假的） | ✅ 已做（2026-11-25：board.js fades + ArrowLeft/Right） |
+| 34 | **负载/预算用官方 Meter** | 团队负载与预算使用是「容量占用」，改用 BoardUI Meter（role=meter）；完成率仍用 ProgressBar。审计探针补扫效能「AI 与成本」分区 | ✅ 已做（2026-11-25：analytics Meter；audit 30 模块 0 违规） |
 
 ## 5. 落地顺序
 

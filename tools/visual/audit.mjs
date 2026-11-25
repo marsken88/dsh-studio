@@ -68,6 +68,17 @@ const COUNT = () => {
 
 const browser = await puppeteer.launch({ executablePath: CHROME, headless: 'new', args: ['--no-sandbox'], defaultViewport: { width: 1680, height: 1000 } })
 const page = await browser.newPage()
+/* 宿主只认 cookie 时用 STUDIO_COOKIE（name=value; ...）登录。 */
+const cookieSpec = String(process.env.STUDIO_COOKIE ?? '').trim()
+if (cookieSpec !== '') {
+  await page.goto(BASE + '/', { waitUntil: 'domcontentloaded', timeout: 60000 })
+  const origin = new URL(BASE)
+  const parsed = cookieSpec.split(';').map(part => part.trim()).filter(Boolean).map(part => {
+    const at = part.indexOf('=')
+    return at > 0 ? { name: part.slice(0, at), value: part.slice(at + 1), url: origin.origin } : null
+  }).filter(Boolean)
+  if (parsed.length > 0) await page.setCookie(...parsed)
+}
 const errors = []
 page.on('pageerror', (e) => errors.push(String(e).slice(0, 160)))
 await page.goto(`${BASE}/?token=${TOKEN}`, { waitUntil: 'networkidle2', timeout: 60000 })
@@ -102,6 +113,13 @@ const clickTab = async (want) => {
 for (const label of PAGES) {
   await clickTab(label)
   await snap(label)
+  /* 效能页的 Meter（团队负载 / 预算使用）在「AI 与成本」分区里；
+     默认总览看不见，旧审计因此误报「全站没有 meter」。 */
+  if (label === '效能') {
+    await page.evaluate(() => document.querySelector('[data-analytics-tab="ai"]')?.click())
+    await snap('效能/AI 与成本')
+    await page.evaluate(() => document.querySelector('[data-analytics-tab="overview"]')?.click())
+  }
 }
 
 // 设置里的每个面板：左栏是 button[data-settings-nav-item]

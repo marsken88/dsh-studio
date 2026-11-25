@@ -1,8 +1,9 @@
 import { sanitizeAccess } from '../domain.js'
-const INJECTED = ["applyConfig","checkToolAccess","operatorFromSessionId","operatorOf","publicState","readJsonBody","sendJson"]
+const INJECTED = ["applyConfig","checkToolAccess","getWorkspaceRegistry","operatorFromSessionId","operatorOf","publicState","readJsonBody","sendJson"]
 let host = {
   applyConfig: () => {},
   checkToolAccess: () => {},
+  getWorkspaceRegistry: () => undefined,
   operatorFromSessionId: () => {},
   operatorOf: () => {},
   publicState: () => {},
@@ -32,6 +33,53 @@ if (method === 'POST' && route === '/config') {
   }
   await host.applyConfig(store, body)
   host.sendJson(res, 200, { ok: true, state: host.publicState(store) })
+  return true
+}
+/* 侧栏工作区的注册表：列出来 / 删掉重复注册（会话日志不删）。
+   工作区按 cwd 精确归属，插件没法合并；清理只能删注册。 */
+if (method === 'POST' && route === '/workspace/list') {
+  req.__studioReadOnly = true
+  const registry = host.getWorkspaceRegistry()
+  let list = []
+  try { list = typeof registry?.list === 'function' ? registry.list() : [] } catch { list = [] }
+  host.sendJson(res, 200, {
+    ok: true,
+    workspaces: list.map(item => ({
+      id: String(item.id ?? ''),
+      title: String(item.title ?? ''),
+      path: String(item.path ?? ''),
+      sessions: Array.isArray(item.sessionIds) ? item.sessionIds.length : 0,
+      sessionIds: Array.isArray(item.sessionIds) ? item.sessionIds.map(String) : [],
+      createdAt: String(item.createdAt ?? ''),
+      updatedAt: String(item.updatedAt ?? ''),
+    })),
+  })
+  return true
+}
+if (method === 'POST' && route === '/workspace/detach') {
+  const body = await host.readJsonBody(req)
+  const workspaceId = String(body.workspaceId ?? '').trim()
+  const sessionId = String(body.sessionId ?? '').trim()
+  const registry = host.getWorkspaceRegistry()
+  const workspace = workspaceId === '' ? undefined : (typeof registry?.get === 'function' ? registry.get(workspaceId) : undefined)
+  if (workspace === undefined || typeof workspace?.detachSession !== 'function' || sessionId === '') {
+    host.sendJson(res, 400, { ok: false, error: '缺 workspaceId/sessionId，或宿主没提供 workspaceRegistry' })
+    return true
+  }
+  await workspace.detachSession(sessionId)
+  host.sendJson(res, 200, { ok: true })
+  return true
+}
+if (method === 'POST' && route === '/workspace/delete') {
+  const body = await host.readJsonBody(req)
+  const id = String(body.id ?? '').trim()
+  const registry = host.getWorkspaceRegistry()
+  if (id === '' || typeof registry?.delete !== 'function') {
+    host.sendJson(res, 400, { ok: false, error: '缺 workspace id，或宿主没提供 workspaceRegistry' })
+    return true
+  }
+  const removed = await registry.delete(id)
+  host.sendJson(res, 200, { ok: true, removed: removed === true })
   return true
 }
 if (method === 'POST' && route === '/access/save') {

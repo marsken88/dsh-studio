@@ -106,11 +106,30 @@ export function workspaceAttachPlan({ sessions = [], workspaces = [] } = {}) {
   return plan
 }
 
-export function dispatchDirFor({ task, worktree, context, fallbackDir } = {}) {
+export function dispatchDirFor({ task, worktree, context, fallbackDir, grouping, requirement, requirementWorktree } = {}) {
   const code = String(task?.code ?? '').trim() || String(task?.id ?? '').trim().slice(-8)
   const projectName = String(context?.projectName ?? '').trim()
   const repoPath = String(context?.repoPath ?? '').trim()
   const worktreePath = String(worktree?.path ?? '').trim()
+  const reqCode = String(requirement?.code ?? '').trim() || String(requirement?.id ?? '').trim()
+  const reqDir = String(requirementWorktree?.path ?? '').trim()
+  /* 按需求分组：产品/架构/测试跑同一个需求工作树，会话因此落在同一个侧栏文件夹；
+     同一需求里有多张研发卡并发时，研发卡仍走自己的 worktree（标题带卡号，能区分）。 */
+  if (grouping === 'requirement' && reqCode !== '' && reqDir !== '') {
+    const perCard = worktreePath !== '' && worktree?.shared !== true
+    if (perCard) {
+      return {
+        kind: 'worktree',
+        dir: worktreePath,
+        title: projectName !== '' ? `${projectName} · ${reqCode} · ${code}` : `${STUDIO_WORKSPACE_TITLE} · ${reqCode} · ${code}`,
+      }
+    }
+    return {
+      kind: 'requirement',
+      dir: reqDir,
+      title: projectName !== '' ? `${projectName} · ${reqCode}` : `${STUDIO_WORKSPACE_TITLE} · ${reqCode}`,
+    }
+  }
   if (worktreePath !== '') {
     return {
       kind: 'worktree',

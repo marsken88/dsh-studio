@@ -248,6 +248,13 @@ try {
 
   // ---- 4) 多行输入：抽屉里的 textarea
   await page.evaluate(() => document.querySelector('[data-dsh-studio] [data-kanban-card]')?.click())
+  // 评论框现在只在「讨论」页常驻（测试/概览页收起了），先切页签再验多行输入。
+  await page.evaluate(() => {
+    const tab = document.querySelector('[data-drawer-tab="discuss"]')
+      ?? [...document.querySelectorAll('[role="tab"]')].find(node => String(node.textContent ?? '').includes('讨论'))
+    tab?.click()
+  })
+  await new Promise(resolve => setTimeout(resolve, 600))
   await page.waitForSelector('[data-dsh-studio] [data-drawer] textarea', { timeout: 30000 })
   const areaShape = await page.evaluate(() => {
     const area = document.querySelector('[data-dsh-studio] [data-drawer] textarea')

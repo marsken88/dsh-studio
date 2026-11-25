@@ -136,6 +136,14 @@ async function runOnce(round) {
   const rel = await post('/release/save', { release: { name: '全闭环自检版本 ' + stamp, version: '0.0.0-' + stamp.replace(/[^0-9]/g, ''), project: PROJECT, tagName: 'e2e-' + stamp.replace(/[^0-9]/g, ''), smoke: [{ text: '自检脚本跑通', done: true }] } })
   const release = rel.body.release ?? {}
   await post('/release/link', { id: release.id, taskIds: cardsNow.map(c => c.id) })
+  /* 审批是发布门禁（release-model.js）：先审批，再发布。以前自检直接 publish，
+     撞出「没审批 → 不许审批」的死锁（2026-11-24）。 */
+  const releaseApproved = await post('/release/approve', { id: release.id, by: '自检产品', note: '全闭环自检：审批通过' })
+  step('版本审批', releaseApproved.body.release?.status === 'approved', String(releaseApproved.body.release?.status ?? releaseApproved.body.error).slice(0, 60))
+  const releaseRevoked = await post('/release/approve', { id: release.id, by: '自检产品', action: 'revoke' })
+  step('撤销审批', releaseRevoked.body.release?.status === 'candidate', String(releaseRevoked.body.release?.status ?? releaseRevoked.body.error).slice(0, 60))
+  const releaseReApproved = await post('/release/approve', { id: release.id, by: '自检产品', note: '自检：重新审批' })
+  step('重新审批', releaseReApproved.body.release?.status === 'approved', String(releaseReApproved.body.release?.status ?? releaseReApproved.body.error).slice(0, 60))
   const published = await post('/release/publish', { id: release.id, by: '产品', confirm: 'PUBLISH' })
   step('版本发布', published.body.release?.status === 'released', String(published.body.release?.status ?? published.body.error).slice(0, 50))
 

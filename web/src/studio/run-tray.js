@@ -15,7 +15,7 @@
  * `data-run-tray` 是探针钩子（tools/visual/panel-probe.mjs 按它读运行数）。
  */
 
-const SUMMARY = 'flex cursor-pointer list-none items-center gap-2 rounded-md px-1 py-0.5 text-caption-1-regular text-text-tertiary'
+const SUMMARY = 'flex cursor-pointer list-none items-center gap-2 rounded-md px-1 py-1 text-caption-1-regular text-text-tertiary'
 const DOT = 'inline-block size-[7px] flex-none rounded-full'
 const PANEL = 'absolute right-0 top-[calc(100%+6px)] z-30 w-[min(380px,92vw)] min-w-[280px] rounded-lg border border-separator-border bg-background-primary-default p-2 shadow-lg'
 const ROW = 'border-t border-separator-border py-1 first:border-t-0'

@@ -532,6 +532,18 @@ html[data-dsh-theme="light"] [class*="rightbarCol"] { background: #fafafa !impor
    md-editor-bar / md-preview）。它不是组件样式，是「渲染出来的正文」的排版：
    颜色只取 BoardUI 的语义 token，字号走 4px 档（正文 13 / 标题 18·16·14 / 代码 12），
    行高落在 20·24·16 上。{--ds-*} 只在单文件产物（没有 index.css）里当兜底。 */
+/* 效能页分区：同上，只显示当前 pane 的直接子块。 */
+[data-analytics-pane="overview"] > [data-analytics-panel]:not([data-analytics-panel="overview"]),
+[data-analytics-pane="efficiency"] > [data-analytics-panel]:not([data-analytics-panel="efficiency"]),
+[data-analytics-pane="ai"] > [data-analytics-panel]:not([data-analytics-panel="ai"]),
+[data-analytics-pane="context"] > [data-analytics-panel]:not([data-analytics-panel="context"]) { display:none; }
+
+/* 需求详情分区：只显示当前 pane 的直接子块；顶部标题与 tab 栏没有 data-req-panel，始终可见。 */
+[data-req-pane="overview"] > [data-req-panel]:not([data-req-panel="overview"]),
+[data-req-pane="discuss"] > [data-req-panel]:not([data-req-panel="discuss"]),
+[data-req-pane="accept"] > [data-req-panel]:not([data-req-panel="accept"]),
+[data-req-pane="artifacts"] > [data-req-panel]:not([data-req-panel="artifacts"]) { display:none; }
+
 [data-dsh-studio] .md-content { white-space:normal; word-break:break-word; font-size:13px; line-height:20px; color:var(--color-text-primary, currentColor); }
 
 [data-dsh-studio] .md-content > *:first-child { margin-top:0; }
@@ -986,6 +998,7 @@ html[data-dsh-theme="light"] [class*="rightbarCol"] { background: #fafafa !impor
         agentsSandbox: config.agents?.sandbox ?? 'workspace-write',
         agentsEscalation: config.agents?.escalation ?? 'allow',
         agentsIsolation: config.agents?.isolation ?? 'none',
+        agentsGrouping: config.agents?.workspaceGrouping === 'requirement' ? 'requirement' : 'card',
         agentsWorktreeRoot: config.agents?.worktreeRoot ?? '',
         agentsCleanup: config.agents?.cleanupWorktree ?? 'manual',
         agentsAuto: Array.isArray(config.agents?.autoStatuses) ? config.agents.autoStatuses : ['design', 'dev_ready', 'test'],
@@ -993,6 +1006,31 @@ html[data-dsh-theme="light"] [class*="rightbarCol"] { background: #fafafa !impor
       const [status, setStatus] = React.useState(null)
       const [error, setError] = React.useState(null)
       const [busy, setBusy] = React.useState(false)
+      /* 未保存提醒：设置页有 18 个分区，一大半是「改完点保存」。这里只跟踪**文本输入**
+         （下拉/开关在好几块里是即时保存的，不能算脏），保存按钮点过就清掉。
+         切分区时如果还脏，先确认再切，别让一页改动静默丢掉。 */
+      const [dirty, setDirty] = React.useState(false)
+      const markDirty = event => {
+        const target = event.target
+        const tag = target?.tagName
+        /* 下拉在大多数面板是即时保存的（权限、测试开关），不能一概算脏；
+           但「看板外观 / 角色与模型 / 自动派单」这三块是草稿 + 保存条，改了下拉也要提示。 */
+        if (tag === 'SELECT') {
+          if (event.currentTarget?.getAttribute?.('data-draft-form') === '1') setDirty(true)
+          return
+        }
+        if (tag !== 'INPUT' && tag !== 'TEXTAREA') return
+        if (tag === 'INPUT' && ['checkbox', 'radio', 'file', 'range', 'color', 'search'].includes(String(target.type))) return
+        // 搜索/筛选框不是表单字段：在设置页里搜一下再切分区，不该弹「未保存」。
+        const label = `${target.getAttribute?.('placeholder') ?? ''} ${target.getAttribute?.('aria-label') ?? ''}`
+        if (/搜|筛/.test(label)) return
+        setDirty(true)
+      }
+      const clearDirtyOnSave = event => {
+        const button = event.target?.closest?.('button')
+        if (button === null || button === undefined) return
+        if (/^保存/.test(String(button.textContent ?? '').trim())) setDirty(false)
+      }
 
       const save = async () => {
         setBusy(true); setError(null); setStatus(null)
@@ -1008,12 +1046,14 @@ html[data-dsh-theme="light"] [class*="rightbarCol"] { background: #fafafa !impor
               sandbox: form.agentsSandbox,
               escalation: form.agentsEscalation,
               isolation: form.agentsIsolation,
+              workspaceGrouping: form.agentsGrouping,
               worktreeRoot: form.agentsWorktreeRoot,
               cleanupWorktree: form.agentsCleanup,
               autoStatuses: form.agentsAuto,
             },
           })
           setStatus('已保存')
+          setDirty(false)
           await onChanged()
         } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)) } finally { setBusy(false) }
       }
@@ -1028,7 +1068,10 @@ html[data-dsh-theme="light"] [class*="rightbarCol"] { background: #fafafa !impor
         if (typeof initialSection === 'string' && initialSection !== '') setSection(initialSection)
       }, [initialSection])
 
-      const pickSection = next => {
+      const pickSection = async next => {
+        if (next === section) return
+        if (dirty === true && !(await confirmDialog('这一页还有未保存的修改，切走就丢了。继续？', { title: '未保存的修改', danger: true, okText: '丢弃并切换' }))) return
+        setDirty(false)
         setSection(next)
         onSection?.(next)
       }
@@ -1053,7 +1096,7 @@ html[data-dsh-theme="light"] [class*="rightbarCol"] { background: #fafafa !impor
         health: ['集成健康', '飞书通知、GitLab、飞书云盘、代码隔离四条外部通道最近一次是成功还是失败。以前这些失败只写进日志，现在会在这里亮出来，坏了能看见、能补一次。'],
       }
 
-      const saveBar = h(SettingsSaveBar, { busy, status, error, onSave: save })
+      const saveBar = h(SettingsSaveBar, { busy, status, error, dirty, onSave: save })
 
       const nav = [
         { group: '团队' },
@@ -1130,11 +1173,25 @@ html[data-dsh-theme="light"] [class*="rightbarCol"] { background: #fafafa !impor
                   ? null
                   : h('span', { className: 'shrink-0 text-caption-1-regular tabular-nums text-text-tertiary' }, String(item.count))))),
         ),
-        h('div', { className: 'flex min-w-0 flex-col gap-4', 'data-settings-pane': section },
+        h('div', {
+          className: 'flex min-w-0 flex-col gap-4',
+          'data-settings-pane': section,
+          'data-settings-dirty': dirty ? '1' : '0',
+          // 草稿 + 保存条的面板：下拉改动也算未保存（其余面板的下拉多数是即时保存）
+          'data-draft-form': ['board', 'models', 'agents'].includes(section) ? '1' : '0',
+          onChange: markDirty,
+          onInput: markDirty,
+          onClick: clearDirtyOnSave,
+        },
           h('div', { className: 'flex flex-col gap-1' },
             h('div', { className: 'text-title-2-semibold text-text-primary' }, (PANE_META[section] ?? ['设置'])[0]),
             h('div', { className: 'text-caption-1-regular text-text-tertiary' }, (PANE_META[section] ?? ['', ''])[1]),
           ),
+          dirty
+            ? h('div', { className: 'flex flex-wrap items-center gap-2 rounded-xl bg-status-yellow-background px-3 py-2 text-caption-1-regular text-status-yellow-text', 'data-settings-dirty-banner': '' },
+              h('span', { className: 'font-medium' }, '有未保存的修改'),
+              h('span', null, '改完点本页的「保存」；切到别的分区会先问你'))
+            : null,
           paneFor(section)),
       )
     }
@@ -1467,9 +1524,9 @@ function installKeyboardActivation() {
     const BODY = 'flex min-h-0 flex-1 flex-col gap-4 overflow-auto p-6'
     const HEAD_STAT = 'text-caption-1-regular text-text-tertiary max-[760px]:hidden'
     const SEG_GROUP = 'inline-flex items-center gap-1 rounded-lg border border-separator-border bg-background-secondary-default p-1'
-    const MENU_SHELL = 'absolute right-0 top-[calc(100%+6px)] z-[80] min-w-[232px] rounded-xl border border-separator-border bg-background-primary-default p-1.5 shadow-lg'
-    const MENU_ROW = 'block w-full rounded-md px-3 py-1.5 text-left text-body-2-regular text-text-primary hover:bg-background-secondary-default'
-    const MENU_BLOCK = 'flex w-full flex-col items-start gap-0.5 rounded-md px-3 py-1.5 text-left hover:bg-background-secondary-default'
+    const MENU_SHELL = 'absolute right-0 top-[calc(100%+6px)] z-[80] min-w-[232px] rounded-xl border border-separator-border bg-background-primary-default p-1 shadow-lg'
+    const MENU_ROW = 'block w-full rounded-md px-3 py-2 text-left text-body-2-regular text-text-primary hover:bg-background-secondary-default'
+    const MENU_BLOCK = 'flex w-full flex-col items-start gap-1 rounded-md px-3 py-2 text-left hover:bg-background-secondary-default'
     const MENU_BLOCK_TITLE = 'text-body-2-medium text-text-primary'
     const TAB_BASE = 'inline-flex shrink-0 items-center rounded-t-lg px-3 py-2 text-body-2-regular transition-colors'
     const TAB_ON = TAB_BASE + ' bg-background-primary-default font-semibold text-text-primary shadow-sm'
@@ -1679,10 +1736,13 @@ function installKeyboardActivation() {
                 ? h(Button, {
                     variant: 'ghost',
                     size: 'sm',
+                    // 集成异常是错误语义：边框/文字/底色统一用 rose；以前是 ghost 按钮里套 rose chip，
+                    // 键盘聚焦时外圈还是主题蓝，蓝框配红字，看着像两个互不相干的信号。
+                    className: '!border !border-status-rose-text/40 !bg-status-rose-background !text-status-rose-text hover:!bg-status-rose-background/80 focus-visible:!ring-status-rose-text',
                     'data-integration-alert': String(state.integrations.broken),
                     title: (state.integrations.channels ?? []).filter(item => item.state === 'error').map(item => `${item.label}：${item.lastError}`).join('\n'),
                     onClick: () => { setTab('settings'); setSettingsSection('health') },
-                  }, h(ChipField, { variant: 'rose' }, `集成异常 ${state.integrations.broken}`))
+                  }, `集成异常 ${state.integrations.broken}`)
                 : null,
               h('div', { className: 'relative', 'data-new-menu': '' },
                 h(Button, {
@@ -1779,7 +1839,7 @@ function installKeyboardActivation() {
             : tab === 'releases'
               ? h(ReleasesPage, { state, onOpenTask: setOpenId })
             : tab === 'projects'
-              ? h(ProjectsOverview, { state, onOpenBoard: () => setTab('board') })
+              ? h(ProjectsOverview, { state, onOpenBoard: () => setTab('board'), onOpenSettings: () => { setSettingsSection('projects'); setTab('settings') } })
               : tab === 'analytics'
                 ? h(AnalyticsPage, { state, onOpenTask: setOpenId, onFixPrices: models => { setCostSuggest(Array.isArray(models) ? models : []); setSettingsSection('costs'); setTab('settings') } })
               : tab === 'market'

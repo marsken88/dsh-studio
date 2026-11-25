@@ -429,7 +429,7 @@ export function TeamsPanel({ config, onChanged }) {
                 onChange: e => set('members', e.target.checked
                   ? [...(draft.members ?? []), expert.id]
                   : (draft.members ?? []).filter(id => id !== expert.id)),
-              }, `${expert.emoji} ${expert.name}`)),
+              }, expert.name)),
             ),
         ),
         fieldOf(h, '团长（负责拆活和汇总）',

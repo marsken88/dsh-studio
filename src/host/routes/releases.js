@@ -158,13 +158,32 @@ export async function handleReleasesRoute({ method, route, req, res, store, url 
   if (method === 'POST' && route === '/release/approve') {
     const body = await host.readJsonBody(req)
     const id = String(body.id ?? '')
+    const action = String(body.action ?? 'approve')
     const by = String(body.by ?? '人').slice(0, 120)
     let release = null
     let gate = null
     await store.mutate(state => {
       const found = state.releases.find(item => item.id === id)
       if (found === undefined) throw new Error('版本不存在')
-      gate = host.releaseGate(state, found)
+      /* 撤销审批：已发布的版本不能撤；撤掉之后回到 candidate，要重新审批才能发布。 */
+      if (action === 'revoke') {
+        if (found.status === 'released') throw new Error('已发布的版本不能撤销审批')
+        const count = (found.approvals ?? []).length
+        found.approvals = []
+        found.status = 'candidate'
+        found.approveBy = ''
+        found.approveAt = 0
+        found.deployLog = [...(found.deployLog ?? []), {
+          at: Date.now(), by, action: 'revoke', note: `撤销审批（原 ${count} 条）`,
+        }].slice(-200)
+        found.updatedAt = Date.now()
+        release = { ...found }
+        gate = host.releaseGate(state, found)
+        return
+      }
+      /* 审批动作只看「除了审批之外」的门禁：否则「没审批 → 不许审批」死锁（2026-11-24 e2e 自检抓到，
+         面板上的审批按钮也永远灰着）。 */
+      gate = host.releaseGate(state, found, { ignoreApproval: true })
       if (!gate.ready) throw new Error(`门禁没过：${gate.blockers.join('；')}`)
       found.status = 'approved'
       found.approveBy = by
@@ -181,6 +200,7 @@ export async function handleReleasesRoute({ method, route, req, res, store, url 
       }].slice(-200)
       found.updatedAt = Date.now()
       release = { ...found }
+      gate = host.releaseGate(state, found)
     })
     host.sendJson(res, 200, { ok: true, release, gate, state: host.publicState(store) })
     return true

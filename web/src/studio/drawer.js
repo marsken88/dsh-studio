@@ -5,7 +5,7 @@ import { ARTIFACT_KINDS, ARTIFACT_KIND_LABEL, ARTIFACT_STATUS, ARTIFACT_STATUS_L
 import { artifactsWithoutBody, buildRoster, cardOwner, caseSummaryOf, checkSummaryOf, commentCountOf, filterRoster, fromDateInput, ownerLabel, toDateInput } from './roster.js'
 import { fmtTime } from './format.js'
 import { parseSteps } from './cases.js'
-import { Button } from '../boardui/index'
+import { Button, TreeView, TreeViewItem } from '../boardui/index'
 import { EmptyState } from '../boardui/empty-state'
 import { ProgressTrack } from '../components/base/progress/progress'
 
@@ -20,13 +20,13 @@ const LABEL = 'text-caption-1-medium text-text-secondary'
 const SECTION = 'flex min-w-0 flex-col gap-3 rounded-xl border border-separator-border bg-background-primary-default p-4'
 const SECTION_HEAD = 'flex min-w-0 flex-wrap items-center gap-2'
 const SECTION_TITLE = 'text-title-2-semibold text-text-primary'
-const SECTION_BODY = 'flex min-w-0 flex-col gap-2'
+const SECTION_BODY = 'flex min-w-0 flex-col gap-3'
 const ACTIONS = 'flex flex-wrap items-center gap-2'
 const PANEL = 'flex min-w-0 flex-col gap-2 rounded-xl border border-separator-border bg-background-primary-default p-3'
 const PANEL_HEAD = 'flex min-w-0 items-start gap-2'
 const PANEL_LINE = 'min-w-0 break-words text-body-2-semibold text-text-primary'
 const ART_TITLE = 'text-body-2-semibold text-text-primary'
-const ART_REF = 'break-all font-mono text-caption-1-regular text-text-tertiary'
+const ART_REF = 'break-words font-mono text-caption-1-regular text-text-secondary'
 const ERR_TEXT = 'text-caption-1-regular text-text-error-primary'
 const OK_TEXT = 'text-caption-1-regular text-state-success-text'
 const WARN_TEXT = 'whitespace-nowrap text-caption-1-semibold text-text-error-primary'
@@ -37,10 +37,12 @@ const LINK = 'text-caption-1-regular text-accent-600 hover:underline'
 const LIST_ROW = 'flex min-w-0 items-center gap-2 border-b border-l-2 border-separator-border py-2 last:border-b-0 border-l-separator-border'
 const CASE_RESULT_RAIL = {
   fail: 'border-l-border-error-default bg-background-tertiary-error',
-  pass: 'border-l-state-success-base',
-  pending: 'border-l-separator-border',
-  skip: 'border-l-separator-border',
+  pass: 'border-l-state-success-text',
+  // pending 与 skip 必须能分开：未跑=黄，跳过=中性灰
+  pending: 'border-l-status-yellow-text',
+  skip: 'border-l-separator-border-strong',
 }
+const CASE_RESULT_CHIP = { pass: 'lime', fail: 'rose', pending: 'yellow', skip: 'neutral' }
 const COMMENT_ROLE_RAIL = {
   product: 'border-l-status-blue-text',
   architect: 'border-l-status-purple-text',
@@ -50,6 +52,54 @@ const COMMENT_ROLE_RAIL = {
 const EMPTY_BOX = 'flex min-w-0 flex-col gap-1 rounded-xl border border-separator-border bg-background-secondary-default p-3'
 
 const DESIGN_LABEL = { approved: '已通过', pending: '待评审', changes_requested: '要改' }
+
+/* 代码改动的文件树：git 只给扁平路径，这里拼成目录树，抽屉用 BoardUI TreeView 展示。
+   目录在前、同类按名字排序；节点 id 用完整路径（选中状态与 DOM 钩子都靠它）。 */
+const DIFF_CHANGE_LABEL = { added: '新增', modified: '修改', deleted: '删除', renamed: '改名', copied: '复制' }
+const DIFF_CHANGE_CLASS = {
+  added: 'text-state-success-text',
+  modified: 'text-accent-600',
+  deleted: 'text-text-error-primary',
+  renamed: 'text-status-purple-text',
+  copied: 'text-status-purple-text',
+}
+
+function buildDiffTree(files) {
+  const root = []
+  for (const file of files) {
+    const path = String(file.path ?? '')
+    const segments = path.split('/').filter(Boolean)
+    if (segments.length === 0) continue
+    let level = root
+    let prefix = ''
+    for (const segment of segments.slice(0, -1)) {
+      prefix = prefix === '' ? segment : `${prefix}/${segment}`
+      let node = level.find(item => item.kind === 'dir' && item.name === segment)
+      if (node === undefined) {
+        node = { kind: 'dir', id: prefix, name: segment, path: prefix, children: [] }
+        level.push(node)
+      }
+      level = node.children
+    }
+    level.push({ kind: 'file', id: path, name: segments[segments.length - 1], path, file })
+  }
+  const sort = nodes => {
+    nodes.sort((a, b) => (a.kind === b.kind ? a.name.localeCompare(b.name) : a.kind === 'dir' ? -1 : 1))
+    for (const node of nodes) if (node.kind === 'dir') sort(node.children)
+  }
+  sort(root)
+  return root
+}
+
+/** 默认把所有目录展开：改动文件大多两三层，收着反而要多点好几下。 */
+function diffDirIds(nodes, out = []) {
+  for (const node of nodes) {
+    if (node.kind !== 'dir') continue
+    out.push(node.id)
+    diffDirIds(node.children, out)
+  }
+  return out
+}
 
 /* 交接契约五段式：顺序与 src/host/handoff.js 的 HANDOFF_FIELDS 一致。
    标签在这里写死是为了不把 host 模块 import 进浏览器包（会多带一份纯函数）。 */
@@ -138,6 +188,8 @@ function Drawer({ task, state, onClose, onChanged }) {
   const [newItem, setNewItem] = React.useState('')
   const [artifact, setArtifact] = React.useState({ kind: 'doc', title: '', ref: '', content: '' })
   const [artEdit, setArtEdit] = React.useState(null)
+  // 交付物多了先筛再找：按标题 / 类型 / 链接。
+  const [artifactQuery, setArtifactQuery] = React.useState('')
   const [artRead, setArtRead] = React.useState(null)
   // 截图预览：只取 data URL，不把磁盘路径变成静态资源
   const [imageOf, setImageOf] = React.useState('')
@@ -147,13 +199,23 @@ function Drawer({ task, state, onClose, onChanged }) {
   const [artBodies, setArtBodies] = React.useState({})
   // 评论正文同样不随轮询下发（一条讨论动辄几百字），抽屉打开时按卡取一次。
   const [commentList, setCommentList] = React.useState(null)
+  /* 评论编辑：后端 /task/comment 支持 update/remove 并留历史，界面之前没有入口。 */
+  const [commentEdit, setCommentEdit] = React.useState(null)
   // 用例与验收清单的正文同样按需取，轮询只给计数。
   const [parts, setParts] = React.useState(null)
-  React.useEffect(() => { setArtBodies({}); setArtRead(null); setArtEdit(null) }, [task.id])
+  React.useEffect(() => { setArtBodies({}); setArtRead(null); setArtEdit(null); setArtifactQuery('') }, [task.id])
   // 新用例的 pointId 默认跟卡走：一个功能点通常多条用例，别让人每条都选一次（issue #11 可发现性）
   const [newCase, setNewCase] = React.useState({ title: '', expected: '', steps: '', stepsText: '', type: 'functional', tier: '', priority: 'p2', preconditions: '', pointId: task.pointId ?? '' })
   const [caseRun, setCaseRun] = React.useState({ busy: false, note: '' })
   const [caseGen, setCaseGen] = React.useState({ busy: false, note: '' })
+  /* 用例明细默认收起：接口/响应/步骤/功能点/记录一展开就是十几行，35 条用例滚不动。 */
+  const [expandedCaseIds, setExpandedCaseIds] = React.useState(() => new Set())
+  /* 用例筛选：默认失败→未跑→跳过→通过，和用例库页一致。 */
+  const [caseFilter, setCaseFilter] = React.useState('all')
+  const [caseQuery, setCaseQuery] = React.useState('')
+  /* 改定义：一个表单，不再连弹 4 个 prompt。 */
+  const [caseEdit, setCaseEdit] = React.useState(null)
+  const [caseBugMap, setCaseBugMap] = React.useState({})
   const [codingDraft, setCodingDraft] = React.useState(null)
   const [reviewNote, setReviewNote] = React.useState('')
   const coding = task.coding ?? null
@@ -164,6 +226,77 @@ function Drawer({ task, state, onClose, onChanged }) {
   const worktree = task.worktree ?? null
   const [worktreeMsg, setWorktreeMsg] = React.useState('')
   const [verify, setVerify] = React.useState({ busy: false, line: '', ok: null })
+  /* 代码改动：直接读仓库里的 git diff（只读路由，不推 revision）。
+     切到「执行记录」页签时按需加载；文件逐个折叠，点开看逐行 patch —— 人不用再自己去仓库敲 git diff。 */
+  const [diffView, setDiffView] = React.useState(null)
+  const [diffBusy, setDiffBusy] = React.useState(false)
+  const [diffError, setDiffError] = React.useState(null)
+  // 文件树里选中的那个文件：默认选第一个有改动的文件，打开就能看到内容。
+  const [diffPath, setDiffPath] = React.useState('')
+  // 「看全部 / 看某一次提交」与按路径筛文件。
+  const [diffCommit, setDiffCommit] = React.useState('')
+  const [diffQuery, setDiffQuery] = React.useState('')
+  // 右边内容区看「改动（patch）」还是「全文（工作树里的文件）」。
+  const [diffMode, setDiffMode] = React.useState('diff')
+  const [fileView, setFileView] = React.useState(null)
+  const loadFile = async path => {
+    setFileView({ path, busy: true, data: null, error: null })
+    try {
+      const out = await api('/task/file', { id: task.id, path })
+      setFileView({ path, busy: false, data: out ?? null, error: null })
+    } catch (cause) {
+      setFileView({ path, busy: false, data: null, error: cause instanceof Error ? cause.message : String(cause) })
+    }
+  }
+  const selectDiffFile = path => {
+    setDiffPath(path)
+    setFileView(null)
+    if (diffMode === 'file' && path !== '') void loadFile(path)
+  }
+  /* 复制路径 / 复制内容：非安全上下文（http 的 .218）里 navigator.clipboard 不可用，退回 execCommand。 */
+  const copyPlain = async (text, label) => {
+    const value = String(text ?? '')
+    if (value === '') { setNotice('没有可复制的内容'); return }
+    let ok = false
+    try { await navigator.clipboard.writeText(value); ok = true } catch { /* 走下面的兜底 */ }
+    if (!ok) {
+      try {
+        const area = document.createElement('textarea')
+        area.value = value
+        area.style.position = 'fixed'
+        area.style.opacity = '0'
+        document.body.appendChild(area)
+        area.select()
+        ok = document.execCommand('copy')
+        area.remove()
+      } catch { ok = false }
+    }
+    setNotice(ok ? `已复制${label}（${value.length} 字）` : `复制失败：浏览器不允许写剪贴板，手动选中${label}吧`)
+  }
+  const loadDiff = async (commit = diffCommit) => {
+    if (diffBusy) return
+    setDiffBusy(true)
+    setDiffError(null)
+    try {
+      const out = await api('/task/diff', { id: task.id, ...(commit === '' ? {} : { commit }) })
+      setDiffView(out ?? null)
+      const files = Array.isArray(out?.files) ? out.files : []
+      setDiffPath(current => (files.some(item => item.path === current) ? current : (files[0]?.path ?? '')))
+    } catch (cause) {
+      setDiffError(cause instanceof Error ? cause.message : String(cause))
+    } finally {
+      setDiffBusy(false)
+    }
+  }
+  React.useEffect(() => {
+    setDiffView(null)
+    setDiffPath('')
+    setDiffError(null)
+    setDiffMode('diff')
+    setFileView(null)
+    setDiffCommit('')
+    setDiffQuery('')
+  }, [task.id])
   // 项目检查：跑本地质量命令（npm run check 之类），结果由服务端写回卡片。
   const [qualityRun, setQualityRun] = React.useState({ busy: false, line: '' })
   const quality = task.quality ?? null
@@ -175,6 +308,8 @@ function Drawer({ task, state, onClose, onChanged }) {
   const caseSum = caseSummaryOf(task)
   const checkSum = checkSummaryOf(task)
   const cases = parts !== null && Array.isArray(parts.cases) ? parts.cases : (Array.isArray(task.cases) ? task.cases : [])
+  // 需求文档改版后，之前通过过的用例要复跑（服务端按文档更新时间算好 stale，界面只显示）
+  const staleCases = cases.filter(item => item.stale === true).length
   /* 三层测试：服务端算好的分层进度与缺口（parts.plan），以及最近几次执行批次。
      界面不自己重算一遍口径 —— 门禁读的也是服务端这一份。 */
   const testPlanTiers = parts !== null && parts.plan !== null && parts.plan !== undefined && Array.isArray(parts.plan.tiers) ? parts.plan.tiers : []
@@ -184,13 +319,27 @@ function Drawer({ task, state, onClose, onChanged }) {
   const [gateNote, setGateNote] = React.useState('')
   const casePass = caseSum.pass
   const caseFail = caseSum.fail
-  const caseRest = Math.max(0, caseSum.total - casePass - caseFail)
+  const caseSkip = cases.filter(item => item.result === 'skip').length
+  const casePending = Math.max(0, caseSum.total - casePass - caseFail - caseSkip)
+  const caseRank = { fail: 0, pending: 1, skip: 2, pass: 3 }
+  const caseQueryText = caseQuery.trim().toLowerCase()
+  const visibleCases = cases
+    .filter(item => {
+      if (caseFilter !== 'all' && item.result !== caseFilter) return false
+      if (caseQueryText === '') return true
+      return [item.title, item.expected, item.note].join(' ').toLowerCase().includes(caseQueryText)
+    })
+    .sort((a, b) => (caseRank[a.result] ?? 9) - (caseRank[b.result] ?? 9))
   const caseSummary = caseSum.total === 0
     ? ''
-    : `${caseSum.total} 条 · 通过 ${casePass} · 不通过 ${caseFail}${caseRest > 0 ? ` · 没跑 ${caseRest}` : ''}`
+    : `${caseSum.total} 条 · 通过 ${casePass} · 不通过 ${caseFail}${casePending > 0 ? ` · 未跑 ${casePending}` : ''}${caseSkip > 0 ? ` · 跳过 ${caseSkip}` : ''}`
   const checklist = parts !== null && Array.isArray(parts.checklist) ? parts.checklist : (Array.isArray(task.checklist) ? task.checklist : [])
   const doneCount = checkSum.done
   const artifacts = task.artifacts ?? []
+  const artifactQueryText = artifactQuery.trim().toLowerCase()
+  const visibleArtifacts = artifactQueryText === ''
+    ? artifacts
+    : artifacts.filter(item => [item.title, item.ref, ARTIFACT_KIND_LABEL[item.kind] ?? item.kind].join(' ').toLowerCase().includes(artifactQueryText))
   // 轮询给的只有 contentLength；正文要么已经取过（artBodies），要么还在路上。
   const artifactBody = (item) => (artBodies[item.id] !== undefined ? artBodies[item.id] : String(item.content ?? ''))
   const artifactHasBody = (item) => (typeof item.contentLength === 'number' ? item.contentLength > 0 : String(item.content ?? '').trim() !== '')
@@ -231,7 +380,7 @@ function Drawer({ task, state, onClose, onChanged }) {
       if (alive) setCommentList(Array.isArray(json?.comments) ? json.comments : [])
     }).catch(() => { if (alive) setCommentList([]) })
     return () => { alive = false }
-  }, [task.id, commentTotal])
+  }, [task.id, commentTotal, task.updatedAt])
   // 用例、清单、执行批次与测试计划正文：抽屉打开（或卡片有任何写入）时取一次。
   // 以前空卡直接跳过请求，但「零用例 + 已声明某层不适用」也是要展示的状态，所以不再短路。
   React.useEffect(() => {
@@ -248,12 +397,21 @@ function Drawer({ task, state, onClose, onChanged }) {
     }).catch(() => { if (alive) setParts({ cases: [], checklist: [], testRuns: [], testPlan: null, plan: null }) })
     return () => { alive = false }
   }, [task.id, task.updatedAt, caseSum.total, caseSum.pass, caseSum.fail, checkSum.total, checkSum.done])
-  const [pane, setPane] = React.useState('overview')
-  React.useEffect(() => { setPane('overview') }, [task.id])
+  /* 打开卡默认落在最该干活的页：待测试 → 测试，待评审 → 执行记录，其余回概览。 */
+  const initialPaneFor = status => status === 'test' ? 'test' : status === 'review' ? 'coding' : status === 'accept' ? 'test' : 'overview'
+  const [pane, setPane] = React.useState(() => initialPaneFor(task.status))
+  React.useEffect(() => { setPane(initialPaneFor(task.status)) }, [task.id])
   // 切页签时把内容滚回顶部，否则从长页面切到「讨论」会停在中间，看起来像只显示了半截。
   React.useEffect(() => {
     const node = bodyRef.current
     if (node !== null) node.scrollTop = 0
+  }, [pane, task.id])
+  /* 第一次切到「执行记录」时自动读一次 git diff：否则要人先点一下「读取」才知道有这个功能。
+     已读过 / 正在读 / 上次报错都跳过，别每次轮询都去敲一遍 git；刷新有按钮。 */
+  React.useEffect(() => {
+    if (pane !== 'coding') return
+    if (diffView !== null || diffBusy || diffError !== null) return
+    void loadDiff()
   }, [pane, task.id])
   const tabs = [
     { id: 'overview', label: '概览', hint: '标题、状态、负责人、阻塞原因与关键时间' },
@@ -263,7 +421,7 @@ function Drawer({ task, state, onClose, onChanged }) {
     { id: 'design', label: '设计', count: designDrafts.length > 0 ? designDrafts.length : '', hint: '多稿对比与定案' },
     { id: 'deliver', label: '交付物', count: artifacts.length > 0 ? artifacts.length : '', hint: '文档 / MR / 用例 / 报告；空的交付物会被准出拦下' },
     { id: 'test', label: '测试', count: caseSum.total > 0 ? `${casePass}/${caseSum.total}` : (checkSum.total > 0 ? `${doneCount}/${checkSum.total}` : ''), hint: '三层测试进度（单元/集成/端到端）、验收清单与执行记录；失败用例自动开缺陷' },
-    { id: 'coding', label: '执行记录', count: coding === null ? '' : (coding.review?.status === 'approved' ? '✓ 已评审' : ''), hint: 'AI 的分支、提交、改动文件；可以「核对代码事实」' },
+    { id: 'coding', label: '执行记录', count: coding === null ? '' : (coding.review?.status === 'approved' ? '✓ 已评审' : ''), hint: '代码改动（逐行 diff）、AI 的分支与提交、改动文件、评审结论；可以「核对代码事实」' },
     { id: 'discuss', label: '讨论', count: commentTotal > 0 ? commentTotal : '', hint: '评论；在评论里 @ 专家或专家团即派单' },
   ]
   const [draft, setDraft] = React.useState({ title: task.title, requirement: task.requirement, gitlabIssue: task.gitlabIssue, gitlabMR: task.gitlabMR?.url ?? '', pointId: task.pointId ?? '' })
@@ -323,6 +481,26 @@ function Drawer({ task, state, onClose, onChanged }) {
       setComment('')
       if (told.length > 0) setError(null)
       setNotice(told.length > 0 ? `已通知 ${told.join('、')}` : null)
+      await onChanged()
+    } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)) } finally { setBusy(false) }
+  }
+  const startCommentEdit = item => setCommentEdit({ id: item.id, body: String(item.body ?? '') })
+  const saveCommentEdit = async () => {
+    if (commentEdit === null) return
+    const body = String(commentEdit.body ?? '').trim()
+    if (body === '') { setError('评论不能为空'); return }
+    setBusy(true); setError(null)
+    try {
+      await api('/task/comment', { id: task.id, action: 'update', commentId: commentEdit.id, body })
+      setCommentEdit(null)
+      await onChanged()
+    } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)) } finally { setBusy(false) }
+  }
+  const removeComment = async item => {
+    if (!(await confirmDialog('删除这条评论？删掉后不可恢复（历史里保留旧版）。', { title: '删除评论', danger: true, okText: '删除' }))) return
+    setBusy(true); setError(null)
+    try {
+      await api('/task/comment', { id: task.id, action: 'remove', commentId: item.id })
       await onChanged()
     } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)) } finally { setBusy(false) }
   }
@@ -491,51 +669,49 @@ function Drawer({ task, state, onClose, onChanged }) {
       await onChanged()
     } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)) } finally { setBusy(false) }
   }
-  const editCaseDefinition = async (item) => {
+  const editCaseDefinition = item => {
     if (item.http != null) {
-      const method = await promptDialog('HTTP 方法', { title: '改接口用例', defaultValue: item.http.method ?? 'GET' })
-      if (method === null) return
-      const path = await promptDialog('地址（相对测试环境 baseUrl，或完整 http(s) 地址）', { title: '改接口用例', defaultValue: item.http.url ?? '' })
-      if (path === null) return
-      const status = await promptDialog('期望状态码', { title: '改接口用例', defaultValue: String(item.http.expectStatus ?? 200) })
-      if (status === null) return
-      const contains = await promptDialog('响应里应包含什么（可留空）', { title: '改接口用例', defaultValue: item.http.expectContains ?? '' })
-      if (contains === null) return
-      await saveCaseDefinition(item, { http: { ...item.http, method: String(method).trim().toUpperCase(), url: String(path).trim(), expectStatus: Number(status), expectContains: String(contains).trim() } })
+      setCaseEdit({ id: item.id, title: item.title, kind: 'http', method: item.http.method ?? 'GET', url: item.http.url ?? '', expectStatus: String(item.http.expectStatus ?? 200), expectContains: item.http.expectContains ?? '' })
       return
     }
     if (item.shell != null) {
-      const command = await promptDialog('shell 命令', { title: '改 shell 用例', defaultValue: item.shell.command ?? '' })
-      if (command === null) return
-      const contains = await promptDialog('期望输出里包含什么（可留空）', { title: '改 shell 用例', defaultValue: item.shell.expectContains ?? '' })
-      if (contains === null) return
-      await saveCaseDefinition(item, { shell: { ...item.shell, command: String(command).trim(), expectContains: String(contains).trim() } })
+      setCaseEdit({ id: item.id, title: item.title, kind: 'shell', command: item.shell.command ?? '', expectContains: item.shell.expectContains ?? '' })
       return
     }
     if (item.db != null) {
-      const file = await promptDialog('SQLite 库文件路径', { title: '改数据库用例', defaultValue: item.db.file ?? '' })
-      if (file === null) return
-      const sql = await promptDialog('SQL 语句', { title: '改数据库用例', defaultValue: item.db.sql ?? '' })
-      if (sql === null) return
-      const column = await promptDialog('断言首行的哪一列（留空就只看能不能执行）', { title: '改数据库用例', defaultValue: item.db.expectColumn ?? '' })
-      if (column === null) return
-      const expect = await promptDialog('这一列的期望值（可留空）', { title: '改数据库用例', defaultValue: item.db.expectValue ?? '' })
-      if (expect === null) return
-      await saveCaseDefinition(item, { db: { ...item.db, file: String(file).trim(), sql: String(sql).trim(), expectColumn: String(column).trim(), expectValue: String(expect).trim() === '' ? null : String(expect).trim() } })
+      setCaseEdit({ id: item.id, title: item.title, kind: 'db', file: item.db.file ?? '', sql: item.db.sql ?? '', expectColumn: item.db.expectColumn ?? '', expectValue: item.db.expectValue ?? '' })
       return
     }
     if (item.browser != null) {
-      const url = await promptDialog('页面地址（相对 baseUrl 或完整 http(s)）', { title: '改浏览器用例', defaultValue: item.browser.url ?? '/' })
-      if (url === null) return
-      const text = await promptDialog('页面上应该出现的文字（可留空）', { title: '改浏览器用例', defaultValue: item.browser.expectText ?? '' })
-      if (text === null) return
-      const selector = await promptDialog('页面上应该存在的元素选择器（可留空）', { title: '改浏览器用例', defaultValue: item.browser.expectSelector ?? '' })
-      if (selector === null) return
-      const expectText = String(text).trim()
-      const expectSelector = String(selector).trim()
-      await saveCaseDefinition(item, { browser: { ...item.browser, url: String(url).trim(), expectText: expectText === '' ? undefined : expectText, expectSelector: expectSelector === '' ? undefined : expectSelector } })
+      setCaseEdit({ id: item.id, title: item.title, kind: 'browser', url: item.browser.url ?? '/', expectText: item.browser.expectText ?? '', expectSelector: item.browser.expectSelector ?? '' })
     }
   }
+
+  const saveCaseEdit = async () => {
+    if (caseEdit === null) return
+    const item = cases.find(entry => entry.id === caseEdit.id)
+    if (item === undefined) { setCaseEdit(null); return }
+    const text = value => String(value ?? '').trim()
+    let patch = null
+    if (caseEdit.kind === 'http') {
+      if (text(caseEdit.url) === '') { setError('接口地址不能为空'); return }
+      patch = { http: { ...item.http, method: text(caseEdit.method).toUpperCase() || 'GET', url: text(caseEdit.url), expectStatus: Number(caseEdit.expectStatus) || 200, expectContains: text(caseEdit.expectContains) } }
+    } else if (caseEdit.kind === 'shell') {
+      if (text(caseEdit.command) === '') { setError('shell 命令不能为空'); return }
+      patch = { shell: { ...item.shell, command: text(caseEdit.command), expectContains: text(caseEdit.expectContains) } }
+    } else if (caseEdit.kind === 'db') {
+      if (text(caseEdit.file) === '' || text(caseEdit.sql) === '') { setError('库文件与 SQL 都不能为空'); return }
+      patch = { db: { ...item.db, file: text(caseEdit.file), sql: text(caseEdit.sql), expectColumn: text(caseEdit.expectColumn), expectValue: text(caseEdit.expectValue) === '' ? null : text(caseEdit.expectValue) } }
+    } else if (caseEdit.kind === 'browser') {
+      if (text(caseEdit.url) === '') { setError('页面地址不能为空'); return }
+      patch = { browser: { ...item.browser, url: text(caseEdit.url), expectText: text(caseEdit.expectText) === '' ? undefined : text(caseEdit.expectText), expectSelector: text(caseEdit.expectSelector) === '' ? undefined : text(caseEdit.expectSelector) } }
+    }
+    if (patch !== null) {
+      await saveCaseDefinition(item, patch)
+      setCaseEdit(null)
+    }
+  }
+
   const addCase = async () => {
     const title = newCase.title.trim()
     if (title === '') return
@@ -580,6 +756,9 @@ function Drawer({ task, state, onClose, onChanged }) {
       const body = Array.isArray(caseId) ? { caseIds: caseId } : (caseId === undefined ? {} : { caseId })
       const out = await api('/task/case/run', { id: task.id, ...body, by: '我在界面里跑的' })
       const run = out?.run ?? {}
+      const bugMap = {}
+      for (const item of out?.bugs ?? []) { if (String(item.bug ?? '') !== '') bugMap[item.caseId] = item.bug }
+      if (Object.keys(bugMap).length > 0) setCaseBugMap(previous => ({ ...previous, ...bugMap }))
       const made = (out?.bugs ?? []).filter(item => item.created === true).length
       const parts = [`跑了 ${run.total ?? 0} 条：通过 ${run.passed ?? 0}，不通过 ${run.failed ?? 0}`]
       if (made > 0) parts.push(`自动开缺陷 ${made} 张`)
@@ -645,6 +824,7 @@ function Drawer({ task, state, onClose, onChanged }) {
     }
   }
   const removeCase = async (item) => {
+    if (!(await confirmDialog(`删除用例「${item.title}」？删掉后不可恢复。`, { title: '删除用例', danger: true, okText: '删除' }))) return
     setBusy(true); setError(null)
     try { await api('/task/case', { id: task.id, action: 'remove', caseId: item.id }); await onChanged() }
     catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)) } finally { setBusy(false) }
@@ -901,6 +1081,66 @@ function Drawer({ task, state, onClose, onChanged }) {
 
   /* 三层测试进度块：单元 / 集成 / 端到端各一行（通过/总数、可执行数、缺口或理由），
      每行可以「跑这一层」或标记「不适用 + 理由」。数字来自服务端 parts.plan，界面不重算口径。 */
+  /* 改定义：接口 / shell / 数据库 / 浏览器各一组字段，一次保存。 */
+  const caseEditBlock = () => {
+    if (caseEdit === null) return null
+    const line = (label, node) => h('label', { className: 'flex min-w-0 flex-col gap-1' },
+      h('span', { className: 'text-caption-2-medium text-text-secondary' }, label),
+      node,
+    )
+    const textField = (key, label, placeholder) => line(label, h(TextField, {
+      value: caseEdit[key] ?? '', placeholder,
+      onChange: event => setCaseEdit({ ...caseEdit, [key]: event.target.value }),
+    }))
+    let fields = null
+    if (caseEdit.kind === 'http') {
+      fields = h(React.Fragment, null,
+        line('HTTP 方法', h(SelectField, {
+          value: caseEdit.method, size: 'sm',
+          'aria-label': 'HTTP 方法',
+          onChange: event => setCaseEdit({ ...caseEdit, method: event.target.value }),
+        }, ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD'].map(method => h('option', { key: method, value: method }, method)))),
+        textField('url', '地址（相对测试环境 baseUrl，或完整 http(s)）', '/api/points/available'),
+        textField('expectStatus', '期望状态码', '200'),
+        textField('expectContains', '响应里应包含什么（可留空）', '\"availablePoints\"'),
+      )
+    } else if (caseEdit.kind === 'shell') {
+      fields = h(React.Fragment, null,
+        line('shell 命令', h(TextAreaField, {
+          rows: 3, value: caseEdit.command ?? '',
+          onChange: event => setCaseEdit({ ...caseEdit, command: event.target.value }),
+        })),
+        textField('expectContains', '期望输出里包含什么（可留空）', 'ok'),
+      )
+    } else if (caseEdit.kind === 'db') {
+      fields = h(React.Fragment, null,
+        textField('file', 'SQLite 库文件路径', 'server/data.sqlite'),
+        line('SQL 语句', h(TextAreaField, {
+          rows: 3, value: caseEdit.sql ?? '',
+          onChange: event => setCaseEdit({ ...caseEdit, sql: event.target.value }),
+        })),
+        textField('expectColumn', '断言首行的哪一列（可留空）', 'count'),
+        textField('expectValue', '这一列的期望值（可留空）', '1'),
+      )
+    } else {
+      fields = h(React.Fragment, null,
+        textField('url', '页面地址（相对 baseUrl 或完整 http(s)）', '/'),
+        textField('expectText', '页面上应该出现的文字（可留空）', '订单管理'),
+        textField('expectSelector', '应该存在的元素选择器（可留空）', '#root'),
+      )
+    }
+    return h('div', { className: 'flex min-w-0 flex-col gap-3 rounded-xl border border-separator-border bg-background-secondary-default p-3', 'data-case-edit': '' },
+      h('div', { className: 'flex items-center justify-between gap-2' },
+        h('div', { className: 'text-body-2-semibold text-text-primary' }, '编辑用例：' + caseEdit.title),
+        h(Button, { variant: 'ghost', size: 'sm', onClick: () => setCaseEdit(null) }, '取消'),
+      ),
+      fields,
+      h('div', { className: 'flex justify-end' },
+        h(Button, { variant: 'primary', size: 'sm', disabled: busy, onClick: () => void saveCaseEdit() }, busy ? '保存中…' : '保存定义'),
+      ),
+    )
+  }
+
   const testPlanBlock = () => {
     if (testPlanTiers.length === 0) return null
     /* 产品/设计卡不受三层闸门约束：没有用例也没有测试计划时不显示这个块，
@@ -910,16 +1150,20 @@ function Drawer({ task, state, onClose, onChanged }) {
     const required = testPlanTiers.filter(row => CASE_TIERS.includes(row.tier) && row.tier !== 'other')
     if (required.length === 0) return null
     const gapSet = new Set(testPlanGaps.map(gap => gap.tier))
-    return h('div', { className: PANEL, 'data-test-plan': '' },
-      h('div', { className: PANEL_HEAD },
-        h('div', { className: GROW },
-          h('div', { className: PANEL_LINE }, '三层测试进度'),
-          h('div', { className: HINT }, '单元 / 集成 / 端到端：每条线要么有能跑的用例，要么写明为什么验不了（门禁按这个判定）'),
-        ),
+    return h('details', { className: PANEL, 'data-test-plan': '' },
+      h('summary', { className: 'flex cursor-pointer list-none flex-wrap items-center gap-2 border-b border-separator-border px-4 py-3 [&::-webkit-details-marker]:hidden', 'data-test-plan-summary': '' },
+        h('span', { className: 'text-body-2-semibold text-text-primary' }, '三层测试'),
+        required.map(row => h(ChipField, {
+          key: row.tier,
+          variant: row.applicable === false ? 'neutral' : (row.fail > 0 ? 'rose' : (row.executable === 0 ? 'yellow' : 'lime')),
+          title: `${CASE_TIER_FULL[row.tier]}：通过 ${row.pass}/${row.total}，可执行 ${row.executable}`,
+        }, `${CASE_TIER_LABEL[row.tier]} ${row.pass}/${row.total}`)),
         testPlanGaps.length === 0
           ? h(ChipField, { variant: 'lime', 'data-test-gap': '0' }, '三条线齐全')
           : h(ChipField, { variant: 'yellow', 'data-test-gap': testPlanGaps.map(gap => gap.tier).join(',') }, `缺 ${testPlanGaps.map(gap => CASE_TIER_LABEL[gap.tier] ?? gap.tier).join('/')}`),
+        h('span', { className: 'ml-auto text-caption-1-regular text-text-tertiary' }, '展开明细'),
       ),
+      h('div', { className: 'flex min-w-0 flex-col gap-2 p-4' },
       required.map(row => h('div', {
         key: row.tier,
         className: LIST_LINE,
@@ -938,19 +1182,41 @@ function Drawer({ task, state, onClose, onChanged }) {
               : (gapSet.has(row.tier) ? h(ChipField, { variant: 'yellow' }, '缺') : h(ChipField, { variant: 'lime' }, '已覆盖')),
           ),
           row.applicable === false && row.reason !== '' ? h('div', { className: ART_REF }, `理由：${row.reason}`) : null,
-          h('div', { className: 'mt-1' },
-            h(ProgressTrack, { percentage: row.total === 0 ? 0 : Math.round(row.pass / row.total * 100), size: 'sm' }),
-          ),
+          row.total === 0
+            ? h('div', { className: 'mt-1 text-caption-1-regular text-text-tertiary' }, '这一层还没有用例')
+            : h('div', { className: 'mt-1' },
+              h(ProgressTrack, { percentage: Math.round(row.pass / row.total * 100), size: 'sm' }),
+            ),
         ),
         row.applicable === false
           ? h(Button, { variant: 'ghost', size: 'sm', disabled: busy, title: '恢复为适用：这一层要补用例并跑通', onClick: () => void setTierApplicable(row.tier, true) }, '恢复适用')
-          : h(Button, { variant: 'ghost', size: 'sm', disabled: busy || caseRun.busy, title: '只跑这一层里能跑的用例', onClick: () => void runTier(row.tier) }, [uiIcon(h, 'run'), ' 跑这层']),
-        row.applicable === false ? null : h(Button, { variant: 'ghost', size: 'sm', disabled: busy, title: '这一层确实验不了：写明理由，门禁认它', onClick: () => void setTierApplicable(row.tier, false) }, '不适用'),
+          : h(Button, {
+            variant: 'ghost', size: 'sm',
+            disabled: busy || caseRun.busy || (row.executable ?? 0) === 0,
+            title: (row.executable ?? 0) === 0 ? '这一层还没有可执行用例：先补用例，或标「本层不适用」写明理由' : '只跑这一层里能跑的用例',
+            'data-tier-action': 'run',
+            onClick: () => void runTier(row.tier),
+          }, [uiIcon(h, 'run'), ' 跑这层']),
+        row.applicable === false
+          ? null
+          : h('button', {
+            type: 'button',
+            className: 'shrink-0 rounded px-1 text-caption-1-regular text-text-tertiary underline-offset-2 hover:text-text-secondary hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-border-focus-ring disabled:cursor-default disabled:opacity-50',
+            disabled: busy,
+            title: '这一层确实验不了：写明理由，门禁认它',
+            'data-tier-action': 'exclude',
+            onClick: () => void setTierApplicable(row.tier, false),
+          }, '本层不适用'),
       )),
-      testRuns.length === 0 ? null : h('div', { className: ROW, style: { gap: 10, marginTop: 2 }, 'data-test-runs': '' },
-        h('span', { className: HINT }, '最近执行'),
-        ...testRuns.slice(-3).reverse().map(run => h('span', { key: run.id, className: HINT, title: run.by ? `执行人：${run.by}` : '' },
-          `${fmtTime(run.at)} · ${run.passed ?? 0}/${run.total ?? 0} 通过${(run.failed ?? 0) > 0 ? ` · ${run.failed} 失败` : ''}`)),
+      testRuns.length === 0 ? null : (() => {
+        const latest = testRuns[testRuns.length - 1]
+        return h('div', { className: ROW, style: { gap: 10, marginTop: 2 }, 'data-test-runs': '' },
+          h('span', { className: HINT }, '最近执行'),
+          h('span', { className: HINT, title: latest.by ? `执行人：${latest.by}` : '' },
+            `${fmtTime(latest.at)} · ${latest.passed ?? 0}/${latest.total ?? 0} 通过${(latest.failed ?? 0) > 0 ? ` · ${latest.failed} 失败` : ''}`),
+          testRuns.length > 1 ? h('span', { className: HINT }, `共 ${testRuns.length} 次`) : null,
+        )
+      })(),
       ),
     )
   }
@@ -1010,7 +1276,7 @@ function Drawer({ task, state, onClose, onChanged }) {
     },
       h('div', { className: 'flex shrink-0 items-start gap-2 border-b border-separator-border px-5 pt-4 pb-3' },
         h('div', { className: GROW },
-          h('div', { className: 'text-title-2-semibold break-words text-text-primary' }, task.title),
+          h('div', { className: 'text-title-1-semibold break-words text-text-primary' }, task.title),
           h('div', { className: 'mt-1 ' + HINT }, `${task.id} · ${columnLabel}${assignee === '' ? '' : ` · ${assignee}`} · 更新 ${fmtTime(task.updatedAt)}`),
         ),
         h(Button, { variant: 'ghost', size: 'sm', disabled: busy, title: '定案 + 评审通过才能进开发', onClick: () => setPane('design') }, '设计：' + (DESIGN_LABEL[task.design?.status] ?? '未登记') + (designDrafts.length > 0 ? `（${designDrafts.length} 稿）` : '')),
@@ -1145,8 +1411,13 @@ function Drawer({ task, state, onClose, onChanged }) {
               collabQuality === null ? '项目检查未跑' : `项目检查${collabQuality.ok === true ? '通过' : '未过'}`,
             ].filter(Boolean).join(' · ')
             const review = String(collabCoding.review?.status ?? '')
-            if (review === 'approved') return roleRow('dev', '研发', 'ok', '实现已评审', bits)
-            if (review === 'changes_requested') return roleRow('dev', '研发', 'bad', '评审要改', `${bits}${collabCoding.review?.note ? ` · ${String(collabCoding.review.note).slice(0, 80)}` : ''}`)
+            /* 评审意见以前只在「执行记录」页签里，概览这里只写「实现已评审」四个字；
+               把评审人与意见摘要带出来，人不必再翻页签才知道架构师说了什么。 */
+            const reviewBy = String(collabCoding.review?.by ?? '').trim()
+            const reviewNote = String(collabCoding.review?.note ?? '').trim()
+            const reviewDetail = `${reviewBy === '' ? '' : ` · 评审人 ${reviewBy}`}${reviewNote === '' ? '' : ` · 评审意见：${reviewNote.slice(0, 80)}${reviewNote.length > 80 ? '…' : ''}`}`
+            if (review === 'approved') return roleRow('dev', '研发', 'ok', '实现已评审', `${bits}${reviewDetail}`)
+            if (review === 'changes_requested') return roleRow('dev', '研发', 'bad', '评审要改', `${bits}${reviewDetail}`)
             return roleRow('dev', '研发', 'warn', '实现待评审', bits)
           })(),
           (() => {
@@ -1188,7 +1459,7 @@ function Drawer({ task, state, onClose, onChanged }) {
                 }),
                 h(Button, { variant: 'primary', size: 'sm', disabled: busy, onClick: () => void signOff('sign') }, '签字确认'))
             : h('div', { className: 'flex min-w-0 flex-wrap items-center justify-between gap-2 rounded-xl bg-background-secondary-default p-3 text-caption-1-regular text-text-primary', 'data-drawer-signoff': '' },
-                h('span', { className: 'min-w-0 break-words' }, `${task.signoff.by} 于 ${new Date(task.signoff.at).toLocaleString()} 签字：${task.signoff.note}`),
+                h('span', { className: 'min-w-0 break-words' }, `${task.signoff.by} 于 ${fmtTime(task.signoff.at)} 签字：${task.signoff.note}`),
                 h(Button, { variant: 'ghost', size: 'sm', onClick: () => void signOff('clear') }, '取消签字')),
         ),
       ),
@@ -1481,6 +1752,169 @@ function Drawer({ task, state, onClose, onChanged }) {
           task.design?.spec == null ? null : h('div', { className: HINT, style: { marginTop: 8 } }, `规范体检：查了 ${task.design.spec.checked} 个元素，${task.design.spec.violations} 处野值`),
         ),
       ),
+      h(Section, { pane: 'coding', current: pane, id: 'diff' },
+        h(SectionHead, null, '代码改动（git diff）',
+          h('span', { className: HINT }, '直接读仓库里的真实改动：卡的分支对比基线。左边文件树按目录分组，标了新增/修改/删除与行数')),
+        h('div', { className: SECTION_BODY, 'data-drawer-diff': '' },
+          (() => {
+            if (diffBusy) return h('div', { className: HINT, 'data-diff-loading': '' }, '读取中…')
+            if (diffError !== null) {
+              return h('div', { className: ROW, style: { gap: 8, alignItems: 'center' } },
+                h('div', { className: ERR_TEXT }, `读不到代码改动：${diffError}`),
+                h(Button, { variant: 'ghost', size: 'sm', onClick: () => void loadDiff() }, '再试一次'))
+            }
+            if (diffView === null) {
+              return h('div', { className: ROW, style: { gap: 8, alignItems: 'center' } },
+                h(Button, { variant: 'secondary', size: 'sm', onClick: () => void loadDiff() }, '读取代码改动'),
+                h('span', { className: HINT }, '从卡的 worktree（或项目代码目录）读分支相对基线的改动'))
+            }
+            if (String(diffView.skipped ?? '') !== '') return h(EmptyState, { title: diffView.skipped })
+            if (diffView.ok !== true) return h(EmptyState, { title: '读不到代码改动' })
+            const allFiles = Array.isArray(diffView.files) ? diffView.files : []
+            const fileQuery = diffQuery.trim().toLowerCase()
+            const files = fileQuery === '' ? allFiles : allFiles.filter(item => String(item.path).toLowerCase().includes(fileQuery))
+            const totals = diffView.totals ?? { files: 0, additions: 0, deletions: 0 }
+            const uncommitted = diffView.uncommitted ?? { total: 0, files: [], additions: 0, deletions: 0 }
+            /* 文件树：目录分组 + 改动标记（新增/修改/删除）+ 行数；点一个文件在下面看它的 patch。 */
+            const tree = buildDiffTree(files)
+            const selected = files.find(item => item.path === diffPath) ?? files[0] ?? null
+            const changeLabel = item => DIFF_CHANGE_LABEL[item.change] ?? '修改'
+            const changeClass = item => DIFF_CHANGE_CLASS[item.change] ?? ''
+            const renderNode = node => (node.kind === 'dir'
+              ? h(TreeViewItem, { key: node.id, id: node.id, label: node.name, textValue: node.path, title: node.path }, node.children.map(renderNode))
+              : h(TreeViewItem, {
+                key: node.id,
+                id: node.id,
+                label: node.name,
+                textValue: node.path,
+                'data-diff-file': node.path,
+                trailingContent: h('span', { className: 'flex items-center gap-2' },
+                  h('span', { className: changeClass(node.file), 'data-change': node.file.change }, changeLabel(node.file)),
+                  h('span', { className: 'text-state-success-text' }, `+${node.file.additions}`),
+                  h('span', { className: 'text-text-error-primary' }, `−${node.file.deletions}`)),
+              }))
+            const renderLine = (line, index) => h('div', {
+              key: `d-${index}`,
+              className: line.startsWith('+++') || line.startsWith('---')
+                ? 'text-text-tertiary'
+                : line.startsWith('+')
+                  ? 'text-state-success-text'
+                  : line.startsWith('-')
+                    ? 'text-text-error-primary'
+                    : line.startsWith('@@')
+                      ? 'text-accent-600'
+                      : 'text-text-secondary',
+            }, line === '' ? ' ' : line)
+            /* 「全文」：读工作树里的文件本体（只读、200KB 上限），带行号。 */
+            const renderFileView = item => {
+              if (fileView === null || fileView.path !== item.path) return h('div', { className: HINT }, '读取文件全文…')
+              if (fileView.busy === true) return h('div', { className: HINT, 'data-diff-fulltext-loading': '' }, '读取中…')
+              if (fileView.error !== null) return h('div', { className: ERR_TEXT }, `读不到全文：${fileView.error}`)
+              const data = fileView.data ?? {}
+              if (String(data.skipped ?? '') !== '') return h('div', { className: HINT }, data.skipped)
+              if (data.binary === true) return h('div', { className: HINT }, '二进制文件，不显示全文')
+              const text = String(data.content ?? '')
+              return h('pre', {
+                className: 'max-h-[420px] overflow-auto rounded-md bg-background-secondary-default p-2 text-caption-1-regular',
+                'data-diff-fulltext': item.path,
+                style: { whiteSpace: 'pre-wrap', wordBreak: 'break-word', margin: 0 },
+              },
+                text.split('\n').map((line, index) => h('div', { key: `f-${index}`, className: 'flex gap-2 text-text-secondary' },
+                  h('span', { className: 'shrink-0 select-none tabular-nums text-text-tertiary', style: { minWidth: '3em', textAlign: 'right' } }, String(index + 1)),
+                  h('span', { className: 'min-w-0 whitespace-pre-wrap break-words' }, line === '' ? ' ' : line))),
+                data.truncated === true ? h('div', { className: HINT }, '文件太大，只显示前 200 KB') : null)
+            }
+            return h('div', { className: 'flex min-w-0 flex-col gap-2' },
+              h('div', { className: ROW, style: { gap: 8, alignItems: 'center' } },
+                h(ChipField, { variant: 'gray', 'data-diff-range': '1' }, diffView.rangeLabel || `${diffView.branch || '(无分支)'} ← ${diffView.base}`),
+                h('span', { className: HINT, 'data-diff-totals': `${totals.files}-${totals.additions}-${totals.deletions}` },
+                  `${totals.files} 个文件 · +${totals.additions} −${totals.deletions}${diffView.truncated === true ? '（已截断）' : ''}`),
+                (diffView.commits ?? []).length === 0
+                  ? null
+                  : h('div', { className: 'w-56 max-w-full', 'data-diff-commit': '' },
+                    h(SelectField, {
+                      value: diffCommit,
+                      'aria-label': '看哪一次提交',
+                      onChange: event => { setDiffCommit(event.target.value); setDiffQuery(''); void loadDiff(event.target.value) },
+                    },
+                      h('option', { value: '' }, '全部改动'),
+                      diffView.commits.map(item => h('option', { key: item.sha, value: item.sha }, `${item.sha} ${String(item.subject).slice(0, 24)}`)))),
+                allFiles.length > 6 || diffQuery !== ''
+                  ? h('div', { className: 'w-40 max-w-full', 'data-diff-filter': '' },
+                    h(TextField, { value: diffQuery, placeholder: '筛文件路径…', 'aria-label': '筛文件', onChange: event => {
+                      const value = event.target.value
+                      setDiffQuery(value)
+                      const query = value.trim().toLowerCase()
+                      const hit = allFiles.filter(item => query === '' || String(item.path).toLowerCase().includes(query))
+                      setDiffPath(hit[0]?.path ?? '')
+                      setFileView(null)
+                    } }))
+                  : null,
+                h(Button, { variant: 'ghost', size: 'sm', disabled: diffBusy, onClick: () => void loadDiff() }, '刷新'),
+                (task.gitlabMR?.url ?? '') === ''
+                  ? null
+                  : h('a', { className: LINK, href: String(task.gitlabMR.url).replace(/\/$/, '') + '/diffs', target: '_blank', rel: 'noreferrer' }, '在 GitLab 看 diff')),
+              h('div', { className: HINT }, `仓库：${diffView.dir}`),
+              uncommitted.total > 0
+                ? h('div', { className: 'text-caption-1-regular text-status-yellow-text', 'data-diff-dirty': uncommitted.total },
+                  `还有 ${uncommitted.total} 个文件没提交（+${uncommitted.additions} −${uncommitted.deletions}）：这些改动不在分支上，评审和测试都看不到`)
+                : null,
+              files.length === 0
+                ? h('div', { className: HINT }, allFiles.length === 0 ? '这条分支相对基线没有代码改动。' : '没有匹配的文件。')
+                : h('div', { className: 'min-w-0', 'data-diff-tree': '' },
+                  h(TreeView, {
+                    // 刷新（at 变了）就重建：新出现的目录也要按默认全部展开，避免沿用旧的展开集合。
+                    key: `diff-tree-${diffView.at ?? ''}`,
+                    'aria-label': '改动的文件（按目录分组）',
+                    selectionMode: 'single',
+                    selectedKeys: diffPath === '' ? [] : [diffPath],
+                    defaultExpandedKeys: diffDirIds(tree),
+                    onSelectionChange: keys => {
+                      const next = Array.from(keys)
+                      selectDiffFile(next.length > 0 ? String(next[0]) : '')
+                    },
+                    size: 'sm',
+                    showGuides: true,
+                    // 跟随上游「树跟着内容长、滚动交给外层」：不再套一层 280px 内滚动。
+                    // 圆角与所在区块一致（上游默认 24px，套在 12px 的区块里会显得层级更深）。
+                    style: { borderRadius: 12 },
+                  }, tree.map(renderNode))),
+              files.length === 0
+                ? null
+                : (selected === null
+                  ? h('div', { className: HINT }, '在文件树里选一个文件，看它的改动内容。')
+                  : h('div', { className: 'flex min-w-0 flex-col gap-2', 'data-diff-content': selected.path },
+                    h('div', { className: 'flex min-w-0 flex-wrap items-center gap-2' },
+                      h('span', { className: 'font-mono text-caption-1-regular text-text-primary' }, selected.path),
+                      h('span', { className: changeClass(selected), 'data-change': selected.change }, changeLabel(selected)),
+                      h('span', { className: 'text-caption-1-regular text-state-success-text' }, `+${selected.additions}`),
+                      h('span', { className: 'text-caption-1-regular text-text-error-primary' }, `−${selected.deletions}`),
+                      selected.binary === true ? h('span', { className: HINT }, '二进制') : null,
+                      selected.truncated === true ? h('span', { className: HINT }, '已截断') : null,
+                      h('span', { className: GROW }),
+                      h(Button, { variant: diffMode === 'diff' ? 'secondary' : 'ghost', size: 'sm', 'data-diff-mode': 'diff', onClick: () => setDiffMode('diff') }, '改动'),
+                      h(Button, {
+                        variant: diffMode === 'file' ? 'secondary' : 'ghost',
+                        size: 'sm',
+                        'data-diff-mode': 'file',
+                        onClick: () => {
+                          setDiffMode('file')
+                          if (fileView === null || fileView.path !== selected.path) void loadFile(selected.path)
+                        },
+                      }, '全文'),
+                      h(Button, { variant: 'ghost', size: 'sm', 'data-diff-copy': 'path', onClick: () => void copyPlain(selected.path, '路径') }, '复制路径'),
+                      h(Button, { variant: 'ghost', size: 'sm', 'data-diff-copy': 'content', onClick: () => void copyPlain(diffMode === 'file' ? String(fileView?.data?.content ?? '') : selected.patch, diffMode === 'file' ? '全文' : 'diff') }, '复制内容')),
+                    diffMode === 'file'
+                      ? renderFileView(selected)
+                      : (selected.patch === ''
+                        ? h('div', { className: HINT }, '没有可显示的 patch（二进制文件或改动太大）')
+                        : h('pre', { className: 'max-h-[420px] overflow-auto rounded-md bg-background-secondary-default p-2 text-caption-1-regular', style: { whiteSpace: 'pre-wrap', wordBreak: 'break-word', margin: 0 } },
+                          String(selected.patch).split('\n').map(renderLine))))),
+              diffView.omitted > 0 ? h('div', { className: HINT }, `还有 ${diffView.omitted} 个文件没展开（改动太多）`) : null,
+            )
+          })(),
+        ),
+      ),
       h(Section, { pane: 'coding', current: pane, id: 'skill' },
         h(SectionHead, null, '技能沉淀',
           h('span', { className: HINT }, '把这张卡上真实发生过的证据汇总成一条技能草稿（默认停用）')),
@@ -1639,11 +2073,14 @@ function Drawer({ task, state, onClose, onChanged }) {
                 coding.commits.length > 6 ? h('div', { className: HINT }, `还有 ${coding.commits.length - 6} 次提交`) : null,
               ),
               (coding.files ?? []).length === 0 ? null : h('div', { className: 'flex flex-wrap gap-1' },
-                coding.files.slice(0, 12).map(item => h('span', { key: item.id, className: 'rounded-md bg-background-secondary-default px-2 py-0.5 font-mono text-caption-1-regular text-text-secondary', 'data-change': item.change },
+                coding.files.slice(0, 12).map(item => h('span', { key: item.id, className: 'rounded-md bg-background-secondary-default px-2 py-1 font-mono text-caption-1-regular text-text-secondary', 'data-change': item.change },
                   `${item.path}${item.additions > 0 ? ` +${item.additions}` : ''}${item.deletions > 0 ? ` -${item.deletions}` : ''}`)),
                 coding.files.length > 12 ? h('span', { className: HINT }, `还有 ${coding.files.length - 12} 个`) : null,
               ),
-              coding.review.note === '' ? null : h('div', { className: NOTE_BOX }, `评审意见：${coding.review.note}`),
+              coding.review.note === '' && coding.review.status === 'pending'
+                ? null
+                : h('div', { className: NOTE_BOX, 'data-review-note': coding.review.status },
+                  `评审意见${coding.review.by === '' ? '' : `（${coding.review.by}${coding.review.at > 0 ? ` · ${fmtTime(coding.review.at)}` : ''}）`}：${coding.review.note === '' ? '（没有填写意见）' : coding.review.note}`),
               h('div', { className: ROW },
                 h(TextField, {
                   style: { flex: 1 }, value: reviewNote, placeholder: '评审意见（可选，写清文件/行为什么/怎么改）',
@@ -1746,9 +2183,19 @@ function Drawer({ task, state, onClose, onChanged }) {
             }, '同步到云盘')
             : null),
         h('div', { className: SECTION_BODY, 'data-scroll': '1' },
-          (task.artifacts ?? []).length === 0
+          artifacts.length === 0
             ? h(EmptyState, { title: '还没有交付物。', hint: '文档、MR、用例、报告——交付要有东西，不只是一句「做完了」。' })
-            : (task.artifacts ?? []).map(item => h('div', { key: item.id, className: 'flex min-w-0 flex-col gap-2', 'data-drawer-artifact': item.id }, h('div', {
+            : h(React.Fragment, null,
+              artifacts.length > 5 || artifactQuery !== ''
+                ? h('div', { className: ROW, 'data-artifact-filter': '' },
+                  h('div', { className: 'w-64 max-w-full' },
+                    h(TextField, { value: artifactQuery, placeholder: '按标题 / 类型 / 链接筛…', 'aria-label': '筛交付物', onChange: event => setArtifactQuery(event.target.value) })),
+                  h('span', { className: HINT }, `显示 ${visibleArtifacts.length} / ${artifacts.length}`),
+                  artifactQuery === '' ? null : h(Button, { variant: 'ghost', size: 'xs', onClick: () => setArtifactQuery('') }, '清除'))
+                : null,
+              visibleArtifacts.length === 0
+                ? h('div', { className: HINT }, '没有匹配的交付物')
+                : visibleArtifacts.map(item => h('div', { key: item.id, className: 'flex min-w-0 flex-col gap-2', 'data-drawer-artifact': item.id }, h('div', {
               className: LIST_ROW + (artifactHasBody(item) ? '' : ' bg-background-tertiary-error'),
               'data-missing': artifactHasBody(item) ? '0' : '1',
             },
@@ -1812,7 +2259,7 @@ function Drawer({ task, state, onClose, onChanged }) {
                   ? h('span', { className: HINT }, '这条交付物还没有正文。')
                   : renderMarkdown(artifactBody(item)))
               : null,
-          )),
+          ))),
           artEdit === null ? null : h('div', { style: { marginTop: 8 } },
             h(MdField, {
               style: { width: '100%' }, rows: 8, value: artEdit.content,
@@ -1855,7 +2302,7 @@ function Drawer({ task, state, onClose, onChanged }) {
         h(SectionHead, null, '测试用例',
           h('span', { className: HINT }, caseSum.total === 0
             ? '测试同学把用例登记在这里，逐条执行并回填结果'
-            : caseSummary),
+            : `${caseSummary}${staleCases > 0 ? ` · 需复跑 ${staleCases}` : ''}`),
           h(Button, {
             variant: 'ghost', size: 'sm',
             disabled: caseGen.busy,
@@ -1864,34 +2311,60 @@ function Drawer({ task, state, onClose, onChanged }) {
             onClick: () => void generateCases(),
           }, caseGen.busy ? '生成中…' : '生成用例草稿'),
           h(Button, {
-            variant: 'ghost', size: 'sm',
+            variant: 'primary', size: 'sm',
             disabled: caseRun.busy || cases.filter(item => item.http != null || item.shell != null || item.db != null || item.browser != null).length === 0,
             onClick: () => void runCases(undefined),
           }, caseRun.busy ? '运行中…' : [uiIcon(h, 'run'), ' 跑用例'])),
         h('div', { className: SECTION_BODY, 'data-scroll': '1' },
-          caseRun.note === '' ? null : h('div', { className: HINT }, caseRun.note),
+          caseEditBlock(),
+          caseRun.busy ? h('div', { className: 'sticky top-0 z-10 rounded-lg bg-background-primary-default px-2 py-1 text-caption-1-regular text-text-secondary', 'data-case-running': '' }, '正在跑用例…') : null,
+          caseRun.note === '' ? null : h('div', { className: HINT, style: { position: 'sticky', top: 0, zIndex: 5, background: 'inherit' }, 'data-run-note': '' }, caseRun.note),
+          h('div', { className: 'flex min-w-0 flex-wrap items-center gap-2', 'data-case-filter': '' },
+            ...[['all', '全部', caseSum.total], ['pending', '未跑', casePending], ['fail', '不通过', caseFail], ['skip', '跳过', caseSkip], ['pass', '通过', casePass]]
+              .map(([id, label, count]) => h(ChipField, {
+                key: id, variant: caseFilter === id ? 'soft' : 'gray', className: 'cursor-pointer',
+                'data-case-filter-chip': id,
+                role: 'button', tabIndex: 0, 'aria-pressed': caseFilter === id,
+                'aria-label': `筛选用例：${label}`,
+                onClick: () => setCaseFilter(id),
+                onKeyDown: event => {
+                  if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); setCaseFilter(id) }
+                },
+              }, `${label} ${count}`)),
+            h('div', { className: 'w-56 max-w-full' },
+              h(TextField, {
+                value: caseQuery, placeholder: '筛标题 / 期望 / 记录', 'aria-label': '筛用例',
+                onChange: event => setCaseQuery(event.target.value),
+              })),
+            caseFilter === 'all' && caseQuery === '' ? null : h(Button, { variant: 'ghost', size: 'sm', onClick: () => { setCaseFilter('all'); setCaseQuery('') } }, '清除筛选'),
+          ),
           caseGen.note === '' ? null : h('div', { className: HINT }, caseGen.note),
-          testPlanBlock(),
           caseSum.total === 0
             ? h(EmptyState, { title: '还没有用例。', hint: '测试同学把用例登记在这里，逐条执行并回填结果。' })
             : parts === null
               ? h('div', { className: HINT }, '载入用例…')
-              : cases.map(item => h('div', {
+              : visibleCases.length === 0
+                ? h('div', { className: HINT }, '没有匹配的用例。')
+                : visibleCases.map(item => h('div', {
                 key: item.id,
                 'data-result': item.result,
                 'data-drawer-case-row': item.id,
-                className: LIST_ROW + ' ' + (CASE_RESULT_RAIL[item.result] ?? ''),
+                /* 每条用例一张小卡片：结果选择在左、标题与操作在顶部、明细在下面。
+                   以前是 items-center 的列表行，操作按钮垂直居中在一堆长文本中间，看着很乱。 */
+                className: 'flex min-w-0 items-start gap-3 rounded-lg border border-separator-border border-l-4 bg-background-primary-default px-3 py-3 ' + (CASE_RESULT_RAIL[item.result] ?? ''),
               },
               h(SelectField, {
-                style: { width: 84, height: 22, fontSize: 11 }, value: item.result, disabled: busy,
+                size: 'sm', style: { width: 88 }, value: item.result, disabled: busy,
+                'aria-label': `用例结果：${item.title}`,
                 onChange: event => void setCaseResult(item, event.target.value),
               }, CASE_RESULTS.map(value => h('option', { key: value, value }, CASE_RESULT_LABEL[value]))),
               h('div', { className: GROW },
-                h('div', { className: ART_TITLE }, item.title),
+                h('div', { className: 'line-clamp-2 text-body-2-semibold text-text-primary', title: item.title }, item.title),
                 h('div', { className: ROW, style: { gap: 8, alignItems: 'center', marginTop: 2 } },
+                  h(ChipField, { variant: CASE_RESULT_CHIP[item.result] ?? 'neutral', 'data-case-result': item.result }, CASE_RESULT_LABEL[item.result] ?? item.result),
                   h(ChipField, { variant: 'soft' }, CASE_TYPE_LABEL[item.type ?? 'functional'] ?? '功能'),
                   h(SelectField, {
-                    style: { width: 84, height: 22, fontSize: 11 },
+                    size: 'sm', style: { width: 108 },
                     value: item.tier ?? '',
                     disabled: busy,
                     title: `${CASE_TIER_HINT[item.tierEffective ?? 'other'] ?? ''}（当前按${item.tier === '' || item.tier === undefined ? '断言推断' : '手动指定'}：${CASE_TIER_FULL[item.tierEffective ?? 'other'] ?? '其它'}）`,
@@ -1902,10 +2375,19 @@ function Drawer({ task, state, onClose, onChanged }) {
                     CASE_TIERS.map(value => h('option', { key: value, value }, CASE_TIER_LABEL[value])),
                   ),
                   h(ChipField, { variant: 'soft', 'data-pri': item.priority ?? 'p2' }, String(item.priority ?? 'p2').toUpperCase()),
+                  item.stale === true
+                    ? h(ChipField, { variant: 'yellow', 'data-stale': '1', title: '需求文档更新后还没复跑：这条结果可能是旧口径' }, '需复跑')
+                    : null,
+                  caseBugMap[item.id] !== undefined
+                    ? h(ChipField, { variant: 'rose', 'data-case-bug': caseBugMap[item.id], title: '这条用例失败后自动开的缺陷' }, '缺陷 ' + caseBugMap[item.id])
+                    : null,
                   String(item.preconditions ?? '') === '' ? null : h('span', { className: HINT }, `前置：${item.preconditions}`),
                   (item.steps ?? []).length === 0 ? null : h('span', { className: HINT }, `步骤 ${item.steps.length} 条`),
                 ),
-                item.expected === '' ? null : h('div', { className: ART_REF }, `期望：${item.expected}`),
+                item.expected === '' ? null : h('div', { className: 'md-content min-w-0 text-caption-1-regular text-text-secondary', 'data-case-expected': '' },
+                  h('span', { className: HINT }, '期望：'),
+                  renderMarkdown(item.expected)),
+              expandedCaseIds.has(item.id) === true ? h('div', { className: 'flex min-w-0 flex-col gap-1', 'data-case-details': '' },
               // 四种可执行用例各显示自己的定义。以前这里是一个三元链，db 那条永远走不到。
               (() => {
                 if (item.browser != null) {
@@ -1919,7 +2401,7 @@ function Drawer({ task, state, onClose, onChanged }) {
                 if (item.http != null) return h('div', { className: ART_REF }, `接口：${item.http.method} ${item.http.url} → 期望 ${item.http.expectStatus}${item.http.expectContains ? ` 且含 «${item.http.expectContains}»` : ''}`)
                 return null
               })(),
-                item.lastRun == null ? null : h('div', { className: ART_REF }, `${item.lastRun.ok ? '通过' : '不通过'} 最近执行：${item.lastRun.status === 0 ? item.lastRun.error : `${item.lastRun.status} · ${item.lastRun.ms}ms`}（${new Date(item.lastRun.at).toLocaleString('zh-CN')}）`),
+                item.lastRun == null ? null : h('div', { className: ART_REF }, `${item.lastRun.ok ? '通过' : '不通过'} 最近执行：${item.lastRun.status === 0 ? item.lastRun.error : `${item.lastRun.status} · ${item.lastRun.ms}ms`}（${fmtTime(item.lastRun.at)}）`),
                 item.lastRun?.response ? h('div', { className: NOTE_BOX }, `响应片段：${String(item.lastRun.response).slice(0, 400)}${String(item.lastRun.response).length > 400 ? '…' : ''}`) : null,
                 (item.lastRun?.steps ?? []).length === 0 ? null : h('div', { className: ART_REF }, `步骤：${item.lastRun.steps.map(step => `${step.ok ? '' : '失败 · '}${step.method} ${step.url}${step.status === 0 ? '' : ` → ${step.status}`}`).join('；')}`),
                 (item.http?.steps ?? []).length === 0 ? null : h(ChipField, { variant: 'soft' }, `多步 ${item.http.steps.length}`),
@@ -1941,23 +2423,41 @@ function Drawer({ task, state, onClose, onChanged }) {
                         ((state.requirements ?? []).find(entry => entry.id === task.requirementId)?.points ?? []).map(point => h('option', { key: point.id, value: point.id }, `${point.id} ${point.title}`)),
                       ),
                     ),
-                item.note === '' ? null : h('div', { className: ART_REF }, `记录：${item.note}${item.by ? ` — ${item.by}` : ''}`),
+                item.note === '' ? null : h('div', { className: 'md-content min-w-0 text-caption-1-regular text-text-secondary', 'data-case-note': '' },
+                  h('span', { className: HINT }, '记录：'),
+                  renderMarkdown(item.note),
+                  item.by ? h('span', { className: HINT }, ` — ${item.by}`) : null),
+                h('div', { className: 'flex justify-end gap-2' },
+                  h(Button, {
+                    variant: 'ghost', size: 'sm', disabled: busy,
+                    title: '标记为不稳定用例：失败时不自动开缺陷',
+                    'data-flaky': item.flaky === true ? '1' : '0',
+                    onClick: () => void toggleFlaky(item),
+                  }, item.flaky === true ? '恢复稳定' : '标记不稳定'),
+                  h(Button, { variant: 'danger', size: 'sm', disabled: busy, title: '删除这条用例（先确认）', 'aria-label': '删除这条用例', onClick: () => void removeCase(item) }, '删除这条用例')),
+              ) : null,
               ),
+              h('div', { className: 'flex shrink-0 items-start gap-1' },
+              h(Button, {
+                variant: 'ghost', size: 'sm',
+                'data-case-expand': item.id,
+                'aria-expanded': expandedCaseIds.has(item.id),
+                title: '展开/收起这条用例的接口定义、响应、步骤与功能点',
+                onClick: () => setExpandedCaseIds(previous => {
+                  const next = new Set(previous)
+                  if (next.has(item.id)) next.delete(item.id)
+                  else next.add(item.id)
+                  return next
+                }),
+              }, expandedCaseIds.has(item.id) ? '收起' : '详情'),
               (item.http == null && item.shell == null && item.db == null && item.browser == null)
                 ? null
                 : h(Button, { variant: 'ghost', size: 'sm', disabled: busy, title: '改这条用例的定义（地址 / 命令 / SQL / 断言）；lastRun 与历史保留', onClick: () => void editCaseDefinition(item) }, '改定义'),
               (item.http == null && item.shell == null && item.db == null && item.browser == null)
                 ? null
-                : h(Button, { variant: 'ghost', size: 'sm', disabled: caseRun.busy, onClick: () => void runCases(item.id) }, uiIcon(h, 'run')),
-              h(Button, {
-                variant: 'ghost', size: 'sm',
-                disabled: busy,
-                title: '标记为不稳定用例：失败时不自动开缺陷',
-                'data-flaky': item.flaky === true ? '1' : '0',
-                onClick: () => void toggleFlaky(item),
-              }, item.flaky === true ? '不稳' : '标不稳'),
-              h(Button, { variant: 'ghost', size: 'sm', disabled: busy, 'aria-label': '删除这条用例', onClick: () => void removeCase(item) }, '×'),
-            )),
+                : h(Button, { variant: 'ghost', size: 'sm', disabled: caseRun.busy, title: '跑这条用例', 'aria-label': '跑这条用例', onClick: () => void runCases(item.id) }, uiIcon(h, 'run')),
+              ))),
+
           h('div', { className: ROW },
             h(TextField, {
               style: { flex: 1 }, value: newCase.title, placeholder: '用例：做什么，例如 用错误密码连续登录 5 次',
@@ -2026,6 +2526,7 @@ function Drawer({ task, state, onClose, onChanged }) {
             }),
             h('div', { className: HINT }, '先登录取 token、再带 token 调业务接口时用；变量写成 {{data.token}} 放进 url 或 body。第一步失败后面不会跑。'),
           ),
+          testPlanBlock(),
         ),
       ),
       h(Section, { pane: 'overview', current: pane, id: 'meta' },
@@ -2068,12 +2569,38 @@ function Drawer({ task, state, onClose, onChanged }) {
             : bugs.map(item => `${item.code || item.id}（${(state.statuses ?? []).find(entry => entry.id === item.status)?.label ?? item.status}）`).join('、')
         })()),
         h('dt', {}, '飞书会话'), h('dd', {}, task.feishuThread === '' || task.feishuThread === undefined ? '未关联' : task.feishuThread),
-        h('dt', {}, '状态历史'), h('dd', {}, task.history.map(item => {
-          const label = (state.statuses ?? []).find(entry => entry.id === item.status)?.label ?? item.status
-          const tail = item.note === undefined || item.note === '' ? '' : `（${item.note}）`
-          return `${label} · ${fmtTime(item.at)}${tail}`
-        }).join(' → ') || '无'),
       ),
+      (() => {
+        const history = Array.isArray(task.history) ? [...task.history].reverse() : []
+        if (history.length === 0) return h('div', { className: 'mt-3 ' + HINT, 'data-status-history': '' }, '状态历史：无')
+        const row = (item, index) => {
+          const label = (state.statuses ?? []).find(entry => entry.id === item.status)?.label ?? String(item.status ?? '')
+          return h('li', {
+            key: String(item.at ?? 0) + '-' + index,
+            className: 'flex min-w-0 items-start gap-2 border-b border-separator-border pb-2 last:border-b-0 last:pb-0',
+            'data-history-row': '',
+          },
+            h('span', { className: 'w-[86px] shrink-0 text-caption-1-regular text-text-tertiary tabular-nums' }, fmtTime(item.at)),
+            h('div', { className: 'flex min-w-0 flex-1 flex-col gap-0.5' },
+              h('div', { className: 'flex min-w-0 flex-wrap items-center gap-2' },
+                h(ChipField, { variant: 'soft' }, label),
+                item.by ? h('span', { className: HINT }, String(item.by)) : null),
+              (item.note === undefined || item.note === '') ? null : h('div', { className: 'break-words text-caption-1-regular text-text-secondary' }, String(item.note)),
+            ),
+          )
+        }
+        const recent = history.slice(0, 5)
+        const rest = history.slice(5)
+        return h('div', { className: 'mt-3 flex min-w-0 flex-col gap-2', 'data-status-history': '' },
+          h('div', { className: 'flex min-w-0 flex-wrap items-center justify-between gap-2' },
+            h('div', { className: 'text-caption-2-medium text-text-secondary' }, `状态历史（${history.length}）`),
+            h('span', { className: HINT }, '最新的在最上面')),
+          h('ol', { className: 'flex min-w-0 flex-col gap-2' }, recent.map(row)),
+          rest.length === 0 ? null : h('details', { className: 'rounded-lg border border-separator-border px-3 py-2', 'data-history-rest': '' },
+            h('summary', { className: 'cursor-pointer text-caption-1-regular text-text-secondary' }, `展开其余 ${rest.length} 条`),
+            h('ol', { className: 'mt-2 flex min-w-0 flex-col gap-2' }, rest.map(row))),
+        )
+      })(),
       ),
       h(Section, { pane: 'discuss', current: pane, id: 'comments' },
         h(SectionHead, null, `评论（${commentTotal}）`, h('span', { className: HINT }, '最新的在最上面')),
@@ -2118,14 +2645,29 @@ function Drawer({ task, state, onClose, onChanged }) {
                     h('span', { className: 'text-body-2-semibold text-text-primary' }, who),
                     h('span', { className: 'rounded-full border border-separator-border px-2 text-caption-1-regular text-text-tertiary' }, human ? '我提出' : 'AI 回复'),
                     expert !== undefined && expert.domain !== '' ? h(ChipField, { variant: 'gray', 'data-role': expert.role }, expert.domain) : null,
-                    h('span', { className: 'ml-auto text-caption-1-regular text-text-tertiary' }, fmtTime(item.at)),
+                    h('div', { className: 'ml-auto flex items-center gap-1' },
+                      h('span', { className: 'text-caption-1-regular text-text-tertiary tabular-nums' }, fmtTime(item.at)),
+                      h(Button, { variant: 'ghost', size: 'xs', disabled: busy, title: '编辑这条评论', 'data-comment-edit': item.id, onClick: () => startCommentEdit(item) }, '编辑'),
+                      h(Button, { variant: 'ghost', size: 'xs', disabled: busy, title: '删除这条评论', 'data-comment-delete': item.id, onClick: () => void removeComment(item) }, '删除'),
+                    ),
                   ),
-                  h('div', {
-                    className: 'md-content min-w-0 rounded-xl border border-l-2 border-separator-border p-2 text-body-2-regular leading-relaxed '
-                      + (human ? 'bg-background-secondary-default ' : 'bg-background-primary-default ')
-                      + roleRail,
-                  },
-                    bodyNodes.length === 0 ? h('span', { className: HINT }, '（这条评论没有正文）') : bodyNodes),
+                  commentEdit !== null && commentEdit.id === item.id
+                    ? h('div', { className: 'flex min-w-0 flex-col gap-2' },
+                      h(TextAreaField, {
+                        rows: 3, value: commentEdit.body, 'aria-label': '编辑评论',
+                        onChange: event => setCommentEdit({ ...commentEdit, body: event.target.value }),
+                      }),
+                      h('div', { className: 'flex justify-end gap-2' },
+                        h(Button, { variant: 'ghost', size: 'sm', disabled: busy, onClick: () => setCommentEdit(null) }, '取消'),
+                        h(Button, { variant: 'primary', size: 'sm', disabled: busy || commentEdit.body.trim() === '', onClick: () => void saveCommentEdit() }, '保存'),
+                      ),
+                    )
+                    : h('div', {
+                      className: 'md-content min-w-0 rounded-xl border border-l-2 border-separator-border p-2 text-body-2-regular leading-relaxed '
+                        + (human ? 'bg-background-secondary-default ' : 'bg-background-primary-default ')
+                        + roleRail,
+                    },
+                      bodyNodes.length === 0 ? h('span', { className: HINT }, '（这条评论没有正文）') : bodyNodes),
                 ),
               )
             }),
@@ -2134,7 +2676,7 @@ function Drawer({ task, state, onClose, onChanged }) {
         ),
       ),
       ),
-      h('div', { className: 'flex shrink-0 flex-col gap-2 border-t border-separator-border bg-background-primary-default px-5 pt-3 pb-4', 'data-drawer-foot': '' },
+      pane === 'discuss' ? h('div', { className: 'flex shrink-0 flex-col gap-2 border-t border-separator-border bg-background-primary-default px-5 pt-3 pb-4', 'data-drawer-foot': '' },
         h('div', { className: 'flex flex-wrap items-center gap-2', 'data-drawer-mention-bar': '' },
           h(Button, {
             variant: 'secondary', size: 'sm', disabled: busy,
@@ -2187,7 +2729,7 @@ function Drawer({ task, state, onClose, onChanged }) {
         notice !== null ? h('span', { className: OK_TEXT }, notice) : null,
         error !== null ? h('span', { className: ERR_TEXT }, error) : null,
         ),
-      ),
+      ) : null,
     ),
   )
 }

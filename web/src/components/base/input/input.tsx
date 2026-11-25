@@ -126,6 +126,17 @@ export interface InputBaseProps extends Omit<AriaInputProps, "size" | "className
   groupRef?: Ref<HTMLDivElement>;
 }
 
+/* 宿主的全局 input 样式在层叠层里带 !important，普通 class/内联样式都盖不过；
+   只有 !important 的内联声明能赢（真机实测）。组件视觉要求输入框本身无边框、
+   透明、无圆角，圆角与背景交给外层 shell，所以挂载时用 ref 强制一次。 */
+function resetInputBox(node: HTMLInputElement | null) {
+  if (node === null) return;
+  node.style.setProperty("border", "0", "important");
+  node.style.setProperty("background-color", "transparent", "important");
+  node.style.setProperty("border-radius", "0", "important");
+  node.style.setProperty("box-shadow", "none", "important");
+}
+
 const inputStyles = sortCx({
   field: [
     "relative flex w-full items-center",
@@ -175,6 +186,11 @@ export function InputBase({
 }: InputBaseProps) {
   const { direction } = useLocale();
   const ctx = useContext(TextFieldContext);
+  const assignRef = (node: HTMLInputElement | null) => {
+    resetInputBox(node);
+    if (typeof ref === "function") ref(node);
+    else if (ref) (ref as { current: HTMLInputElement | null }).current = node;
+  };
   const size: InputSize = sizeProp ?? ctx.size ?? "medium";
   const hasAddon = leadingAddon !== undefined && leadingAddon !== null;
 
@@ -216,7 +232,7 @@ export function InputBase({
             <Leading className={inputStyles.icon} aria-hidden />
           ) : null}
           <AriaInput
-            ref={ref}
+            ref={assignRef}
             {...inputProps}
             // Align to the field's start even when email/URL values use LTR.
             className={cx(inputStyles.input, direction === "rtl" ? "pr-1 text-right" : "pl-1 text-left", ctx.inputClassName, className)}

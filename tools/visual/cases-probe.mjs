@@ -57,6 +57,15 @@ const hostNoise = []
 const isHostNoise = text => HOST_NOISE.test(String(text))
 
 const page = await browser.newPage()
+const cookieSpec = String(process.env.STUDIO_COOKIE ?? '').trim()
+if (cookieSpec !== '') {
+  const origin = new URL(baseUrl)
+  const parsed = cookieSpec.split(';').map(part => part.trim()).filter(Boolean).map(part => {
+    const at = part.indexOf('=')
+    return at > 0 ? { name: part.slice(0, at), value: part.slice(at + 1), domain: origin.hostname, path: '/' } : null
+  }).filter(Boolean)
+  if (parsed.length > 0) await page.setCookie(...parsed)
+}
 const errors = []
 page.on('pageerror', error => { if (isHostNoise(error)) { hostNoise.push(String(error).slice(0, 120)); return } errors.push(String(error).slice(0, 200)) })
 

@@ -1,4 +1,4 @@
-import { isSelfReview, reviewDecision } from './quality.js'
+import { CODING_REVIEW_VERDICT, isSelfReview, reviewDecision } from './quality.js'
 import { randomBytes } from 'node:crypto'
 import {
   CASE_RESULTS, CODING_REVIEW_STATUS, RELEASE_STATUS_LABEL, REQ_STATUS_LABEL, ROLE_IDS, STATUSES, STATUS_IDS,
@@ -9,7 +9,8 @@ import {
   buildDashboard, commentTask, ensureReqFolder, requirementMatrix, requirementProgress, requirementRollup,
   mutateReqDoc, runSuite, runTaskCases, childSignoffBlockers, runTaskQuality, saveRequirement, syncArtifact, syncRequirementArtifacts, taskExitGate, updateTask,
 } from './executor.js'
-import { runSummary } from './dispatcher.js'
+import { parseMentions, runSummary } from './dispatcher.js'
+import { publishNoteMentions } from './mention-note.js'
 import { mineSkillFromCard } from './skill-mine.js'
 import { removeTaskComment, updateTaskComment } from './comments.js'
 import { resolveRequirement, requirementRefHint, reviewRequirement, saveTaskDesign } from './reviews.js'
@@ -1500,6 +1501,24 @@ export function registerTools(ctx, store) {
         return task
       })
       const task = snapshot.tasks.find(entry => entry.id === args.id)
+      /* 评审结论必须进讨论区：以前只有 HTTP 路由会把备注补成评论，agent 走工具评审时
+         意见只写进 coding.review.note，人翻卡片看到的讨论里一个字都没有。 */
+      if (action === 'review' && task !== undefined) {
+        const verdict = CODING_REVIEW_VERDICT[String(task.coding?.review?.status ?? '')] ?? ''
+        await publishNoteMentions({
+          store,
+          commentTask,
+          dispatcher: host.getActiveDispatcher(),
+          parseMentions,
+        }, {
+          taskId: args.id,
+          note: String(args.reviewNote ?? ''),
+          by,
+          label: '代码评审',
+          verdict,
+          forceComment: true,
+        }).catch(() => undefined)
+      }
       const summary = codingSummary(task.coding)
       return `${task.id} 执行记录：${summary === '' ? '（空）' : summary}`
     },

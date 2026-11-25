@@ -4,7 +4,7 @@
 import { ACCESS_ROLE_LABEL, ADMIN_ROUTES, LEVEL_RANK, ROLE_LEVEL } from './domain.js'
 
 /** 只是读、但走 POST 的入口（前端只有一处 api() 封装，固定发 POST）。 */
-export const READ_ONLY_POST_ROUTES = new Set(['/task/comments', '/task/parts', '/cases', '/team/memory', '/suite/list', '/release/get', '/requirement/get', '/requirement/matrix', '/requirement/impact', '/contexts', '/contexts/session', '/access/explain'])
+export const READ_ONLY_POST_ROUTES = new Set(['/task/comments', '/task/parts', '/task/diff', '/task/file', '/cases', '/team/memory', '/suite/list', '/release/get', '/requirement/get', '/requirement/matrix', '/requirement/impact', '/contexts', '/contexts/session', '/access/explain', '/workspace/list'])
 
 /** 这个请求需要什么权限：读、写、还是管理员。 */
 export function accessLevelFor(route, method) {
@@ -110,6 +110,7 @@ export const DESTRUCTIVE_ROUTES = new Map([
   ['/suite/delete', 'DELETE'],
   ['/skills/delete', 'DELETE'],
   ['/access/delete', 'DELETE'],
+  ['/workspace/delete', 'DELETE'],
   ['/snapshot/restore', 'RESTORE'],
   ['/market/install', 'INSTALL'],
   ['/market/uninstall', 'UNINSTALL'],

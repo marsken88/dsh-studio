@@ -32,3 +32,30 @@ export function impactSummary(tasks) {
     failing: cases.filter(item => item.result === 'fail').length,
   }
 }
+
+/**
+ * 需求文档（PRD / 验收标准）最近一次变更时间；没有这类文档返回 0。
+ * 文档改版后，之前"通过过"的用例不一定还成立 —— 这是「需复跑」的基准时间。
+ */
+export function requirementDocUpdatedAt(requirement) {
+  const docs = Array.isArray(requirement?.docs) ? requirement.docs : []
+  let at = 0
+  for (const doc of docs) {
+    const kind = String(doc?.kind ?? 'prd')
+    if (kind !== 'prd' && kind !== 'acceptance') continue
+    at = Math.max(at, Number(doc?.at) || 0)
+  }
+  return at
+}
+
+/**
+ * 这条用例要不要在文档改版后复跑：
+ *   只有「通过过」的用例才需要 —— 失败/没跑的本来就在待办里；
+ *   最后一次执行（没有执行记录就用登记时间）早于文档更新时间 → 结果可能已经过时。
+ */
+export function caseNeedsRerun(item, docUpdatedAt) {
+  if (!(Number(docUpdatedAt) > 0)) return false
+  if (String(item?.result ?? '') !== 'pass') return false
+  const ranAt = Number(item?.lastRun?.at) || Number(item?.at) || 0
+  return ranAt > 0 && ranAt < Number(docUpdatedAt)
+}

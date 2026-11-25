@@ -26,7 +26,7 @@ const ROW = 'flex min-w-0 flex-wrap items-center gap-2'
 const ACTIONS = 'flex flex-wrap items-center gap-2'
 const LISTROW = 'flex min-w-0 items-start justify-between gap-4 border-b border-separator-border py-3 last:border-b-0'
 const LISTROW_MAIN = 'flex min-w-0 flex-1 flex-col gap-1'
-const STATBOX = 'flex min-w-0 flex-col gap-0.5 rounded-lg border border-separator-border bg-background-primary-default px-3 py-2'
+const STATBOX = 'flex min-w-0 flex-col gap-1 rounded-lg border border-separator-border bg-background-primary-default px-3 py-2'
 const STATVALUE = 'text-title-2-semibold text-text-primary tabular-nums'
 const CODE = 'inline-flex items-center rounded-md border border-separator-border bg-background-secondary-default px-1 font-mono text-caption-1-regular text-text-secondary'
 const LINK = 'text-caption-1-medium text-accent-600 hover:underline'
@@ -35,7 +35,7 @@ const SECTION_BODY = 'flex min-w-0 flex-col gap-2'
 const MOUNT = 'rounded-xl border border-separator-border bg-background-secondary-default px-3 py-3'
 
 export     function IntakePage({ state, onChanged, mode }) {
-  const { h, React, api, toast, currentUser, confirmDialog, promptDialog, renderMarkdown, TextField, TextAreaField, SelectField, CheckField, MdField } = client()
+  const { h, React, api, toast, currentUser, confirmDialog, promptDialog, renderMarkdown, TextField, TextAreaField, SelectField, CheckField, MdField, SideDrawer } = client()
       const business = (state.requirements ?? []).filter(item => item.source === 'business')
       const [note, setNote] = React.useState('')
       const [result, setResult] = React.useState('')
@@ -124,7 +124,7 @@ h('div', { className: FIELD }, h('div', { className: LABEL }, '验收标准链�
     }
 
 export     function RequirementsPage({ state, onOpenTask, onChanged, createSignal, focusReq }) {
-  const { h, React, api, toast, currentUser, confirmDialog, promptDialog, renderMarkdown, TextField, TextAreaField, SelectField, CheckField, MdField } = client()
+  const { h, React, api, toast, currentUser, confirmDialog, promptDialog, renderMarkdown, TextField, TextAreaField, SelectField, CheckField, MdField, SideDrawer } = client()
       const requirements = state.requirements ?? []
       const projects = state.config.projects ?? []
       const statusOptions = REQ_STATUS_ORDER.map(id => ({ value: id, label: REQ_STATUS_LABEL[id] }))
@@ -166,6 +166,8 @@ export     function RequirementsPage({ state, onOpenTask, onChanged, createSigna
       React.useEffect(() => { if (focusReq && focusReq.id) setSelected(focusReq.id) }, [focusReq])
       const [form, setForm] = React.useState(null)
       const [error, setError] = React.useState(null)
+      /* 需求详情分区：概览 / 沟通 / 任务与验收 / 交付物。只切显示，数据仍整页加载。 */
+      const [reqPane, setReqPane] = React.useState('overview')
       const [busy, setBusy] = React.useState(false)
       const [docForm, setDocForm] = React.useState(null)
       const [docNote, setDocNote] = React.useState(null)
@@ -178,10 +180,18 @@ export     function RequirementsPage({ state, onOpenTask, onChanged, createSigna
       // ---- 功能点与可追溯矩阵：需求结构化之后，能查到「每条验收标准被谁做、被哪条用例验」
       const [matrix, setMatrix] = React.useState(null)
       const [matrixNote, setMatrixNote] = React.useState(null)
+      // 矩阵是整条需求的全部功能点，一屏十几行时先筛再编辑：按编号/标题/验收条件搜，或只看未覆盖。
+      const [matrixQuery, setMatrixQuery] = React.useState('')
+      const [matrixOnlyOpen, setMatrixOnlyOpen] = React.useState(false)
       const [pointForm, setPointForm] = React.useState(null)
       /* 需求矩阵里功能点描述是一整段 markdown，全渲染会把表格行撑到半屏高（一屏只看得下两三行）。
          默认只显示两行摘要，点「全文」再展开 —— 表格回到「一眼扫完」的用途。 */
       const [openPointIds, setOpenPointIds] = React.useState(() => new Set())
+      /* 矩阵编辑：勾选多个功能点批量覆盖验收条件；编辑表单在表格上方就地展开（不再在页面底部）。 */
+      const [selectedPointIds, setSelectedPointIds] = React.useState(() => new Set())
+      const [bulkAcceptance, setBulkAcceptance] = React.useState(null)
+      const [pointFormTick, setPointFormTick] = React.useState(0)
+      const pointFormRef = React.useRef(null)
       // ---- 需求准出与验收签字
       const [reqSign, setReqSign] = React.useState('')
       const [reqNote, setReqNote] = React.useState(null)
@@ -279,6 +289,37 @@ export     function RequirementsPage({ state, onOpenTask, onChanged, createSigna
         await savePoints([...existing, entry])
       }
 
+      const openPointForm = point => {
+        setPointForm(point)
+        setPointFormTick(tick => tick + 1)
+      }
+
+      /* 表格上方就地展开：点「编辑」后滚动过去，不用再翻到页面底部找表单。 */
+      React.useEffect(() => {
+        if (pointForm === null) return
+        const node = pointFormRef.current
+        if (node !== null && typeof node.scrollIntoView === 'function') node.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
+      }, [pointFormTick])
+
+      /* 批量覆盖验收条件：一行一条，替换所选功能点的全部条件。
+         id 按位置复用（前 N 条保留原 id），尽量少打断已挂条件的用例；删掉的条件仍会变成「未挂条件」。 */
+      const applyBulkAcceptance = async () => {
+        if (current === null || bulkAcceptance === null) return
+        const texts = String(bulkAcceptance.text ?? '').split('\n').map(line => line.trim()).filter(line => line !== '')
+        if (texts.length === 0) { setMatrixNote('批量验收条件至少要写一条'); return }
+        const ids = new Set(selectedPointIds)
+        if (ids.size === 0) { setMatrixNote('先勾选要改的功能点'); return }
+        if (!(await confirmDialog(`用这 ${texts.length} 条验收条件替换所选 ${ids.size} 个功能点的全部条件？已挂在这些条件下的用例会变成「未挂条件」。`, { title: '批量设置验收条件', danger: true, okText: '替换' }))) return
+        const next = (current.points ?? []).map(point => {
+          if (!ids.has(point.id)) return point
+          const oldIds = (point.acceptance ?? []).map(item => item.id)
+          return { ...point, acceptance: texts.map((text, index) => ({ id: oldIds[index] ?? `a${index + 1}`, text, done: false })) }
+        })
+        await savePoints(next)
+        setSelectedPointIds(new Set())
+        setBulkAcceptance(null)
+      }
+
       const removePoint = async (pointId) => {
         if (current === null) return
         if (!(await confirmDialog('删除这个功能点？挂在上面的卡会变成「未归功能点」。', { title: '删除功能点', danger: true, okText: '删除' }))) return
@@ -295,6 +336,8 @@ export     function RequirementsPage({ state, onOpenTask, onChanged, createSigna
       }
 
       const current = requirements.find(item => item.id === selected) ?? null
+      // 换一条需求就把批量选择清掉，避免把上一条需求的功能点 id 带过来。
+      React.useEffect(() => { setSelectedPointIds(new Set()); setBulkAcceptance(null) }, [selected])
       const tasksOf = id => state.tasks.filter(task => task.requirementId === id)
       const statusLabel = id => (state.statuses.find(column => column.id === id)?.label ?? id)
 
@@ -552,9 +595,18 @@ export     function RequirementsPage({ state, onOpenTask, onChanged, createSigna
         }
       }
 
-      const formPanel = form === null ? null : h('div', { className: PANEL },
-        h('div', { className: PANEL_HEAD }, form.id === undefined ? '新建需求' : `编辑 ${current?.code ?? ''}`),
-        h('div', { className: PANEL_BODY },
+      const closeForm = () => { setForm(null); setError(null) }
+      /* 新建/编辑需求走侧滑块：页面本体只留列表与详情，不再把一长串表单铺在顶部。 */
+      const formPanel = form === null ? null : h(SideDrawer, {
+        title: form.id === undefined ? '新建需求' : `编辑 ${current?.code ?? ''}`,
+        hint: '先写标题与澄清三问；保存后可在需求详情里继续补功能点、文档与验收条件。',
+        onClose: closeForm,
+        footer: [
+          h(Button, { key: 'cancel', variant: 'secondary', size: 'sm', onClick: closeForm }, '取消'),
+          h(Button, { key: 'save', variant: 'primary', size: 'sm', disabled: busy, onClick: () => void save() }, busy ? '保存中…' : '保存需求'),
+        ],
+      },
+        h('div', { className: 'flex min-w-0 flex-col gap-3' },
           h('div', { className: FIELD },
             h('div', { className: LABEL }, '需求标题'),
             h(TextField, { 'aria-label': '需求标题', value: form.title, onChange: e => setForm({ ...form, title: e.target.value }) }),
@@ -621,10 +673,6 @@ export     function RequirementsPage({ state, onOpenTask, onChanged, createSigna
               onChange: e => setForm({ ...form, description: e.target.value }),
             }),
           ),
-          h('div', { className: ROW, style: { justifyContent: 'flex-end', gap: 8 } },
-            h(Button, { variant: 'secondary', size: 'sm', onClick: () => { setForm(null); setError(null) } }, '取消'),
-            h(Button, { variant: 'primary', size: 'sm', disabled: busy, onClick: () => void save() }, busy ? '保存中…' : '保存需求'),
-          ),
         ),
       )
 
@@ -648,7 +696,7 @@ export     function RequirementsPage({ state, onOpenTask, onChanged, createSigna
         const links = current.links ?? {}
         const folder = current.folder ?? {}
         const link = (label, url) => url === '' ? null : h('a', { className: LINK, href: url, target: '_blank', rel: 'noreferrer' }, label)
-        return h('div', { className: 'flex min-w-0 flex-col gap-3', 'data-requirement-body': '' },
+        return h('div', { className: 'flex min-w-0 flex-col gap-3', 'data-requirement-body': '', 'data-req-pane': reqPane },
           h('div', { className: 'flex min-w-0 flex-wrap items-start justify-between gap-3' },
             h('div', null,
               h('div', { className: 'font-mono text-caption-1-medium text-text-tertiary' }, current.code || current.id),
@@ -665,12 +713,26 @@ export     function RequirementsPage({ state, onOpenTask, onChanged, createSigna
             ),
           ),
           (() => {
+            const tabs = [
+              { id: 'overview', label: '概览' },
+              { id: 'discuss', label: '沟通' + (Array.isArray(current.comments) && current.comments.length > 0 ? ' ' + current.comments.length : '') },
+              { id: 'accept', label: '任务与验收' },
+              { id: 'artifacts', label: '交付物' + (artifacts.length > 0 ? ' ' + artifacts.length : '') },
+            ]
+            return h('div', { className: 'flex flex-wrap items-center gap-1 border-b border-separator-border pb-2', role: 'group', 'aria-label': '需求详情分区' },
+              tabs.map(tab => h(Button, {
+                key: tab.id, 'aria-pressed': reqPane === tab.id ? 'true' : 'false', 'data-req-tab': tab.id,
+                variant: reqPane === tab.id ? 'secondary' : 'ghost', size: 'sm',
+                onClick: () => setReqPane(tab.id),
+              }, tab.label)))
+          })(),
+          (() => {
             // 评审：草稿要先过评审才能拆卡；打回会退回草稿并留意见。
             const review = current.review ?? null
             const stateLabel = review === null ? '还没提交评审' : (REVIEW_LABEL[review.status] ?? review.status)
             const canSubmit = review === null || review.status === 'changes_requested'
             const canDecide = review !== null && review.status === 'pending'
-            return h('div', { className: `${PANEL} mt-4`, 'data-review': review === null ? 'none' : review.status },
+            return h('div', { className: `${PANEL} mt-4`, 'data-req-panel': 'overview', 'data-review': review === null ? 'none' : review.status },
               h('div', { className: PANEL_HEAD },
                 h('span', null, '需求评审'),
                 h(Chip, { color: review?.status === 'approved' ? 'lime' : 'gray', className: 'ms-2', 'data-on': review?.status === 'approved' ? '1' : '0' }, stateLabel),
@@ -715,7 +777,7 @@ export     function RequirementsPage({ state, onOpenTask, onChanged, createSigna
               } catch (error) { toast(error.message ?? String(error), 'error') }
               finally { setCommentBusy(false) }
             }
-            return h('div', { className: `${PANEL} mt-4`, 'data-requirement-comments': '' },
+            return h('div', { className: `${PANEL} mt-4`, 'data-req-panel': 'discuss', 'data-requirement-comments': '' },
               h('div', { className: PANEL_HEAD },
                 h('span', null, '沟通'),
                 h('span', { className: HINT, style: { marginLeft: 'auto' } }, comments.length === 0 ? '还没有人在这里说过话' : `${comments.length} 条`),
@@ -755,10 +817,10 @@ export     function RequirementsPage({ state, onOpenTask, onChanged, createSigna
             )
           })(),
           (link('PRD', links.prd) || link('原型', links.proto) || link('验收标准', links.acceptance))
-            ? h('div', { className: ROW }, link('PRD 文档', links.prd), link('原型', links.proto), link('验收标准', links.acceptance))
-            : h('div', { className: 'flex flex-wrap items-center gap-2 rounded-xl border border-dashed border-separator-border bg-background-secondary-default px-3 py-3 text-body-2-regular text-text-secondary' }, [h('span', null, '还没有登记 PRD / 原型 / 验收标准链接；PRD 与原型由产品在澄清后输出，可在这里补，或点右边「让产品补 PRD」。'), h(Button, { variant: 'ghost', size: 'sm', className: 'ms-2', onClick: async () => { const note = await promptDialog('想请产品补什么？', { title: '申请产品补 PRD', defaultValue: '需要产品输出 PRD 与原型' }); if (note === null) return; try { await api('/requirement/request-prd', { id: current.id, by: currentUser(), note }); toast('已申请产品补 PRD'); onChanged() } catch (error) { toast(error.message ?? String(error), 'error') } } }, '让产品补 PRD')]),
+            ? h('div', { className: ROW, 'data-req-panel': 'overview' }, link('PRD 文档', links.prd), link('原型', links.proto), link('验收标准', links.acceptance))
+            : h('div', { className: 'flex flex-wrap items-center gap-2 rounded-xl border border-dashed border-separator-border bg-background-secondary-default px-3 py-3 text-body-2-regular text-text-secondary', 'data-req-panel': 'overview' }, [h('span', null, '还没有登记 PRD / 原型 / 验收标准链接；PRD 与原型由产品在澄清后输出，可在这里补，或点右边「让产品补 PRD」。'), h(Button, { variant: 'ghost', size: 'sm', className: 'ms-2', onClick: async () => { const note = await promptDialog('想请产品补什么？', { title: '申请产品补 PRD', defaultValue: '需要产品输出 PRD 与原型' }); if (note === null) return; try { await api('/requirement/request-prd', { id: current.id, by: currentUser(), note }); toast('已申请产品补 PRD'); onChanged() } catch (error) { toast(error.message ?? String(error), 'error') } } }, '让产品补 PRD')]),
           current.description
-            ? h('div', { className: `${PANEL} mt-4` },
+            ? h('div', { className: `${PANEL} mt-4`, 'data-req-panel': 'overview' },
               h('div', { className: PANEL_HEAD },
                 h('span', null, '需求明细'), current.source === 'business' ? h('span', { className: HINT, 'data-src': 'business' }, `业务提单 · ${current.requester?.name || '未署名'}${current.requester?.dept ? '（' + current.requester.dept + '）' : ''} · ${fmtTime(current.requester?.at || current.createdAt)}`) : null,
                 h('span', { className: HINT, style: { marginLeft: 'auto' } }, '支持 Markdown'),
@@ -773,7 +835,7 @@ export     function RequirementsPage({ state, onOpenTask, onChanged, createSigna
             const history = (current.history ?? []).slice().reverse()
             if (history.length === 0 || (current.change ?? null) !== null) return null
             const label = { title: '标题', description: '需求明细', priority: '优先级', status: '状态', owner: '负责人', project: '项目', iteration: '迭代' }
-            return h('div', { className: `${PANEL} mt-4` },
+            return h('div', { className: `${PANEL} mt-4`, 'data-req-panel': 'overview' },
               h('div', { className: PANEL_HEAD },
                 h('span', null, '变更记录'),
                 h('span', { className: HINT, style: { marginLeft: 'auto' } }, `最近 ${history.length} 条`),
@@ -808,7 +870,7 @@ export     function RequirementsPage({ state, onOpenTask, onChanged, createSigna
               try { await api('/requirement/pool', { id: current.id, pool: { reach, impact, confidence, effort } }); toast('需求池评分已更新'); await onChanged() }
               catch (cause) { toast(cause instanceof Error ? cause.message : String(cause), 'error') }
             }
-            return h('div', { className: `${PANEL} mt-4` },
+            return h('div', { className: `${PANEL} mt-4`, 'data-req-panel': 'overview' },
               h('div', { className: PANEL_HEAD },
                 h('span', null, '需求池评分（RICE）'),
                 h('span', { className: HINT, style: { marginLeft: 'auto' } }, pool.score > 0 ? `得分 ${pool.score}` : '还没打分：不打分就没法和别的需求比优先级'),
@@ -846,7 +908,7 @@ export     function RequirementsPage({ state, onOpenTask, onChanged, createSigna
               if (ok !== true) return
               await call({ action: 'delete', questionId: item.id }, '已删除')
             }
-            return h('div', { className: `${PANEL} mt-4`, 'data-open': openCount > 0 ? '1' : '0' },
+            return h('div', { className: `${PANEL} mt-4`, 'data-req-panel': 'overview', 'data-open': openCount > 0 ? '1' : '0' },
               h('div', { className: PANEL_HEAD },
                 h('span', null, '待确认清单'),
                 h('span', { className: HINT, style: { marginLeft: 'auto' } }, openCount > 0 ? `${openCount} 个没回答，回答完才能拆卡` : (questions.length === 0 ? '澄清阶段把不确定的先记在这里' : '全部已回答')),
@@ -881,7 +943,7 @@ export     function RequirementsPage({ state, onOpenTask, onChanged, createSigna
             const affectedCases = change.affectedCases ?? []
             const byId = new Map(tasks.map(task => [task.id, task]))
             const statusLabel = id => (state.statuses.find(entry => entry.id === id)?.label) ?? id
-            return h('div', { className: `${PANEL} mt-4`, 'data-invalidated': change.invalidated ? '1' : '0' },
+            return h('div', { className: `${PANEL} mt-4`, 'data-req-panel': 'overview', 'data-invalidated': change.invalidated ? '1' : '0' },
               h('div', { className: PANEL_HEAD },
                 h('span', null, change.invalidated ? '变更影响（签字已作废）' : '变更影响'),
                 h('span', { className: HINT, style: { marginLeft: 'auto' } },
@@ -927,7 +989,7 @@ export     function RequirementsPage({ state, onOpenTask, onChanged, createSigna
           (() => {
             const deploys = current.deploys ?? []
             if (deploys.length === 0) return null
-            return h('div', { className: `${PANEL} mt-4` },
+            return h('div', { className: `${PANEL} mt-4`, 'data-req-panel': 'overview' },
               h('div', { className: PANEL_HEAD },
                 h('span', null, '上线足迹'),
                 h('span', { className: HINT, style: { marginLeft: 'auto' } }, '来自版本的部署记录，只留痕不触发'),
@@ -944,7 +1006,7 @@ export     function RequirementsPage({ state, onOpenTask, onChanged, createSigna
               ),
             )
           })(),
-          h('div', { className: `${PANEL} mt-4` },
+          h('div', { className: `${PANEL} mt-4`, 'data-req-panel': 'overview' },
             h('div', { className: PANEL_HEAD }, h('span', null, '依赖与排序')),
             h('div', { className: PANEL_BODY },
               h('div', { className: ROW },
@@ -978,7 +1040,7 @@ export     function RequirementsPage({ state, onOpenTask, onChanged, createSigna
             const pointTotal = stats.points ?? (current.points ?? []).length
             const casePass = stats.pass ?? passed
             const caseTotal = stats.cases ?? caseAgg.total
-            return h('div', { className: `${PANEL} mt-4` },
+            return h('div', { className: `${PANEL} mt-4`, 'data-req-panel': 'accept' },
               h('div', { className: PANEL_HEAD },
                 h('span', null, '需求准出与验收签字'),
                 h(Chip, { color: gate.ready ? 'lime' : 'yellow', className: 'ms-auto', 'data-pt': gate.ready ? 'covered' : 'open' },
@@ -990,8 +1052,26 @@ export     function RequirementsPage({ state, onOpenTask, onChanged, createSigna
                   h('div', { className: HINT },
                     `${pct}% · ${done}/${tasks.length} 张卡完成 · 功能点覆盖 ${covered}/${pointTotal} · 用例通过 ${casePass}/${caseTotal}`),
                 ),
-                (gate.blockers ?? []).map(line => h('div', { key: line, className: 'text-caption-1-regular text-text-error-primary', 'data-kind': 'block' }, `${line}`)),
-                (gate.warnings ?? []).map(line => h('div', { key: line, className: 'text-caption-1-regular text-status-yellow-text', 'data-kind': 'warn' }, `${line}`)),
+                (() => {
+                  /* blocker + warning 一多就是十几行：先露 5 条，其余折叠，避免首屏只剩一片字。 */
+                  const items = [
+                    ...(gate.blockers ?? []).map(line => ({ kind: 'block', line })),
+                    ...(gate.warnings ?? []).map(line => ({ kind: 'warn', line })),
+                  ]
+                  const head = items.slice(0, 5)
+                  const rest = items.slice(5)
+                  const row = item => h('div', {
+                    key: item.kind + ':' + item.line,
+                    className: item.kind === 'block' ? 'text-caption-1-regular text-text-error-primary' : 'text-caption-1-regular text-status-yellow-text',
+                    'data-kind': item.kind,
+                  }, item.line)
+                  return [
+                    head.map(row),
+                    rest.length === 0 ? null : h('details', { key: 'gate-rest', 'data-gate-more': String(rest.length) },
+                      h('summary', { className: 'cursor-pointer text-caption-1-medium text-text-secondary' }, `展开其余 ${rest.length} 条`),
+                      h('div', { className: 'mt-1 flex min-w-0 flex-col gap-1' }, rest.map(row))),
+                  ]
+                })(),
                 gate.ready ? h('div', { className: HINT }, '门禁已通过：签完字这条需求就算交付。') : null,
                 signoff === null
                   ? h('div', { className: 'flex flex-wrap items-center gap-3 rounded-lg bg-background-secondary-default px-3 py-2' },
@@ -1010,6 +1090,7 @@ export     function RequirementsPage({ state, onOpenTask, onChanged, createSigna
               ),
             )
           })(),
+          h('div', { 'data-req-panel': 'artifacts', className: 'flex min-w-0 flex-col gap-3' },
           h('div', { className: SECTION }, '交付物归档（飞书云盘）',
             h('div', { className: ACTIONS },
               folder.url ? h('a', { className: LINK, href: folder.url, target: '_blank', rel: 'noreferrer' }, '打开文件夹') : null,
@@ -1054,10 +1135,10 @@ export     function RequirementsPage({ state, onOpenTask, onChanged, createSigna
                 baseDiff.rows.slice(0, 400).map((row, index) => h('div', {
                   key: index,
                   className: row.kind === 'add'
-                    ? 'whitespace-pre-wrap rounded bg-background-tertiary-default px-2 py-0.5 text-status-lime-text'
+                    ? 'whitespace-pre-wrap rounded bg-background-tertiary-default px-2 py-1 text-status-lime-text'
                     : row.kind === 'del'
-                      ? 'whitespace-pre-wrap rounded bg-background-tertiary-error px-2 py-0.5 text-text-error-primary'
-                      : 'whitespace-pre-wrap px-2 py-0.5 text-text-tertiary',
+                      ? 'whitespace-pre-wrap rounded bg-background-tertiary-error px-2 py-1 text-text-error-primary'
+                      : 'whitespace-pre-wrap px-2 py-1 text-text-tertiary',
                   'data-kind': row.kind,
                 }, `${row.kind === 'add' ? '+' : row.kind === 'del' ? '−' : ' '} ${row.text}`)),
                 baseDiff.rows.length > 400 ? h('div', { className: HINT }, `（还有 ${baseDiff.rows.length - 400} 行未显示）`) : null,
@@ -1139,6 +1220,8 @@ export     function RequirementsPage({ state, onOpenTask, onChanged, createSigna
               ),
             ),
           ),
+          ),
+          h('div', { 'data-req-panel': 'accept', className: 'flex min-w-0 flex-col gap-3' },
           h('div', { className: SECTION },
             h('div', { className: 'text-body-2-medium text-text-primary' }, '需求变更影响面'),
             h('div', { className: 'max-w-2xl text-caption-1-regular text-text-tertiary' }, '需求一改，下面这些卡和用例就要重看。点一下现算，不改任何数据。'),
@@ -1147,7 +1230,7 @@ export     function RequirementsPage({ state, onOpenTask, onChanged, createSigna
             h(Button, { variant: 'secondary', size: 'sm', disabled: impactBusy || currentForDeps === null, onClick: () => void loadImpact() }, impactBusy ? '计算中…' : '算一下影响面'),
             impact === null
               ? h('span', { className: HINT }, '还没算过')
-              : h('span', { className: HINT }, `卡 ${impact.summary.cards} · 用例 ${impact.summary.cases}（能自动跑 ${impact.summary.runnable}）· 失败 ${impact.summary.failing}`),
+              : h('span', { className: HINT }, `卡 ${impact.summary.cards} · 用例 ${impact.summary.cases}（能自动跑 ${impact.summary.runnable}）· 失败 ${impact.summary.failing}${impact.summary.staleCases > 0 ? ` · 需复跑 ${impact.summary.staleCases}` : ''}`),
           ),
           impact === null || impact.cards.length === 0
             ? null
@@ -1166,7 +1249,7 @@ export     function RequirementsPage({ state, onOpenTask, onChanged, createSigna
             ? h('div', { className: HINT, style: { padding: '8px 0' } }, '还没有功能点。点「＋ 加功能点」把需求拆成可交付、可验证的条目。')
             : h('div', { className: 'mt-2 flex min-w-0 flex-col gap-2' },
               h('div', { className: 'text-caption-1-regular text-text-secondary' },
-                `功能点 ${matrix.summary.points} · 已覆盖 ${matrix.summary.coveredPoints}${matrix.summary.pointsWithoutCases > 0 ? `（${matrix.summary.pointsWithoutCases} 条还没有用例，覆盖率 ${matrix.summary.coverageRate}%）` : ''} · 卡 ${matrix.summary.cards}（未归点 ${matrix.summary.looseCards}）· 用例 ${matrix.summary.cases}（通过 ${matrix.summary.pass}${matrix.summary.fail > 0 ? `，失败 ${matrix.summary.fail}` : ''}）· 通过率 ${matrix.summary.passRate}%`,
+                `功能点 ${matrix.summary.points} · 已覆盖 ${matrix.summary.coveredPoints}${matrix.summary.pointsWithoutCases > 0 ? `（${matrix.summary.pointsWithoutCases} 条还没有用例，覆盖率 ${matrix.summary.coverageRate}%）` : ''} · 卡 ${matrix.summary.cards}（未归点 ${matrix.summary.looseCards}）· 用例 ${matrix.summary.cases}（通过 ${matrix.summary.pass}${matrix.summary.fail > 0 ? `，失败 ${matrix.summary.fail}` : ''}${matrix.summary.staleCases > 0 ? `，需复跑 ${matrix.summary.staleCases}` : ''}）· 通过率 ${matrix.summary.passRate}%`,
               ),
               /* 口径写明白：不然读者会自己推断成"一卡一点，覆盖率有天花板"（issue #9 第 5 条的真事） */
               h('div', { className: HINT, style: { marginBottom: 8 } },
@@ -1174,89 +1257,23 @@ export     function RequirementsPage({ state, onOpenTask, onChanged, createSigna
               /* 官方 Table：需求矩阵本来就是一张表（编号 / 功能点 / 覆盖 / 卡与用例 / 操作），
                  原来是一串 div 拼的功能点行。RAC 的 collection 组件不能被自定义组件包住，
                  所以直接用 table.tsx 的再导出。 */
-              h(Table, { size: 'sm', 'aria-label': '需求追溯矩阵' },
-                h(TableHeader, null,
-                  h(TableColumn, { id: 'code', isRowHeader: true }, '编号'),
-                  h(TableColumn, { id: 'point' }, '功能点'),
-                  h(TableColumn, { id: 'covered' }, '覆盖'),
-                  h(TableColumn, { id: 'progress' }, '卡与用例'),
-                  h(TableColumn, { id: 'actions' }, '操作'),
-                ),
-                h(TableBody, null,
-                  (matrix.points ?? []).map(point => h(TableRow, { key: point.id, id: point.id },
-                    h(TableCell, null, h('span', { className: CODE }, point.id)),
-                    h(TableCell, { className: 'align-top' },
-                      h('b', null, point.title),
-                      (() => {
-                        const description = String(point.description ?? '')
-                        if (description === '') return null
-                        const open = openPointIds.has(point.id)
-                        const summary = description
-                          .replace(/[#*`>|_~]/g, '')
-                          .replace(/\s+/g, ' ')
-                          .trim()
-                          .slice(0, 90)
-                        return h(React.Fragment, null,
-                          open
-                            ? h('div', { className: 'md-content text-text-primary' }, renderMarkdown(point.description))
-                            : h('div', { className: 'text-caption-1-regular text-text-tertiary', title: description }, summary + (summary.length >= 90 ? '…' : '')),
-                          h(Button, {
-                            variant: 'ghost', size: 'xs', className: 'mt-1 self-start',
-                            onClick: () => setOpenPointIds((previous) => {
-                              const next = new Set(previous)
-                              if (next.has(point.id)) next.delete(point.id)
-                              else next.add(point.id)
-                              return next
-                            }),
-                          }, open ? '收起' : '全文'),
-                        )
-                      })(),
-                    ),
-                    h(TableCell, null,
-                      h(Chip, { color: point.covered ? 'lime' : 'gray', 'data-pt': point.covered ? 'covered' : 'open' }, point.covered ? '已覆盖' : '未覆盖'),
-                    ),
-                    h(TableCell, null,
-                      h('div', { className: 'text-caption-1-regular text-text-tertiary' },
-                        `卡 ${point.cards.length}${point.cards.length === 0 ? '（还没人做）' : '：' + point.cards.map(card => card.code || card.id).join('、')}`,
-                        ` · 用例 ${point.cases.total}（通过 ${point.cases.pass}${point.cases.fail > 0 ? `，失败 ${point.cases.fail}` : ''}${point.cases.pending > 0 ? `，没跑 ${point.cases.pending}` : ''}）`,
-                        point.acceptance.length === 0 ? '' : ` · 验收条件 ${point.acceptance.filter(item => item.covered).length}/${point.acceptance.length}`,
-                      ),
-                    ),
-                    h(TableCell, null,
-                      h('div', { className: ACTIONS },
-                        h(Button, { variant: 'ghost', size: 'sm', onClick: () => setPointForm({ ...point, acceptanceText: (point.acceptance ?? []).map(item => item.text).join('\n') }) }, '编辑'),
-                        h(Button, { variant: 'destructive', size: 'sm', onClick: () => void removePoint(point.id) }, '删除'),
-                      ),
-                    ),
-                  )),
+              /* 勾选 + 批量覆盖验收条件 */
+              h('div', { className: 'mb-2 flex min-w-0 flex-wrap items-center gap-2', 'data-point-bulk': '' },
+                h('span', { className: HINT }, `已选 ${selectedPointIds.size} 个功能点`),
+                h(Button, { variant: 'secondary', size: 'sm', disabled: selectedPointIds.size === 0, onClick: () => setBulkAcceptance({ text: '' }) }, '批量设验收条件'),
+                selectedPointIds.size === 0 ? null : h(Button, { variant: 'ghost', size: 'xs', onClick: () => setSelectedPointIds(new Set()) }, '清除选择')),
+              bulkAcceptance === null ? null : h('div', { className: `${PANEL} mb-2`, 'data-point-bulk-form': '' },
+                h('div', { className: PANEL_HEAD }, `批量设置验收条件（已选 ${selectedPointIds.size} 个）`),
+                h('div', { className: PANEL_BODY },
+                  h('div', { className: HINT }, '一行一条，会替换所选功能点的全部验收条件；已挂在这些条件下的用例会变成「未挂条件」。'),
+                  h(TextAreaField, { rows: 4, value: bulkAcceptance.text, 'aria-label': '批量验收条件', onChange: event => setBulkAcceptance({ text: event.target.value }) }),
+                  h('div', { className: ROW, style: { justifyContent: 'flex-end', gap: 8 } },
+                    h(Button, { variant: 'secondary', size: 'sm', onClick: () => setBulkAcceptance(null) }, '取消'),
+                    h(Button, { variant: 'primary', size: 'sm', onClick: () => void applyBulkAcceptance() }, '替换验收条件'),
+                  ),
                 ),
               ),
-              (matrix.loose ?? []).length === 0 ? null : h('div', { className: 'mt-3 flex min-w-0 flex-col gap-2 rounded-xl border border-dashed border-separator-border p-3' },
-                h('div', { className: HINT, style: { marginBottom: 8 } }, `还有 ${matrix.loose.length} 张卡没归到功能点，选一个挂上去，矩阵才算完整：`),
-                matrix.loose.map(card => h('div', { key: card.id, className: 'flex min-w-0 items-center gap-2' },
-                  h('span', { className: CODE }, card.code || card.id),
-                  h('span', { className: 'min-w-0 flex-1 truncate text-body-2-regular text-text-primary' }, card.title),
-                  h(Select, {
-                    className: 'w-56',
-                    value: '',
-                    'aria-label': '把卡挂到功能点',
-                    options: [
-                      { value: '', label: '挂到…' },
-                      ...(matrix.points ?? []).map(point => ({ value: point.id, label: `${point.id} ${point.title}` })),
-                    ],
-                    onChange: event => { if (event.target.value !== '') void assignLoose(card.id, event.target.value) },
-                  }),
-                )),
-              ),
-            ),
-          h('div', { className: ROW, style: { gap: 8, marginTop: 12, alignItems: 'center' } },
-            h(Button, { variant: 'secondary', size: 'sm', onClick: () => setPointForm(blankPoint()) }, '＋ 加功能点'),
-            h(Button, { variant: 'primary', size: 'sm', disabled: splitBusy, onClick: () => void splitPoints() }, splitBusy ? '拆卡中…' : '按未覆盖的功能点拆卡'),
-            h(Button, { variant: 'ghost', size: 'sm', onClick: () => { if (current !== null) void loadMatrix(current.id) } }, '刷新矩阵'),
-            splitNote === null ? null : h('span', { className: HINT }, splitNote),
-            matrixNote === null ? null : h('span', { className: HINT }, matrixNote),
-          ),
-          pointForm === null ? null : h('div', { className: `${PANEL} mt-3` },
+          pointForm === null ? null : h('div', { className: `${PANEL} mb-2`, ref: pointFormRef, 'data-point-form': '' },
             h('div', { className: PANEL_HEAD }, pointForm.id === undefined ? '新增功能点' : `编辑功能点 ${pointForm.id}`),
             h('div', { className: PANEL_BODY },
               h('div', { className: FIELD },
@@ -1295,6 +1312,155 @@ export     function RequirementsPage({ state, onOpenTask, onChanged, createSigna
               ),
             ),
           ),
+              (() => {
+                const raw = matrix.points ?? []
+                const query = matrixQuery.trim().toLowerCase()
+                const points = raw.filter(point => {
+                  if (matrixOnlyOpen === true && point.covered === true) return false
+                  if (query === '') return true
+                  const hay = [point.id, point.title, ...(point.acceptance ?? []).map(item => String(item.text ?? ''))].join(' ').toLowerCase()
+                  return hay.includes(query)
+                })
+                return h(React.Fragment, null,
+                  h('div', { className: 'mb-2 flex min-w-0 flex-wrap items-center gap-2', 'data-matrix-filter': '' },
+                    h('div', { className: 'w-64 max-w-full' },
+                      h(TextField, { value: matrixQuery, placeholder: '按编号 / 功能点 / 验收条件筛…', 'aria-label': '筛功能点', onChange: event => setMatrixQuery(event.target.value) })),
+                    h('label', { className: 'flex cursor-pointer items-center gap-1 text-caption-1-regular text-text-secondary' },
+                      h(CheckField, { checked: matrixOnlyOpen, onChange: event => setMatrixOnlyOpen(event.target.checked) }),
+                      h('span', {}, '只看未覆盖')),
+                    h('span', { className: HINT, 'data-matrix-count': points.length }, `显示 ${points.length} / ${raw.length}`),
+                    matrixQuery !== '' || matrixOnlyOpen === true
+                      ? h(Button, { variant: 'ghost', size: 'xs', onClick: () => { setMatrixQuery(''); setMatrixOnlyOpen(false) } }, '清除筛选')
+                      : null),
+                  points.length === 0
+                    ? h(EmptyState, { title: '没有匹配的功能点' })
+                    : h(Table, { size: 'sm', 'aria-label': '需求追溯矩阵' },
+                h(TableHeader, null,
+                  /* 表头不放 Checkbox：RAC 的 Table 会把表头里的勾选框当成 selection 列、要求 slot="selection"。
+                     放一个纯文本按钮做全选/清空，行内勾选照旧。 */
+                  h(TableColumn, { id: 'pick' },
+                    h(Button, {
+                      variant: 'ghost', size: 'xs',
+                      'aria-label': points.length > 0 && points.every(point => selectedPointIds.has(point.id)) ? '清空功能点选择' : '全选功能点',
+                      onClick: () => {
+                        const all = points.length > 0 && points.every(point => selectedPointIds.has(point.id))
+                        setSelectedPointIds(previous => {
+                          const nextSet = new Set(previous)
+                          for (const point of points) {
+                            if (all) nextSet.delete(point.id)
+                            else nextSet.add(point.id)
+                          }
+                          return nextSet
+                        })
+                      },
+                    }, points.length > 0 && points.every(point => selectedPointIds.has(point.id)) ? '清空' : '全选')),
+                  h(TableColumn, { id: 'code', isRowHeader: true }, '编号'),
+                  h(TableColumn, { id: 'point' }, '功能点'),
+                  h(TableColumn, { id: 'covered' }, '覆盖'),
+                  h(TableColumn, { id: 'progress' }, '卡与用例'),
+                  h(TableColumn, { id: 'actions' }, '操作'),
+                ),
+                h(TableBody, null,
+                      points.map(point => h(TableRow, { key: point.id, id: point.id },
+                    h(TableCell, null,
+                      // Checkbox 适配层不透传 data-*，钩子挂在外层 span 上（探针按它勾选）。
+                      h('span', { 'data-point-pick': point.id },
+                        h(CheckField, {
+                          checked: selectedPointIds.has(point.id),
+                          'aria-label': `选择功能点 ${point.id}`,
+                          onChange: event => {
+                            const checked = event.target.checked === true
+                            setSelectedPointIds(previous => {
+                              const next = new Set(previous)
+                              if (checked) next.add(point.id)
+                              else next.delete(point.id)
+                              return next
+                            })
+                          },
+                        }))),
+                    h(TableCell, null, h('span', { className: CODE }, point.id)),
+                    h(TableCell, { className: 'align-top' },
+                      h('b', null, point.title),
+                      (() => {
+                        const description = String(point.description ?? '')
+                        if (description === '') return null
+                        const open = openPointIds.has(point.id)
+                        const summary = description
+                          .replace(/[#*`>|_~]/g, '')
+                          .replace(/\s+/g, ' ')
+                          .trim()
+                          .slice(0, 90)
+                        return h(React.Fragment, null,
+                          open
+                            ? h('div', { className: 'md-content text-text-primary' }, renderMarkdown(point.description))
+                            : h('div', { className: 'text-caption-1-regular text-text-tertiary', title: description }, summary + (summary.length >= 90 ? '…' : '')),
+                          h(Button, {
+                            variant: 'ghost', size: 'xs', className: 'mt-1 self-start',
+                            onClick: () => setOpenPointIds((previous) => {
+                              const next = new Set(previous)
+                              if (next.has(point.id)) next.delete(point.id)
+                              else next.add(point.id)
+                              return next
+                            }),
+                          }, open ? '收起' : '全文'),
+                        )
+                      })(),
+                    ),
+                    h(TableCell, null,
+                      h(Chip, { color: point.covered ? 'lime' : 'gray', 'data-pt': point.covered ? 'covered' : 'open' }, point.covered ? '已覆盖' : '未覆盖'),
+                    ),
+                    h(TableCell, null,
+                      h('div', { className: 'text-caption-1-regular text-text-tertiary' },
+                        `卡 ${point.cards.length}${point.cards.length === 0 ? '（还没人做）' : '：' + point.cards.map(card => card.code || card.id).join('、')}`,
+                        ` · 用例 ${point.cases.total}（通过 ${point.cases.pass}${point.cases.fail > 0 ? `，失败 ${point.cases.fail}` : ''}${point.cases.pending > 0 ? `，没跑 ${point.cases.pending}` : ''}）`,
+                        point.acceptance.length === 0 ? '' : ` · 验收条件 ${point.acceptance.filter(item => item.covered).length}/${point.acceptance.length}`,
+                        (point.cases.stale ?? 0) > 0 ? ` · 需复跑 ${point.cases.stale}` : '',
+                      ),
+                    ),
+                    h(TableCell, null,
+                      h('div', { className: ACTIONS },
+                        h(Button, {
+                          variant: 'ghost', size: 'sm',
+                          'data-point-edit': point.id,
+                          onClick: () => {
+                            const editing = pointForm !== null && pointForm.id === point.id
+                            if (editing) setPointForm(null)
+                            else openPointForm({ ...point, acceptanceText: (point.acceptance ?? []).map(item => item.text).join('\n') })
+                          },
+                        }, pointForm !== null && pointForm.id === point.id ? '编辑中' : '编辑'),
+                        h(Button, { variant: 'destructive', size: 'sm', onClick: () => void removePoint(point.id) }, '删除'),
+                      ),
+                    ),
+                  )),
+                ),
+              )
+            )
+              })(),
+              (matrix.loose ?? []).length === 0 ? null : h('div', { className: 'mt-3 flex min-w-0 flex-col gap-2 rounded-xl border border-dashed border-separator-border p-3' },
+                h('div', { className: HINT, style: { marginBottom: 8 } }, `还有 ${matrix.loose.length} 张卡没归到功能点，选一个挂上去，矩阵才算完整：`),
+                matrix.loose.map(card => h('div', { key: card.id, className: 'flex min-w-0 items-center gap-2' },
+                  h('span', { className: CODE }, card.code || card.id),
+                  h('span', { className: 'min-w-0 flex-1 truncate text-body-2-regular text-text-primary' }, card.title),
+                  h(Select, {
+                    className: 'w-56',
+                    value: '',
+                    'aria-label': '把卡挂到功能点',
+                    options: [
+                      { value: '', label: '挂到…' },
+                      ...(matrix.points ?? []).map(point => ({ value: point.id, label: `${point.id} ${point.title}` })),
+                    ],
+                    onChange: event => { if (event.target.value !== '') void assignLoose(card.id, event.target.value) },
+                  }),
+                )),
+              ),
+            ),
+          h('div', { className: ROW, style: { gap: 8, marginTop: 12, alignItems: 'center' } },
+            h(Button, { variant: 'secondary', size: 'sm', onClick: () => setPointForm(blankPoint()) }, '＋ 加功能点'),
+            h(Button, { variant: 'primary', size: 'sm', disabled: splitBusy, onClick: () => void splitPoints() }, splitBusy ? '拆卡中…' : '按未覆盖的功能点拆卡'),
+            h(Button, { variant: 'ghost', size: 'sm', onClick: () => { if (current !== null) void loadMatrix(current.id) } }, '刷新矩阵'),
+            splitNote === null ? null : h('span', { className: HINT }, splitNote),
+            matrixNote === null ? null : h('span', { className: HINT }, matrixNote),
+          ),
           h('div', { className: 'grid grid-cols-2 gap-2 sm:grid-cols-4 xl:grid-cols-7' },
             h('div', { className: STATBOX }, h('b', { className: STATVALUE }, `${done}/${tasks.length}`), h('span', { className: LABEL }, '卡已完成')),
             h('div', { className: STATBOX }, h('b', { className: blocked > 0 ? `${STATVALUE} text-text-error-primary` : STATVALUE }, String(blocked)), h('span', { className: LABEL }, '阻塞')),
@@ -1331,6 +1497,7 @@ export     function RequirementsPage({ state, onOpenTask, onChanged, createSigna
             h('div', { className: SECTION }, '关联 MR'),
             mrs.map(task => h('div', { key: task.id, className: HINT }, `${task.code || task.id} · !${task.gitlabMR.iid} ${task.gitlabMR.title ?? ''}（${task.gitlabMR.state || 'open'}）`)),
           ) : null,
+          ),
         )
       })()
 

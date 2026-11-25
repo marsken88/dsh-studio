@@ -74,7 +74,7 @@ export function AccessPanel({ state, config, onChanged }) {
   const matched = audit.filter(item => (onlyBy === '' || item.by === onlyBy)
     && (onlyFailed === false || item.ok === false)
     && (keyword === '' || `${ROUTE_LABEL[item.route] ?? item.route} ${item.by} ${item.summary}`.toLowerCase().includes(keyword)))
-  const AUDIT_PAGE_SIZE = 50
+  const AUDIT_PAGE_SIZE = 25
   const rows = matched.slice(0, 500)
   const auditTotalPages = Math.max(1, Math.ceil(rows.length / AUDIT_PAGE_SIZE))
   const auditCurrent = Math.min(auditPage, auditTotalPages)
@@ -96,6 +96,8 @@ export function AccessPanel({ state, config, onChanged }) {
   }
 
   return h('div', { className: PANE, 'data-panel': 'governance-access' },
+    /* 宽屏两栏：成员 380px + 审计占满剩余。原来两段竖着排，一页 10 个成员就把审计日志推到 2000px 外。 */
+    h('div', { className: 'grid min-w-0 gap-4 xl:grid-cols-[minmax(0,380px)_minmax(0,1fr)]' },
     h('div', { className: SECTION, 'data-section': 'members' },
       h('div', { className: SECTION_HEAD },
         h('div', { className: 'flex min-w-0 flex-col gap-1' },
@@ -234,6 +236,7 @@ export function AccessPanel({ state, config, onChanged }) {
               }))
             : null,
         ),
+    ),
     ),
   )
 }
@@ -523,7 +526,7 @@ export function StoragePanel({ state, onChanged }) {
           h('div', { className: SECTION_TITLE }, '快照'),
           h('div', { className: DESC }, '回滚前会把当前这一版先另存一份，不会丢东西'),
         ),
-        h(Button, { variant: 'secondary', size: 'sm', onClick: load, disabled: busy }, '刷新'),
+        h(Button, { variant: 'ghost', size: 'sm', onClick: load, disabled: busy }, '刷新'),
       ),
       notice !== null ? h('div', { className: OK, role: 'status' }, notice) : null,
       error !== null ? h('div', { className: ERR, role: 'alert' }, error) : null,
@@ -535,7 +538,7 @@ export function StoragePanel({ state, onChanged }) {
             h('div', { className: HINT }, `${when(item.at)} · ${(item.bytes / 1024).toFixed(1)} KB`),
           ),
           h('div', { className: LISTROW_ACTIONS },
-            h(Button, { variant: 'secondary', size: 'sm', disabled: busy, onClick: () => restore(item.id) }, '回滚到这版'),
+            h(Button, { variant: 'secondary', size: 'sm', disabled: busy, onClick: () => restore(item.id), 'data-warn': '1', title: '用这个快照覆盖当前台账；覆盖前会先把当前版本另存一份' }, '回滚到这版'),
           ),
         ))),
     ),

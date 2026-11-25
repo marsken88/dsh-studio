@@ -1,12 +1,15 @@
 import { CODING_REVIEW_STATUS, cleanId, mergeCoding, sanitizeCoding } from '../domain.js'
-import { isSelfReview, reviewDecision } from '../quality.js'
+import { CODING_REVIEW_VERDICT, isSelfReview, reviewDecision } from '../quality.js'
 import { clearAgentFailure, noteAgentFailure } from '../dispatcher.js'
 import { codingVerifyLine, qualitySummary, runCommand, runTaskQuality, taskExitGate, verifyCodingRecord } from '../executor.js'
 import { compareCodingFacts } from '../gitlab-facts.js'
 import { publishNoteMentions } from '../mention-note.js'
+import { buildDiffView, parseStatusList } from '../task-diff.js'
 import { parseMentions } from '../dispatcher.js'
 import { mergeGateFor } from '../merge-gate.js'
 import { rejectUnknownFields } from '../route-contract.js'
+import { readFile, realpath, stat } from 'node:fs/promises'
+import { resolve, sep } from 'node:path'
 const INJECTED = ["applyConfig","commentTask","deleteProjectFolder","ensureWorktree","getDispatcher","mergeMergeRequest","publicState","publishMergeGate","readJsonBody","removeWorktree","sendJson","serviceOf","upsertById","workProjectOf"]
 let host = {
   applyConfig: () => {},
@@ -101,9 +104,12 @@ if (method === 'POST' && route === '/task/coding') {
   })
   const task = snapshot.tasks.find(entry => entry.id === id)
   /* 评审备注里的 @ 以前不生效（只有评论才解析）：评审不通过时写「@开发工程师 这里要改」
-     对方根本收不到。现在把备注补成评论并逐个派单。 */
+     对方根本收不到。现在把备注补成评论并逐个派单。
+     forceComment：评审结论一定要进讨论区 —— 以前按关键词猜，通过结论（「LGTM，可以进测试」）
+     不会留评论，人只看得到研发说了什么。 */
+  const verdict = action === 'review' ? (CODING_REVIEW_VERDICT[String(task?.coding?.review?.status ?? '')] ?? '') : ''
   const noteOut = action === 'review'
-    ? await publishNoteMentions({ store, commentTask: host.commentTask, dispatcher: host.getDispatcher(), parseMentions }, { taskId: id, note: String(body.note ?? ''), by, label: '代码评审' })
+    ? await publishNoteMentions({ store, commentTask: host.commentTask, dispatcher: host.getDispatcher(), parseMentions }, { taskId: id, note: String(body.note ?? ''), by, label: '代码评审', verdict, forceComment: true })
     : { mentions: [], dispatched: [], commented: false }
   host.sendJson(res, 200, { ok: true, task, ...noteOut, state: host.publicState(store) })
   return true
@@ -134,6 +140,183 @@ if (method === 'POST' && route === '/task/coding/verify') {
     task,
     state: host.publicState(store),
   })
+  return true
+}
+if (method === 'POST' && route === '/task/diff') {
+  /* 这张卡到底改了什么代码：直接读仓库里的 git 事实（不是 agent 自报的文件名）。
+     只读：不改库、不推 revision —— 否则人每点一次「看代码改动」就多一版快照。
+     目录优先用卡的 worktree（隔离时那边才是真正在改的副本），否则回退到项目/服务的本机代码目录。
+     基线同样从 worktree 记录里取（建树时记下的 base），没有就按服务/项目的 baseBranch。 */
+  req.__studioReadOnly = true
+  const body = await host.readJsonBody(req)
+  const id = String(body.id ?? '')
+  const snapshot = store.snapshot()
+  const task = snapshot.tasks.find(entry => entry.id === id)
+  if (task === undefined) throw new Error(`no task ${id}`)
+  const config = snapshot.config
+  const worktree = task.worktree ?? null
+  const service = host.serviceOf(config, task)
+  const project = host.workProjectOf(config, task)
+  const dir = String(worktree?.path ?? '').trim()
+    || String(service?.repoPath ?? '').trim()
+    || String(project?.repoPath ?? '').trim()
+  const firstLine = value => String(value ?? '').trim().split(/\r?\n/)[0] ?? ''
+  if (dir === '') {
+    host.sendJson(res, 200, { ok: true, skipped: '这张卡还没配代码目录：在项目或服务里填「本机代码目录」，或先建 worktree（执行记录 → 建 worktree）' })
+    return true
+  }
+  const git = (...args) => runCommand('git', ['-C', dir, ...args], 30_000)
+  const inside = await git('rev-parse', '--is-inside-work-tree')
+  if (inside.ok !== true) {
+    host.sendJson(res, 200, { ok: true, skipped: `${dir} 不是可用的 git 仓库：${firstLine(inside.stderr) || 'git 不可用'}` })
+    return true
+  }
+  const head = await git('rev-parse', '--abbrev-ref', 'HEAD')
+  const branch = String(worktree?.branch ?? '').trim() || String(head.stdout ?? '').trim()
+  const wanted = String(body.base ?? worktree?.base ?? service?.baseBranch ?? project?.baseBranch ?? 'main').trim() || 'main'
+  // 基线分支可能只在远端（origin/main）：按候选逐个验存在，别拿一个不存在的名字去 diff。
+  const candidates = [wanted, `origin/${wanted}`, 'main', 'master'].filter((item, index, all) => item !== '' && all.indexOf(item) === index)
+  let base = ''
+  for (const candidate of candidates) {
+    if ((await git('rev-parse', '--verify', '--quiet', `${candidate}^{commit}`)).ok === true) {
+      base = candidate
+      break
+    }
+  }
+  if (base === '') {
+    host.sendJson(res, 200, { ok: true, skipped: `找不到基线分支（试过 ${candidates.join(' / ')}）：这张卡的分支 ${branch || '(未知)'} 没法比出改动` })
+    return true
+  }
+  /* 可选 commit：只看某一次提交的改动（前端「提交」下拉）。只认十六进制短/长 sha，
+     先用 rev-parse 验它真的在这个仓库里，再按 <sha>^..<sha> 出 diff。 */
+  const wantedCommit = String(body.commit ?? '').trim()
+  let commitSha = ''
+  let rangeRef = `${base}...HEAD`
+  let rangeLabel = `${branch || '(无分支)'} ← ${base}`
+  if (wantedCommit !== '') {
+    if (/^[0-9a-f]{4,40}$/i.test(wantedCommit) !== true) {
+      host.sendJson(res, 200, { ok: true, skipped: '提交号不合法：只认 4–40 位十六进制 sha' })
+      return true
+    }
+    const verified = await git('rev-parse', '--verify', '--quiet', `${wantedCommit}^{commit}`)
+    if (verified.ok !== true) {
+      host.sendJson(res, 200, { ok: true, skipped: `找不到提交 ${wantedCommit}（可能不在这个仓库/分支上）` })
+      return true
+    }
+    commitSha = String(verified.stdout ?? '').trim()
+    rangeRef = `${commitSha}^..${commitSha}`
+    rangeLabel = `提交 ${commitSha.slice(0, 8)}`
+  }
+  // 可选的提交列表：让面板能选「全部改动 / 某一次提交」。
+  const log = await git('log', '--format=%h%x09%s', `${base}..HEAD`, '-n', '50')
+  const commits = String(log.stdout ?? '').trim().split(/\r?\n/).filter(line => line.trim() !== '').map(line => {
+    const [sha, ...rest] = line.split('\t')
+    return { sha: String(sha ?? '').trim(), subject: rest.join('\t').trim() }
+  }).filter(item => /^[0-9a-f]{4,40}$/i.test(item.sha))
+  let numstat = await git('diff', '--numstat', rangeRef)
+  if (numstat.ok !== true && commitSha !== '') {
+    // 仓库的第一个提交没有父：退回 git show，仍然只出这一次提交的内容。
+    numstat = await git('show', '--format=', '--numstat', commitSha)
+  }
+  if (numstat.ok !== true) {
+    host.sendJson(res, 200, { ok: true, skipped: `读不到 ${rangeRef} 的改动：${firstLine(numstat.stderr)}` })
+    return true
+  }
+  let patch = await git('diff', '--unified=3', rangeRef)
+  if (patch.ok !== true && commitSha !== '') patch = await git('show', '--format=', '--unified=3', commitSha)
+  // 改动类型（新增 / 修改 / 删除 / 改名）：面板的树形视图用它标每个文件。
+  let nameStatus = patch.ok === true ? await git('diff', '--name-status', rangeRef) : { ok: false, stdout: '' }
+  if (nameStatus.ok !== true && commitSha !== '') nameStatus = await git('show', '--format=', '--name-status', commitSha)
+  const view = buildDiffView({ numstat: numstat.stdout, patch: patch.ok === true ? patch.stdout : '', nameStatus: nameStatus.stdout })
+  // 还没提交的改动单独报：研发说「改完了」但忘了提交时，代码其实不在分支上。
+  const status = await git('status', '--porcelain')
+  const dirty = parseStatusList(status.stdout)
+  const dirtyNumstat = await git('diff', '--numstat', 'HEAD')
+  const dirtyTotals = buildDiffView({ numstat: dirtyNumstat.stdout, patch: '' }).totals
+  host.sendJson(res, 200, {
+    ok: true,
+    at: Date.now(),
+    dir,
+    branch,
+    base,
+    commit: commitSha,
+    rangeLabel,
+    commits,
+    ...view,
+    patchUnavailable: patch.ok !== true,
+    uncommitted: {
+      total: dirty.length,
+      files: dirty.slice(0, 20),
+      additions: dirtyTotals.additions,
+      deletions: dirtyTotals.deletions,
+    },
+  })
+  return true
+}
+if (method === 'POST' && route === '/task/file') {
+  /* 看某个文件的**全文**（面板「改动 / 全文」里的全文）：只读仓库里的文件，越界一律拒绝。
+     只读路由：不推 revision、不记审计。读不到（已删除 / 新文件不在工作区）如实说原因。 */
+  req.__studioReadOnly = true
+  const body = await host.readJsonBody(req)
+  const id = String(body.id ?? '')
+  const wanted = String(body.path ?? '').trim()
+  const snapshot = store.snapshot()
+  const task = snapshot.tasks.find(entry => entry.id === id)
+  if (task === undefined) throw new Error(`no task ${id}`)
+  if (wanted === '') {
+    host.sendJson(res, 200, { ok: true, skipped: '没给文件路径' })
+    return true
+  }
+  const config = snapshot.config
+  const worktree = task.worktree ?? null
+  const service = host.serviceOf(config, task)
+  const project = host.workProjectOf(config, task)
+  const dir = String(worktree?.path ?? '').trim()
+    || String(service?.repoPath ?? '').trim()
+    || String(project?.repoPath ?? '').trim()
+  if (dir === '') {
+    host.sendJson(res, 200, { ok: true, skipped: '这张卡还没配代码目录：在项目或服务里填「本机代码目录」' })
+    return true
+  }
+  const base = resolve(dir)
+  const target = resolve(base, wanted)
+  // 只允许读这个仓库/工作树里面的文件：`../`、绝对路径都要拒绝。
+  if (target !== base && !target.startsWith(base + sep)) {
+    host.sendJson(res, 200, { ok: true, skipped: '只能看仓库目录里的文件' })
+    return true
+  }
+  try {
+    const info = await stat(target)
+    if (info.isFile() !== true) {
+      host.sendJson(res, 200, { ok: true, skipped: '这不是一个文件' })
+      return true
+    }
+    /* 符号链接也要拦住：仓库里放一个指向 /etc/passwd 的软链，字面路径仍在仓库内。 */
+    const real = await realpath(target)
+    const realBase = await realpath(base)
+    if (real !== realBase && !real.startsWith(realBase + sep)) {
+      host.sendJson(res, 200, { ok: true, skipped: '只能看仓库目录里的文件' })
+      return true
+    }
+    const LIMIT = 200_000
+    const buffer = await readFile(target)
+    const capped = buffer.subarray(0, LIMIT)
+    if (capped.includes(0)) {
+      host.sendJson(res, 200, { ok: true, path: wanted, binary: true, bytes: info.size })
+      return true
+    }
+    host.sendJson(res, 200, {
+      ok: true,
+      path: wanted,
+      content: capped.toString('utf8'),
+      bytes: info.size,
+      truncated: info.size > capped.length,
+      at: Date.now(),
+    })
+  } catch (error) {
+    const reason = String(error?.message ?? error)
+    host.sendJson(res, 200, { ok: true, skipped: /ENOENT/.test(reason) ? '这个文件不在工作区里（可能是新文件没落盘，或已删除）' : `读不到这个文件：${reason.slice(0, 120)}` })
+  }
   return true
 }
 if (method === 'POST' && route === '/task/agent/fail') {

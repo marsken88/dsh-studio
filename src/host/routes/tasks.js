@@ -28,6 +28,7 @@ import {
   sanitizeCases,
   text } from '../domain.js'
 import { runSuite } from '../executor.js'
+import { caseNeedsRerun, requirementDocUpdatedAt } from '../impact.js'
 
 /** 请求落在哪个地址上（用于"没配测试环境时回退到宿主自身"）。 */
 function originOf(req) {
@@ -426,9 +427,20 @@ export async function handleTaskRoute({ method, route, req, res, store, url }) {
     /* 用例正文、清单、执行批次、测试计划一起给：抽屉里的「测试」页要一次画完
        （三层进度 + 每层哪几条 + 最近几次执行的结果），分开取会闪。
        tierEffective 是「显式 tier 或按断言推断」的结果，界面按它分组，不用自己再推一遍。 */
+    /* 需求文档改版后，之前通过过的用例要复跑：按「文档更新时间 vs 用例最后一次执行」标 stale，
+       只标不改（不改结果、不重置状态），测试看到就能重跑。 */
+    const requirement = (store.snapshot().requirements ?? []).find(item => item.id === task.requirementId)
+    const docUpdatedAt = requirementDocUpdatedAt(requirement)
+    const decoratedCases = (task.cases ?? []).map(item => ({
+      ...item,
+      tierEffective: tierOf(item),
+      stale: caseNeedsRerun(item, docUpdatedAt),
+    }))
     host.sendJson(res, 200, {
       ok: true,
-      cases: (task.cases ?? []).map(item => ({ ...item, tierEffective: tierOf(item) })),
+      docUpdatedAt,
+      staleCount: decoratedCases.filter(item => item.stale === true).length,
+      cases: decoratedCases,
       checklist: task.checklist ?? [],
       /* 执行批次只给摘要（最近 5 次）：抽屉只显示「什么时候、过了几条」，
          每条 run 的逐条 results 最多 60 条，全下发会让这个接口白白翻几倍。 */

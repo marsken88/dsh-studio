@@ -6,6 +6,7 @@ import test from 'node:test'
 import { checklistFromAcceptance } from '../src/host/acceptance.js'
 import { requirementMatrix } from '../src/host/executor.js'
 import { sanitizeCase } from '../src/host/domain.js'
+import { caseNeedsRerun, requirementDocUpdatedAt } from '../src/host/impact.js'
 
 const point = {
   id: 'p1',
@@ -67,4 +68,43 @@ test('拆卡：功能点的验收条件原样变成卡的验收清单（id 保�
   assert.equal(checklist.every(item => item.done === false), true, '新拆出来的卡一项都没勾')
   assert.deepEqual(checklistFromAcceptance(undefined), [], '没有验收条件时返回空数组（路由会退回模板）')
   assert.deepEqual(checklistFromAcceptance(['纯文本条件']).map(item => item.text), ['纯文本条件'], '字符串也能收')
+})
+
+test('文档改版：只标「通过过、但最后一次执行早于文档更新」的用例', () => {
+  const withDocs = {
+    ...requirement,
+    docs: [
+      { id: 'd1', kind: 'prd', title: 'PRD', at: 2000, content: 'x' },
+      { id: 'd2', kind: 'acceptance', title: '验收标准', at: 3000, content: 'y' },
+      { id: 'd3', kind: 'other', title: '别的', at: 9000, content: 'z' },
+    ],
+  }
+  assert.equal(requirementDocUpdatedAt(withDocs), 3000, '只认 PRD / 验收标准，其它文档不算')
+  assert.equal(requirementDocUpdatedAt({ ...requirement, docs: [] }), 0)
+  assert.equal(caseNeedsRerun({ result: 'pass', lastRun: { at: 2000 } }, 3000), true, '通过过且早于文档 → 需复跑')
+  assert.equal(caseNeedsRerun({ result: 'pass', lastRun: { at: 4000 } }, 3000), false, '文档后又跑过 → 不用复跑')
+  assert.equal(caseNeedsRerun({ result: 'pass', at: 1000 }, 3000), true, '没有执行记录就用登记时间比')
+  assert.equal(caseNeedsRerun({ result: 'fail', lastRun: { at: 1000 } }, 3000), false, '失败用例本来就在待办里')
+  assert.equal(caseNeedsRerun({ result: 'pass', lastRun: { at: 1000 } }, 0), false, '没有文档时间就不标')
+})
+
+test('矩阵：staleCases 按用例算，summary 汇总', () => {
+  const withDocs = {
+    ...requirement,
+    docs: [{ id: 'd1', kind: 'prd', title: 'PRD', at: 3000, content: 'x' }],
+  }
+  const state = {
+    config: {},
+    requirements: [withDocs],
+    tasks: [{
+      id: 't1', code: 'DEV-001', title: '登录失败次数', requirementId: 'r1', pointId: 'p1', status: 'test',
+      cases: [
+        { id: 'c1', title: '旧口径', result: 'pass', acceptanceId: 'a1', pointId: 'p1', lastRun: { at: 2000 } },
+        { id: 'c2', title: '新口径', result: 'pass', acceptanceId: 'a2', pointId: 'p1', lastRun: { at: 4000 } },
+      ],
+    }],
+  }
+  const matrix = requirementMatrix(state, withDocs)
+  assert.equal(matrix.points[0].cases.stale, 1, '只有 c1 需要复跑')
+  assert.equal(matrix.summary.staleCases, 1)
 })

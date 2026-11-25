@@ -1064,7 +1064,7 @@ node tools/visual/ui-audit.mjs --base ... --theme dark --only board,drawer
 4px 网格、字号档位、颜色 token 数量、emoji 是否当图标、圆角层级、首屏空白、网格落单、文字截断。
 它只出证据（截图 + `tmp/unslop-audit/metrics*.json`），不改代码，也不进发版闸门。
 
-四条结论（完整报告见 [`ui-audit-2026-11-22.md`](ui-audit-2026-11-22.md)）：
+四条结论（完整报告见 [`ui-audit-2026-11-22.md`](ui-audit-2026-11-22.md)；一天后的复审与修复见 [`ui-audit-2026-11-24.md`](ui-audit-2026-11-24.md)）：
 
 1. **字体从未落地**：`boardui/theme.css` 引用 `--font-inter`，但仓库没有 `@font-face`、没有字体资源，
    实测全部文本回落到 `ui-sans-serif`。要么自托管 Inter，要么把 token 改成系统字。
@@ -1081,3 +1081,14 @@ node tools/visual/ui-audit.mjs --base ... --theme dark --only board,drawer
 （200–360 自适应，列多先横向滚），看板筛选条上多了一个「适应宽度」开关，
 勾上后把列压到一屏放下（1440 下 8 列 × 166px），状态记在 `localStorage.studio.boardFit`。
 不用 `--` 前缀的 CSS 变量：勾选状态走 `data-fit` 属性，样式里只认这个属性。
+
+### 代码改动用 BoardUI 树形视图（2026-11-24）
+
+抽屉「执行记录 → 代码改动」的文件清单换成 **BoardUI TreeView**（`components/base/tree-view/tree-view.tsx`，
+源码原样 vendored，只去掉上游的 motion 展开动画——原因写在文件头注里）：目录分组、树线、React Aria 的
+展开/选中/键盘导航都来自上游。每个文件行右侧带「新增 / 修改 / 删除 + +N −M」；选中文件在树下方渲染它的
+统一 diff（增/删/hunk 分色），也可以切「全文」读工作树里的文件本体（带行号，只读路由 `/task/file`，越界与 200KB 上限都拒/截断）。git 只给扁平路径，目录树在 `drawer.js` 里拼（`buildDiffTree`）。
+
+DOM 钩子：`[data-diff-tree]`、`[data-diff-file]`、`[data-change]`、`[data-diff-content]`；
+panel-probe ⑦ 用真卡断言「树里的行数 > 文件数（说明目录分组生效）」「点第二个文件内容区跟着换」
+「patch 行数 > 5」。树高上限 280px、独立滚动，避免大改动把抽屉撑爆。

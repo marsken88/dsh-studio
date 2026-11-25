@@ -68,7 +68,33 @@ function Board({ state, onOpen, onMove, onWip, onCreate }) {
   const [requirementFilter, setRequirementFilter] = React.useState('')
   const [hideEmpty, setHideEmpty] = React.useState(false)
   // 列多时默认给可读列宽、横向滚；打开这个把列压到一屏看全（记在本地）
-  const [fitWidth, setFitWidth] = React.useState(() => { try { return window.localStorage.getItem('studio.boardFit') === '1' } catch { return false } })
+  /* 横向滚动的边缘阴影：列多时让人一眼看出「右边还有列」。 */
+  const rowRef = React.useRef(null)
+  const [edges, setEdges] = React.useState({ left: false, right: false })
+  const syncEdges = event => {
+    const el = event?.currentTarget ?? rowRef.current
+    if (el === null || el === undefined) return
+    const max = el.scrollWidth - el.clientWidth
+    setEdges({ left: el.scrollLeft > 4, right: max > 4 && el.scrollLeft < max - 4 })
+  }
+  React.useEffect(() => {
+    syncEdges()
+    const onResize = () => syncEdges()
+    window.addEventListener('resize', onResize)
+    return () => window.removeEventListener('resize', onResize)
+  }, [state.statuses?.length, state.config?.columns])
+  const [fitWidth, setFitWidth] = React.useState(() => {
+    try {
+      const saved = window.localStorage.getItem('studio.boardFit')
+      if (saved === '1' || saved === '0') return saved === '1'
+    } catch { /* 隐私模式读不到就按默认算 */ }
+    /* 没存过偏好：列多或屏窄时先压成一屏（默认 8 列在 1440 下会横向滚、第 8 列看不全）；
+       宽屏且列不多时保持可读列宽。用户勾/取消后记在本地，不再走这里。 */
+    const columnCount = Array.isArray(state?.statuses) ? state.statuses.length : 8
+    const width = typeof window === 'undefined' ? 0 : window.innerWidth
+    // 桌面宽屏才有意义：1280 以下压 8 列会把列压到 100px 出头，宁可横向滚。
+    return width >= 1280 && width < 1920 && columnCount * 240 + 120 > width
+  })
   const [onlyBlocked, setOnlyBlocked] = React.useState(false)
   const [onlyNoBody, setOnlyNoBody] = React.useState(false)
   // 每列当前渲染到第几张；点「显示更多」一页一页加。
@@ -247,11 +273,20 @@ function Board({ state, onOpen, onMove, onWip, onCreate }) {
       h('span', { className: STAT, 'data-board-stat': '' },
         `${total} 张卡 · ${designPending > 0 ? `${designPending} 个设计待评审 · ` : ''}${bugCount > 0 ? `${bugCount} 个缺陷` : `${columns.length} 列`}`),
     ),
+    h('div', { className: 'relative flex min-h-0 min-w-0 flex-1' },
     h('div', {
+      ref: rowRef,
       className: BOARD_ROW,
       'data-fit': fitWidth ? '1' : '0',
       tabIndex: 0,
       'aria-label': '看板列，左右滚动或用方向键',
+      onScroll: syncEdges,
+      onKeyDown: event => {
+        if (event.key === 'ArrowRight' || event.key === 'ArrowLeft') {
+          event.preventDefault()
+          event.currentTarget.scrollBy({ left: event.key === 'ArrowRight' ? 240 : -240, behavior: 'smooth' })
+        }
+      },
     },
       columns.map(column => {
         const tasks = byStatus.get(column.id) ?? []
@@ -296,11 +331,22 @@ function Board({ state, onOpen, onMove, onWip, onCreate }) {
                 h(Button, {
                   variant: 'ghost', size: 'xs',
                   onClick: () => setShown(previous => ({ ...previous, [column.id]: (previous[column.id] ?? COLUMN_PAGE) + COLUMN_PAGE })),
-                }, `显示更多（还有 ${tasks.length - (shown[column.id] ?? COLUMN_PAGE)} 张）`))
+                }, `显示更多（+${tasks.length - (shown[column.id] ?? COLUMN_PAGE)}）`))
               : null,
           ),
         )
       }),
+    ),
+      edges.left ? h('div', {
+        className: 'pointer-events-none absolute inset-y-0 left-0 w-8',
+        style: { background: 'linear-gradient(to right, var(--color-background-primary-default), transparent)' },
+        'data-board-fade': 'left',
+      }) : null,
+      edges.right ? h('div', {
+        className: 'pointer-events-none absolute inset-y-0 right-0 w-8',
+        style: { background: 'linear-gradient(to left, var(--color-background-primary-default), transparent)' },
+        'data-board-fade': 'right',
+      }) : null,
     ),
   )
 }

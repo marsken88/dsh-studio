@@ -30,9 +30,14 @@ try {
     gitlab: { ...gitlabBefore, url: MOCK, projects: [{ id: 'mock', name: '演示仓库', project: 'demo/order' }] },
   })
 
-  const card = await post('/task/create', { title: '（验证用）GitLab 对账', type: 'requirement', priority: 'normal', status: 'dev' })
+  /* 现在的产品规则：卡必须挂在需求下（建卡路由会拒空 requirementId）。
+     验证脚本自己建一条需求、跑完一起删。 */
+  const reqSaved = await post('/requirement/save', { requirement: { title: '（验证用）GitLab 对账需求', status: 'draft' } })
+  const requirementId = reqSaved.body.requirement?.id
+  check('建需求', typeof requirementId === 'string' && requirementId !== '', String(reqSaved.body.error ?? requirementId))
+  const card = await post('/task/create', { title: '（验证用）GitLab 对账', type: 'requirement', priority: 'normal', status: 'dev', requirementId })
   const id = card.body.task?.id
-  check('建卡', typeof id === 'string' && id !== '', id)
+  check('建卡', typeof id === 'string' && id !== '', String(card.body.error ?? id))
 
   await post('/task/update', { id, gitlabMR: { iid: IID, title: 'feat: 库存预占（打桩）' } })
   await post('/task/coding', {
@@ -70,6 +75,7 @@ try {
   for (const task of after.tasks) {
     if (!beforeIds.has(task.id)) await post('/task/delete', { id: task.id, confirm: 'DELETE' })
   }
+  if (typeof requirementId === 'string' && requirementId !== '') await post('/requirement/delete', { id: requirementId, confirm: 'DELETE' })
   await post('/config', { gitlab: gitlabBefore })
   const final = await stateOf()
   console.log('清理完成：' + final.tasks.length + ' 张卡，gitlab 配置已还原')

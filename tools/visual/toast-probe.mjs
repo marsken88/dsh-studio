@@ -36,6 +36,16 @@ const hostNoise = []
 const isHostNoise = text => HOST_NOISE.test(String(text))
 
 const page = await browser.newPage()
+/* 宿主只认 cookie 时用 STUDIO_COOKIE（name=value; ...）登录。 */
+const cookieSpec = String(process.env.STUDIO_COOKIE ?? '').trim()
+if (cookieSpec !== '') {
+  const origin = new URL(BASE)
+  const parsed = cookieSpec.split(';').map(part => part.trim()).filter(Boolean).map(part => {
+    const at = part.indexOf('=')
+    return at > 0 ? { name: part.slice(0, at), value: part.slice(at + 1), domain: origin.hostname, path: '/' } : null
+  }).filter(Boolean)
+  if (parsed.length > 0) await page.setCookie(...parsed)
+}
 const errors = []
 page.on('pageerror', (e) => { if (isHostNoise(e)) { hostNoise.push(String(e).slice(0, 120)); return } errors.push(String(e).slice(0, 200)) })
 page.on('console', (m) => { if (m.type() === 'error') errors.push('console: ' + m.text().slice(0, 200)) })

@@ -39,11 +39,16 @@ export function SettingsField({ form, setForm, fieldKey, label, hint, type }) {
   )
 }
 
-/** 保存条：主按钮 + 结果/错误小字（原来复用同一个 saveBar 节点，这里保持节点语义）。 */
-export function SettingsSaveBar({ busy, status, error, onSave }) {
+/** 保存条：主按钮 + 结果/错误小字。粘在面板底部，滚到哪都能直接保存。 */
+export function SettingsSaveBar({ busy, status, error, dirty, onSave }) {
   const { h } = client()
-  return h('div', { className: ROW, 'data-settings-savebar': '' },
+  return h('div', {
+    className: 'sticky bottom-0 z-10 flex min-w-0 flex-wrap items-center gap-3 rounded-xl border border-separator-border bg-background-primary-default px-4 py-3 shadow-sm',
+    'data-settings-savebar': '',
+    'data-dirty': dirty === true ? '1' : '0',
+  },
     h(Button, { variant: 'primary', size: 'sm', 'data-action': 'save', disabled: busy, onClick: () => void onSave() }, busy ? '保存中…' : '保存'),
+    dirty === true ? h('span', { className: 'text-caption-1-medium text-text-secondary', 'data-savebar-dirty': '1' }, '未保存') : null,
     status !== null ? h('span', { className: OK }, status) : null,
     error !== null ? h('span', { className: ERR }, error) : null,
   )
@@ -142,6 +147,11 @@ export function AutoDispatchPane({ form, setForm, saveBar }) {
         ['worktree', '一卡一个 git worktree（推荐给多卡并行）'],
       ]),
       h('div', { className: HINT }, '开启后，卡要挂在配了「本机代码目录」的项目上，派单时会为它切一条 task/<编号> 分支。'),
+      selectOf('工作区分组', 'agentsGrouping', [
+        ['card', '一卡一个文件夹：每张卡独立 worktree（默认）'],
+        ['requirement', '一个需求一个文件夹：产品/架构/测试共用需求 worktree；同需求多张研发卡并发时仍各自 worktree 隔离'],
+      ]),
+      h('div', { className: HINT }, 'DSH 的工作区按会话 cwd 精确归属：一个文件夹只能挂 cwd 相同的会话。选「按需求」后，同一需求的产品/架构/测试会话会落在同一个侧栏文件夹里。'),
       field('agentsWorktreeRoot', 'worktree 根目录', '留空 = 仓库内 .agents/worktrees'),
       h('div', { className: HINT }, '留空时 worktree 建在仓库的 .agents/worktrees 下，侧栏里挂在项目工作区下；项目没配代码目录时退回工作区同级的 dsh-worktrees。'),
       selectOf('卡完成时', 'agentsCleanup', [
