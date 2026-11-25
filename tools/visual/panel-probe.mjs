@@ -589,6 +589,13 @@ try {
     text: String(document.body.innerText ?? '').includes('先写标题与澄清三问'),
   }))
   check('③d 新建需求用侧滑块打开', newReqOpened === true && (newReqDrawer.fallback === true || newReqDrawer.dialog === true) && newReqDrawer.text === true, JSON.stringify(newReqDrawer))
+  const inputBox = await page.evaluate(() => {
+    const input = document.querySelector('[role="dialog"] input, [data-side-drawer] input')
+    if (input === null) return null
+    const cs = getComputedStyle(input)
+    return { border: cs.borderTopWidth, bg: cs.backgroundColor, radius: cs.borderRadius }
+  })
+  check('③d 输入框保持 BoardUI 原样（无宿主边框/白底）', inputBox !== null && inputBox.border === '0px' && inputBox.bg === 'rgba(0, 0, 0, 0)' && inputBox.radius === '0px', JSON.stringify(inputBox))
   await page.keyboard.press('Escape')
   await new Promise(resolve => setTimeout(resolve, 400))
 
