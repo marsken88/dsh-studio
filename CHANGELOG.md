@@ -27,7 +27,7 @@
 - 无卡会话不会冒充某张卡：执行播报（`parseStudioSession`）不认它，成本统计把它算进总量与按专家（`adHoc`），不落成一张空卡。
 - `/columns/save`、`/agents/run`、`/agents/chat` 也纳入 HTTP 入参白名单：多传字段直接 400。
 
-## [0.15.1] — 2026-11-25
+## [0.16.0] — 2026-11-25
 
 ### `/studio-api` 接上宿主信任栅栏：浏览器里的网页再也调不动它
 
@@ -42,6 +42,8 @@
 新增 `GET /studio-api/health`（**只回 `{ok:true}`，不带任何台账**）给部署脚本与运维探活用；部署脚本的 `state=` 改成探它，而不是探 `/state`。
 
 **会受影响的地方**：拿 `curl` 裸打 `/studio-api` 的脚本现在会 401。脚本要用 `dsh web` 的启动 token 换一次 cookie，见 `tools/lib/studio-auth.mjs`（`STUDIO_TOKEN=$(journalctl -u dsh-web … | grep -o 'token=[^&]*' | cut -d= -f2)`）。仓库内 16 个脚本已迁移；浏览器里的探针（带 `?token=` 打开）不受影响。
+
+## [0.15.1] — 2026-11-25
 
 ### 卡片抽屉写清「这次派单用哪套权限」
 
