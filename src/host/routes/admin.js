@@ -20,7 +20,7 @@ if (method === 'POST' && route === '/config') {
   const body = await host.readJsonBody(req)
   /* access 归 /access/save 管：从 /config 传进来会被 mergeConfig 静默丢掉却返回 200
      （这一轮实测踩到）。只针对它给明确报错，其它形状保持原样 —— 面板用的是「直接给配置键」，
-     一律拒绝未知顶层键会把「保存角色模板」打成 400。 */
+     一律拒绝未知顶层键会把面板的「保存」打成 400。 */
   if (body?.access !== undefined || body?.patch?.access !== undefined) {
     host.sendJson(res, 400, { ok: false, error: '权限名单请用 /access/save（enabled / agents / member），/config 不接受 access' })
     return true

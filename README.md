@@ -105,7 +105,7 @@ flowchart LR
 | --- | --- |
 | ![settings-gates](https://raw.githubusercontent.com/marsken88/dsh-studio/main/docs/images/settings-gates.png) | ![settings-skills](https://raw.githubusercontent.com/marsken88/dsh-studio/main/docs/images/settings-skills.png) |
 
-设置页有**未保存提醒**：文本改过却没点保存时，页内会挂一条黄色提示，切到别的分区会先确认「丢弃并切换」——18 个分区里那些「改完点保存」的字段不会再静默丢。页面级草稿（看板外观 / 角色与模型 / 自动派单）的**保存条粘在面板底部**，滚到哪都能直接点，并标「未保存」；其余分区是分区保存（抽屉 / 行内按钮）或即时保存的开关（一拨就生效），不强行合并——不同对象混成一个大草稿容易误保存。
+设置页有**未保存提醒**：文本改过却没点保存时，页内会挂一条黄色提示，切到别的分区会先确认「丢弃并切换」——17 个分区里那些「改完点保存」的字段不会再静默丢。页面级草稿（看板外观 / 自动派单）的**保存条粘在面板底部**，滚到哪都能直接点，并标「未保存」；其余分区是分区保存（抽屉 / 行内按钮）或即时保存的开关（一拨就生效），不强行合并——不同对象混成一个大草稿容易误保存。
 
 截图不是手截的：`npm run shots -- --base http://127.0.0.1:<dsh 端口>`（`tools/visual/capture.mjs`）
 会造一套**演示数据**（标题都带「演示·」）、用**真实 client.js** 渲染面板、逐页截图并断言没有「渲染失败」，
@@ -203,7 +203,7 @@ curl -s http://<host>:<port>/studio-api/state | head -c 80   # 应返回 {"ok":t
 | 快照恢复 | 一次覆盖整个数据库，不可撤销 |
 | 审计 / 派单日志导出 | 内容是操作人姓名与操作路径 |
 
-其余管理操作（角色模板、项目、集成、成员权限）与全部业务读写不受影响。要在局域网里做上面三件事，
+其余管理操作（专家、项目、集成、成员权限）与全部业务读写不受影响。要在局域网里做上面三件事，
 先到「设置 → 权限与审计」开启登录。
 
 另外两条与安全有关的默认值：
@@ -265,7 +265,7 @@ GitHub Actions（`.github/workflows/release.yml`）会依次：校验 tag 与 `p
 | `npm run verify:ax` | 无障碍树（CDP AX tree）：交互节点命名、可聚焦却被 ignored、标题跳级、对话框名称。**暂未接入发版闸门**；8 页签 + 抽屉的 AX 命名检查已并入 `verify:pages`，真机 `verify:ax` 仍需 token 复跑 |
 | `npm run review:layout` | 24 个模块的字号/溢出/内联硬编码颜色巡检 |
 | `npm run review:components` | 官方元素 vs 自研元素的分布，看还有哪些组件没换 |
-| `npm run audit:ui` | unslop 口径的界面体检：32 个面（7 页签 + 设置 18 分区 + 抽屉 5 页签 + 命令面板 + 新建抽屉）逐面截图 + 采 computed style 指标（4px 网格、字号档位、颜色 token、emoji、圆角、对比度、首屏空白、网格落单、文字截断）。**只出证据不改代码**，结论见 `docs/ui-audit-2026-11-24.md`（首次审计 11-22，复审报告含本轮修复项） |
+| `npm run audit:ui` | unslop 口径的界面体检：31 个面（7 页签 + 设置 17 分区 + 抽屉 5 页签 + 命令面板 + 新建抽屉）逐面截图 + 采 computed style 指标（4px 网格、字号档位、颜色 token、emoji、圆角、对比度、首屏空白、网格落单、文字截断）。**只出证据不改代码**，结论见 `docs/ui-audit-2026-11-24.md`（首次审计 11-22，复审报告含本轮修复项） |
 | `npm run audit:overlays` | 浮层/交互态体检：确认框 / 输入框 / 下拉 / @ 选择器 / 新建技能 / 新增专家 / 登录，逐层截图并量字号档位、非 4px 网格、emoji、可关闭入口 |
 | `npm run audit:static` | 三个公开页（提单 / 我提过的 / 查进度）在 1200 与 390 两种宽度下的渲染体检（字号档位、非网格、溢出） |
 | `npm run audit:state` | 空态 / 登录页 / 大数据量 / 375 宽：改写 `/state` 响应造状态，逐面截图并量字号、非 4px 网格、溢出、截断 |

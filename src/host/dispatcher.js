@@ -1037,13 +1037,14 @@ export class Dispatcher {
   }
 
   /**
-   * Model for one role: the settings override ("provider/model" or a bare model
-   * id, in which case the host default provider is borrowed), else the host
-   * default selection. Returning undefined lets the factory decide.
+   * Model for one expert: its own setting ("provider/model" or a bare model id,
+   * in which case the host default provider is borrowed), else the fallback.
+   * 专家的 model 是唯一来源——旧的「角色模板」兜底已删（键是 expert.id，自定义
+   * 专家永远命不中，等于死代码）。
    */
   modelFor(expert) {
     const current = this.ctx.agentDefaultModel?.currentSelection?.()
-    const configured = String(expert?.model ?? '').trim() || this.store.snapshot().config.roles?.[expert?.id]?.model
+    const configured = String(expert?.model ?? '').trim()
     if (typeof configured === 'string' && configured.trim() !== '') {
       const spec = configured.trim()
       const slash = spec.indexOf('/')
@@ -1300,7 +1301,9 @@ export function buildExpertPrompt(task, expert, column, config, team, instructio
     recent ? `\n最近评论：\n${recent}` : '',
     instruction ? `\n有人刚刚在看板上 @ 了你：\n${instruction}` : '',
     '',
-    expert.prompt ? `工作要求（来自管理员配置）：\n${expert.prompt}` : `你的职责：${ROLE_BRIEF[expert.id] ?? '按卡上的要求推进工作。'}`,
+    /* 空提示词时退内置职责：按**角色位**取，不是按 expert.id —— 自建专家的 id 是
+       slug/hash，以前永远查不到，只会拿到一句「按卡上的要求推进工作」。 */
+    expert.prompt ? `工作要求（来自管理员配置）：\n${expert.prompt}` : `你的职责：${ROLE_BRIEF[expert.role] ?? ROLE_BRIEF[expert.id] ?? '按卡上的要求推进工作。'}`,
     '',
     '工作方式：',
     `1. 先用 studio_task_get 读取这张卡的完整内容（id=${task.id}）。`,

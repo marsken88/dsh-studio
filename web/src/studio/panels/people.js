@@ -70,26 +70,11 @@ function labelTip(h, tipOf, text, hint) {
 }
 
 export function ExpertsPanel({ config, onChanged }) {
-  const { h, React, api, toast, confirmDialog, tipOf, TextField, TextAreaField, ChipField, CheckField, SwitchToggle, SelectField, SideDrawer } = client()
+  const { h, React, api, confirmDialog, tipOf, TextField, TextAreaField, ChipField, CheckField, SwitchToggle, SelectField, SideDrawer } = client()
   const experts = config.experts ?? []
   const [draft, setDraft] = React.useState(null)
   const [error, setError] = React.useState(null)
   const [busy, setBusy] = React.useState(false)
-
-  // 角色模板：新建专家时按角色套用 label / 模型 / 提示词；改这里不动已有专家
-  const ROLE_KEYS = ['product', 'architect', 'dev', 'qa']
-  const [roles, setRoles] = React.useState(() => {
-    const src = config.roles ?? {}
-    const out = {}
-    for (const key of ROLE_KEYS) out[key] = { label: String(src[key]?.label ?? ''), model: String(src[key]?.model ?? ''), prompt: String(src[key]?.prompt ?? '') }
-    return out
-  })
-  const [rolesNote, setRolesNote] = React.useState(null)
-  const saveRoles = async () => {
-    setBusy(true); setError(null); setRolesNote(null)
-    try { await api('/config', { roles }); setRolesNote('角色模板已保存'); toast('角色模板已保存'); await onChanged() }
-    catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)) } finally { setBusy(false) }
-  }
 
   const save = async () => {
     if (draft === null) return
@@ -168,7 +153,7 @@ export function ExpertsPanel({ config, onChanged }) {
       ),
       h('div', { className: HINT }, `${expert.model || '跟随默认模型'}${expert.description ? ' · ' + expert.description : ''}`),
       promptPreview(expert.prompt) === ''
-        ? h('div', { className: HINT, 'data-empty': '1' }, '提示词：还没有写，会退回内置角色说明（点「编辑」补上）')
+        ? h('div', { className: HINT, 'data-empty': '1' }, '提示词：还没有写，会退回该角色位的一句话职责（点「编辑」补上完整要求）')
         : h('div', {
             className: HINT,
             'data-prompt': '1',
@@ -185,28 +170,6 @@ export function ExpertsPanel({ config, onChanged }) {
   ))
 
   return h('div', { className: PANE, 'data-panel': 'people-experts' },
-    h('div', { className: SECTION, 'data-section': 'role-templates' },
-      h('div', { className: SECTION_HEAD },
-        h('div', { className: 'flex min-w-0 flex-col gap-1' },
-          h('div', { className: SECTION_TITLE }, '角色模板'),
-          h('div', { className: DESC }, '新建专家时套用；改这里不影响已有专家'),
-        ),
-      ),
-      ROLE_KEYS.map((key, index) => h('div', {
-        key,
-        className: index === 0 ? 'flex min-w-0 flex-col gap-2' : 'flex min-w-0 flex-col gap-2 border-t border-separator-border pt-3',
-      },
-        h('div', { className: ROW },
-          h(TextField, { style: { width: 120 }, 'aria-label': `${ROLE_LABEL[key] ?? key} 角色名`, placeholder: '角色名', value: roles[key].label, onChange: e => setRoles({ ...roles, [key]: { ...roles[key], label: e.target.value } }) }),
-          h(TextField, { style: { flex: 1 }, 'aria-label': `${ROLE_LABEL[key] ?? key} 模型 id`, placeholder: '模型 id，如 deepseek-v4.1-flash', value: roles[key].model, onChange: e => setRoles({ ...roles, [key]: { ...roles[key], model: e.target.value } }) }),
-        ),
-        h(TextAreaField, { rows: 2, 'aria-label': `${ROLE_LABEL[key] ?? key} 角色提示词`, placeholder: '角色提示词（留空退回内置说明）', value: roles[key].prompt, onChange: e => setRoles({ ...roles, [key]: { ...roles[key], prompt: e.target.value } }) }),
-      )),
-      h('div', { className: ROW_END },
-        h(Button, { variant: 'primary', size: 'sm', disabled: busy, onClick: () => void saveRoles() }, '保存角色模板'),
-      ),
-      rolesNote === null ? null : h('div', { className: OK, role: 'status' }, rolesNote),
-    ),
     listSection({
       h, hook: 'experts',
       title: '专家（可在评论里 @ 他们）',

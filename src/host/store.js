@@ -382,6 +382,22 @@ export class StudioStore {
       }
       this.state.config.schema = 6
     }
+    if (Number(this.state.config.schema ?? 1) < 7) {
+      // 「角色模板」（config.roles）已废弃：新建专家、派单提示词、种子数据都不读它，
+      // 只剩一条按 expert.id 找角色模型的兜底——自定义专家的 id 是 slug/hash，永远命不中。
+      // 迁走最后一点有用信息：没单独指定模型的专家，按它的角色位抄一份角色模型；
+      // 之后这份配置就丢掉，专家的 model 成为唯一来源。
+      const legacyRoles = saved?.config?.roles
+      if (legacyRoles !== null && typeof legacyRoles === 'object') {
+        for (const expert of this.state.config.experts ?? []) {
+          if (String(expert.model ?? '').trim() !== '') continue
+          const model = legacyRoles[expert.role]?.model
+          if (typeof model !== 'string' || model.trim() === '') continue
+          expert.model = model.trim().slice(0, 120)
+        }
+      }
+      this.state.config.schema = 7
+    }
   }
 
   snapshot() {

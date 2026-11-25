@@ -5,7 +5,7 @@
  * 断言（任一不满足 → 退出码 1）：
  *   1 面板正常（页签渲染、无渲染失败、pageerror 为空）
  *   2 找到并点了一个**确定会 toast** 的按钮
- *      （用「设置 → 专家 → 保存角色模板」：people.js 里 `toast('角色模板已保存')`）
+ *      （用「设置 → 部署环境 → 保存环境」：people.js 里 `toast('已保存 N 个环境')`）
  *   3 [data-dsh-studio-portal] 里出现 role=region 的容器，且高度 > 0（真渲染出条目了）
  *   4 容器在视口内（scoped CSS 没把它甩到屏幕外）
  *   5 约 4 秒后自动消失
@@ -67,24 +67,24 @@ await page.evaluate(() => {
 })
 await sleep(1800)
 
-// 左栏切到「专家」（people.js 的角色模板保存就在这里）
+// 左栏切到「部署环境」（people.js 的保存环境按钮就在这里）
 await page.evaluate(() => {
   const item = [...document.querySelectorAll('[data-dsh-studio] [data-settings-nav] [data-settings-nav-item]')]
-    .find((n) => (n.querySelector('span')?.textContent || '').trim() === '专家')
+    .find((n) => (n.querySelector('span')?.textContent || '').trim() === '部署环境')
   item?.click()
 })
 await sleep(1800)
 
-// 点「保存角色模板」——这一步必定调 toast('角色模板已保存')
+// 点「保存环境」——这一步必定调 toast('已保存 N 个环境')
 const fired = await page.evaluate(() => {
   const buttons = [...document.querySelectorAll('[data-dsh-studio] button')]
-  const btn = buttons.find((n) => (n.textContent || '').trim() === '保存角色模板')
-    ?? buttons.find((n) => /保存角色模板/.test((n.textContent || '').trim()))
+  const btn = buttons.find((n) => (n.textContent || '').trim() === '保存环境')
+    ?? buttons.find((n) => /保存环境/.test((n.textContent || '').trim()))
   if (btn === undefined) return null
   btn.click()
   return (btn.textContent || '').trim()
 })
-check('找到并点了「保存角色模板」（确定会 toast）', fired !== null, String(fired))
+check('找到并点了「保存环境」（确定会 toast）', fired !== null, String(fired))
 await sleep(1800)
 
 const shown = await page.evaluate(() => {

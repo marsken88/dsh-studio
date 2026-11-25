@@ -252,8 +252,11 @@ test('client: studio modules only use names they declare, import or receive', ()
 test('ui: settings panes that exist are reachable from the nav', () => {
   const source = read('client.src.js')
   /* 2026-11-21：paneFor 里有 models 分支、导航数组却没有它 —— 面板写好了永远打不开。
-     verify:audit 会真点每个面板，这里再加一条便宜的兜底。 */
-  for (const id of ['models', 'docs']) {
+     verify:audit 会真点每个面板，这里再加一条便宜的兜底。
+     2026-11-25：「角色模板 / 角色与模型」已删（专家是模型与提示词的唯一来源），
+     这里反过来守一条 —— 导航里不该再出现 models。 */
+  assert.doesNotMatch(source, /id: 'models'/, '角色与模型面板已删，导航里不该再有 models')
+  for (const id of ['docs']) {
     assert.match(source, new RegExp("\\{ id: '" + id + "', label: "), 'settings nav is missing ' + id)
   }
 })
@@ -733,6 +736,21 @@ test('host: an expert with skills does not crash the prompt builder', async () =
   // 注入缺失时也不能炸（以前是裸的 activeSkills，直接 ReferenceError）
   const prompt = buildExpertPrompt(task, expert, column, { experts: [expert] }, undefined, '', undefined, {}, [])
   assert.ok(String(prompt).includes('lark-base'), '技能名要出现在提示词里')
+})
+
+test('host: an expert without a prompt falls back to ROLE_BRIEF by role, not by id', async () => {
+  const { buildExpertPrompt, configureDispatcher } = await import('../src/host/dispatcher.js')
+  configureDispatcher(new Proxy({}, { get: () => () => undefined }))
+  const column = { id: 'dev', label: '开发中' }
+  const task = { id: 't-1', code: 'DEV-001', title: 'x', comments: [] }
+  /* 自建专家的 id 是 slug/hash：以前按 expert.id 查 ROLE_BRIEF 永远查不到，
+     空提示词只剩一句通用话；现在按角色位退该角色的职责。 */
+  const custom = { id: 'expert-d3c58341', name: '支付开发', role: 'dev' }
+  const prompt = String(buildExpertPrompt(task, custom, column, { experts: [custom] }, undefined, '', undefined, {}, []))
+  assert.match(prompt, /按方案实现代码/, '填了角色位就退该角色的一句话职责')
+  const noRole = { id: 'expert-x', name: '顾问', role: '' }
+  const generic = String(buildExpertPrompt(task, noRole, column, { experts: [noRole] }, undefined, '', undefined, {}, []))
+  assert.match(generic, /按卡上的要求推进工作/, '没填角色位才是通用兜底')
 })
 
 test('host: a card with unasserted cases asks the expert to fill assertions', async () => {
