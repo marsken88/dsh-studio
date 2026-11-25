@@ -783,8 +783,16 @@ try {
     return true
   })
   if (teamsNav === true) await new Promise(resolve => setTimeout(resolve, 700))
-  const teamChat = await page.evaluate(() => document.querySelectorAll('[data-chat="team"]').length)
-  check('④h 专家团行也有「发起会话」入口（团长接话）', teamsNav === true && teamChat > 0, `nav=${teamsNav} count=${teamChat}`)
+  const teamChat = await page.evaluate(() => ({
+    rows: document.querySelectorAll('[data-team-row]').length,
+    chat: document.querySelectorAll('[data-chat="team"]').length,
+  }))
+  /* 空看板没有专家团行时这条不适用（不是缺陷）：只在真有团的时候断言入口存在。 */
+  check(
+    '④h 专家团行也有「发起会话」入口（团长接话）',
+    teamsNav === true && (teamChat.rows === 0 || teamChat.chat >= teamChat.rows),
+    `nav=${teamsNav} rows=${teamChat.rows} chat=${teamChat.chat}`,
+  )
   const backToExperts = await page.evaluate(() => {
     const el = [...document.querySelectorAll('[data-settings-nav-item]')]
       .find(node => String(node.textContent ?? '').trim().startsWith('专家') && !String(node.textContent ?? '').includes('团'))
