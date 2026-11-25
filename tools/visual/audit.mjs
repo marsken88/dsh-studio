@@ -113,6 +113,13 @@ const clickTab = async (want) => {
 for (const label of PAGES) {
   await clickTab(label)
   await snap(label)
+  /* 效能页的 Meter（团队负载 / 预算使用）在「AI 与成本」分区里；
+     默认总览看不见，旧审计因此误报「全站没有 meter」。 */
+  if (label === '效能') {
+    await page.evaluate(() => document.querySelector('[data-analytics-tab="ai"]')?.click())
+    await snap('效能/AI 与成本')
+    await page.evaluate(() => document.querySelector('[data-analytics-tab="overview"]')?.click())
+  }
 }
 
 // 设置里的每个面板：左栏是 button[data-settings-nav-item]

@@ -891,6 +891,8 @@ try {
   await new Promise(resolve => setTimeout(resolve, 500))
   const analyticsVisible = await page.evaluate(() => [...new Set([...document.querySelectorAll('[data-analytics-panel]')].filter(node => getComputedStyle(node).display !== 'none').map(node => node.getAttribute('data-analytics-panel')))])
   check('⑥d 切「AI 与成本」只显示对应分区', analyticsVisible.length === 1 && analyticsVisible[0] === 'ai', JSON.stringify(analyticsVisible))
+  const meterCount = await page.evaluate(() => document.querySelectorAll('[role="meter"]').length)
+  check('⑥d AI 与成本有官方 Meter（负载/预算）', meterCount > 0, String(meterCount))
   await page.evaluate(() => document.querySelector('[data-analytics-tab="overview"]')?.click())
   await new Promise(resolve => setTimeout(resolve, 300))
 

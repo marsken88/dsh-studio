@@ -7,6 +7,7 @@ import { StatCard, ChartCard, BarRow } from '../../boardui/chart-card'
 import { TaskList, TaskRow } from '../../boardui/task-list'
 import { Button, Select } from '../../boardui/index'
 import { EmptyState } from '../../boardui/empty-state'
+import { Meter } from '../../components/base/meter/meter'
 
 /* 分类色只用 BoardUI 的 chart token（浅/深主题各自一套），不再写死 hex。 */
 const CTX_COLORS = ['var(--color-chart-1)', 'var(--color-chart-2)', 'var(--color-chart-3)', 'var(--color-chart-4)', 'var(--color-chart-5)']
@@ -467,10 +468,15 @@ export function AnalyticsPage({ state, onOpenTask, onFixPrices }) {
             ? h(EmptyState, { title: '还没有启用的专家。' })
             : (load?.experts ?? []).filter(item => item.enabled).map(item => h('div', { key: item.id, className: 'grid grid-cols-[106px_minmax(0,1fr)_84px] items-center gap-2 py-1 text-body-2-regular' },
               h('span', { className: 'text-text-secondary' }, `${item.name}`),
-              // 这里原来是自己画的轨道/填充 —— 同一页里出现了两条进度条实现
-              // （另一条走 kit('ProgressBar')）。统一交给 ProgressField，它渲染官方 Meter。
-              h(ProgressField, {
-                value: Math.round((item.open / Math.max(1, ...(load.experts ?? []).map(entry => entry.open))) * 100),
+              /* 负载是「容量占用」，用官方 Meter（role=meter）；完成率才用 ProgressBar。 */
+              h(Meter, {
+                value: Number(item.open) || 0,
+                maxValue: Math.max(1, ...(load.experts ?? []).map(entry => Number(entry.open) || 0)),
+                'aria-label': `${item.name} 在办 ${item.open} 张`,
+                showValueLabel: false,
+                size: 'sm',
+                tone: Number(item.overdue) > 0 ? 'error' : 'accent',
+                className: 'min-w-0',
               }),
               h('span', { className: 'text-right tabular-nums text-text-secondary' }, `在办 ${item.open}${item.running > 0 ? ` · 跑 ${item.running}` : ''}${item.overdue > 0 ? ` · 逾期 ${item.overdue}` : ''}`),
             )),
@@ -531,9 +537,13 @@ export function AnalyticsPage({ state, onOpenTask, onFixPrices }) {
                 h('b', { style: { color: costs.budget.level === 'over' ? 'var(--color-text-error-primary)' : costs.budget.level === 'warn' ? 'var(--color-status-yellow-text)' : undefined } },
                   `${Math.max(costs.budget.runRate, costs.budget.hourRate)}%`),
               ),
-              h(ProgressField, {
+              h(Meter, {
                 value: Math.min(100, Math.max(costs.budget.runRate, costs.budget.hourRate)),
-                tone: costs.budget.level,
+                maxValue: 100,
+                'aria-label': '预算使用',
+                showValueLabel: false,
+                size: 'md',
+                tone: costs.budget.level === 'over' ? 'error' : costs.budget.level === 'warn' ? 'warning' : 'accent',
               }),
               h('div', { className: HINT },
                 `${costs.budget.runs}/${costs.budget.budgetRuns} 次 · ${costs.budget.hours}/${costs.budget.budgetHours} 小时 · ${costs.budget.hint}`),

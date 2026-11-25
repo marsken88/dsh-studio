@@ -115,6 +115,7 @@ AI 是执行手，判定权在确定性规则和人手里。要变成 AI Native�
 | 31 | **分区页签语义与加载态** | 需求/效能的分区切换用 `group + aria-pressed`（不再冒充未实现键盘导航的 ARIA tab）；效能页次数据加载中显示「正在算…/正在加载团队负载…」而不是像空数据 | ✅ 已做（2026-11-25：audit 违规 12→0；analytics loading） |
 | 32 | **门禁提示折叠** | 需求准出面板的 blocker/warning 超过 5 条时只露 5 条，其余折叠成「展开其余 N 条」，避免首屏一片红/黄 | ✅ 已做（2026-11-25：requirements gate details） |
 | 33 | **看板横向滚动提示** | 列多时看板右侧/左侧出现渐变边缘，提示还有列；方向键左右可滚动（aria-label 说的方向键以前是假的） | ✅ 已做（2026-11-25：board.js fades + ArrowLeft/Right） |
+| 34 | **负载/预算用官方 Meter** | 团队负载与预算使用是「容量占用」，改用 BoardUI Meter（role=meter）；完成率仍用 ProgressBar。审计探针补扫效能「AI 与成本」分区 | ✅ 已做（2026-11-25：analytics Meter；audit 30 模块 0 违规） |
 
 ## 5. 落地顺序
 
