@@ -1294,3 +1294,34 @@ TDZ 41 文件，`pnpm build` 后 `cmp dist/client.js client.js` 一致，`probe:
 通过；❌ 的 5 条与**改前基线完全同 5 条**，是 .218 还跑 0.15.1 后端导致，不是这次改动）。
 
 没验到的：目标机还没部署这一版，所以「真重启 dsh-web 后逐张续跑」要等部署后再看一次。
+
+## 模型漂移的「重建」为什么没生效（2026-11-25/26）
+
+重启续跑把一张老卡（REQ-2026-005-3 · 开发中）拉起来后，用户看到它又在用 `deepseek-v4-pro`。
+
+查会话日志 `~/.dsh/sessions/--home-lyf-dsh-workspace--/studio-t-5d1d2ad4-dev/`：
+
+- 新的 `request/header`（seq 808，16:02:17）仍是 `deepseek-official/deepseek-v4-pro`；
+- 一路 `llm/retry` 到 16:04:58，`turn/end reason.error`：
+  `No available channel for model deepseek-v4-pro under group arch (distributor) 503`；
+- 卡上 16:02:16 确实有一条「模型漂移……已归档旧会话并按配置重建」——**但这句话是假的**：
+  `~/.dsh/sessions/*/` 下没有任何 `.stale-*` 目录。
+
+根因：`guardModelDrift` 用**当前派单目录**推旧会话路径（`sessionDirOf(homedir(), dir, sessionId)`），
+而这条会话是当年在兜底目录 `~/dsh-workspace` 下建的（slug `--home-lyf-dsh-workspace--`），
+卡后来挂上项目、派单目录变成 `/home/lyf/repos/demo-order`（slug 不同）。
+`rename` 扑空 → `create` 撞「session already exists」→ `openSession()` 回退 `resume` →
+还是那条 pro 会话；而且评论在归档**之前**就写了「已归档」，把失败掩盖掉了。
+
+修法：
+
+- `locateSessionDir()`：当前目录推算 → `sessionPersistence.stat(id).location` →
+  扫 `~/.dsh/sessions/*/<sessionId>`，三个来源任一命中才 rename 成 `.stale-<ts>`；
+- 重建后仍漂移 → **抛错**（派单记 failed，按 `retry` 退避、超上限挂阻塞），
+  卡上写清「旧/新型号 + 归档成功与否 + 先重启 dsh 或手工删旧会话目录」；
+  不再拿旧型号硬跑（这次就是跑了 16 轮才 503）；
+- 评论改成按实际结果写，不再在归档前谎报。
+
+验证：`tests/model-drift.test.mjs` 新增 3 条（真实目录归档 / 归档失败必须失败 / 没漂移不动），
+`npm run check` 591 条本地与 `TZ=UTC` 全绿；真机：把这一版部署到 .218 后，等
+`REQ-2026-005-3` 下一次催派，看它是否归档到 `--home-lyf-dsh-workspace--` 下并用 flash 起新会话。

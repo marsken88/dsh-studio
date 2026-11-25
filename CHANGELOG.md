@@ -12,7 +12,18 @@
 
 配套：换列时清掉旧列的派单印记（卡被打回原列也能重新派）、解除阻塞时把催派次数清零（否则一解除又被挂起）、卡片抽屉与看板按新阶段显示（`running` / `stopped` / `done` / `stalled`）、设置页「哪些列自动派单」补齐全部七列。
 
-验证：`npm run check` 596 条单测（新增 10 条 `dispatch-continue` + 3 条 `dispatch-state`，`dispatch-state` / `store-boot` / `abandoned` 同步更新）全绿；`pnpm build` 后 `cmp dist/client.js client.js` 一致。
+验证：`npm run check` 588 条单测（新增 10 条 `dispatch-continue` + 3 条 `dispatch-state`，`dispatch-state` / `store-boot` / `abandoned` 同步更新）全绿；`pnpm build` 后 `cmp dist/client.js client.js` 一致。
+
+### 模型漂移：归档路径算错，重建后仍在拿旧型号跑（真机 503 的根因）
+
+重启续跑把一张老卡拉起来后，卡上出现「模型漂移……已归档旧会话并按配置重建」，但请求仍是 `deepseek-v4-pro`，跑了 16 轮后 `turn/end error: No available channel for model deepseek-v4-pro … 503`。
+
+- **路径算错**：`guardModelDrift` 用**当前派单目录**推旧会话目录（`<home>/.dsh/sessions/<cwd-slug>/<sessionId>`），而这条会话是当年在兜底目录 `~/dsh-workspace` 下建的，卡后来挂上项目、派单目录变成仓库 → `rename` 扑空 → `create` 又撞「已存在」→ 回退 `resume` → 重建等于没做。
+- **现在按三个来源定位真实目录**：当前目录推算 → `sessionPersistence.stat(id).location` → 扫 `~/.dsh/sessions/*/<sessionId>`；任一命中就 rename 成 `.stale-<ts>`。
+- **重建后仍不一致就放弃这一轮**：抛错让派单记为失败（按 `retry` 退避、超上限挂阻塞），并在卡上写明「旧/新型号 + 归档成功与否 + 先重启 dsh 或手工删旧会话目录」，不再拿旧型号硬跑烧 token。
+- **评论不再谎报**：原来在归档*之前*就写「已归档并重建」；现在按实际结果写（归档失败 / 重建后仍是 …）。
+
+验证：`tests/model-drift.test.mjs` 新增 3 条（真实目录归档、归档失败必须失败、没漂移不动）；`npm run check` 591 条、本地与 `TZ=UTC` 全绿。
 
 ## [0.17.1] — 2026-11-25
 

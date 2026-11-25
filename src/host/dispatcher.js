@@ -10,10 +10,10 @@ import { COLLABORATION_BRIEF, rolePlaybookFor } from './role-playbooks.js'
 import { emitEvent } from './events.js'
 import { loadTeamMemory, teamMemoryBlock } from './team-memory.js'
 import { STUDIO_WORKSPACE_TITLE, dispatchDirFor, projectContext, workspaceAttachPlan } from './dispatch-cwd.js'
-import { mkdir, rename, stat } from 'node:fs/promises'
+import { mkdir, readdir, rename, stat } from 'node:fs/promises'
 import { randomBytes } from 'node:crypto'
 import { homedir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 // 派单引擎：一卡一会话、槽位限流、幂等投递、SLA 升级。
 // 需要宿主能力的少数几处走 configureDispatcher() 注入，避免这里反过来依赖 index.js。
 
@@ -1183,27 +1183,88 @@ export class Dispatcher {
   /**
    * 会话的模型是否和配置对不上；对不上就 abort + 归档目录 + 重建一次。
    * 只重建一次：重建后仍不一致说明宿主把型号固定在别处（例如 preset），
-   * 那种情况给出明确提示让人重启 dsh，而不是无限重建把卡拖死。
+   * 那种情况**直接放弃这一轮**并写明原因 —— 继续拿旧型号跑只会烧 token、撞 503
+   * （2026-11-25 真机：评论写着「已归档并重建」，实际还在用 pro 跑了 16 轮才 503）。
    */
   async guardModelDrift({ handle, sessionId, dir, agentOptions, task, openSession }) {
     const readModel = candidate => candidate?.agent?.session?.requestContext?.()
     const current = readModel(handle)
     if (isModelDrift(current, agentOptions) === false) return handle
-    this.note(driftNote(current, agentOptions))
-    await this.commentDrift(task, driftNote(current, agentOptions))
+    const note = driftNote(current, agentOptions)
+    this.note(note)
     try { await handle.dispose?.() } catch (error) { this.note(`dispose 失败：${error?.message ?? error}`) }
-    const from = sessionDirOf(homedir(), dir, sessionId)
+    /* 旧会话目录是按「创建时的 cwd」分 slug 存的，卡的派单目录后来会变
+       （兜底目录 → 项目仓库 / 需求分组）。以前直接用当前 dir 算路径，
+       rename 扑空 → create 又撞「已存在」→ 回退 resume，重建等于没做。 */
+    const from = await this.locateSessionDir(sessionId, dir)
+    let archived = false
+    let archiveError = ''
     if (from !== '') {
-      try { await rename(from, `${from}.stale-${Date.now()}`) } catch (error) { this.note(`归档旧会话失败：${error?.message ?? error}`) }
+      try {
+        await rename(from, `${from}.stale-${Date.now()}`)
+        archived = true
+      } catch (error) {
+        archiveError = String(error?.message ?? error)
+        this.note(`归档旧会话失败（${from}）：${archiveError}`)
+      }
+    } else {
+      archiveError = '找不到旧会话目录'
+      this.note(`归档旧会话失败：${archiveError}（${sessionId}）`)
     }
     const rebuilt = await openSession()
     const after = readModel(rebuilt)
     if (isModelDrift(after, agentOptions)) {
-      this.note(`重建后仍是 ${after?.provider ?? '?'}/${after?.model ?? '?'}：宿主可能把型号固定在别处，需要重启 dsh`)
-    } else {
-      this.note(`已按配置重建会话（${agentOptions?.provider ?? ''}/${agentOptions?.model ?? ''}）`)
+      const still = `${after?.provider ?? '?'}/${after?.model ?? '?'}`
+      const detail = `重建后仍是 ${still}：宿主可能把型号固定在别处`
+      this.note(detail)
+      await this.commentDrift(task, `${note} 但旧会话${archived ? `已归档（${from}）` : `归档失败（${archiveError}）`}，${detail}；这一轮不再开跑（继续跑只会拿旧型号撞 503）。先重启 dsh，或手工删掉旧会话目录再派。`)
+      throw new Error(`会话模型仍是 ${still}，配置要的是 ${agentOptions?.provider ?? ''}/${agentOptions?.model ?? ''}：旧会话${archived ? '已归档' : `归档失败（${archiveError}）`}，重建后型号没变`)
     }
+    await this.commentDrift(task, `${note}${from === '' ? '（没找到旧会话目录）' : `（旧会话 ${from}，${archived ? '已归档' : '未归档'}）`}，已按配置重建。`)
+    this.note(`已按配置重建会话（${agentOptions?.provider ?? ''}/${agentOptions?.model ?? ''}）`)
     return rebuilt
+  }
+
+  /**
+   * 旧会话的真实目录。
+   *
+   * 宿主的会话目录是 `<home>/.dsh/sessions/<cwd-slug>/<sessionId>`，slug 来自**创建时**的 cwd；
+   * 卡的派单目录后来会变（项目仓库 / 兜底目录 / 需求分组），按当前 dir 硬算会找不到。
+   * 顺序：当前 dir 推算 → 宿主 sessionPersistence.stat 的 location → 扫 sessions 下每个 slug。
+   * 都找不到返回空串，调用方据此走「归档失败」的真实分支。
+   */
+  async locateSessionDir(sessionId, dir) {
+    const id = String(sessionId ?? '')
+    if (id === '') return ''
+    const preferred = sessionDirOf(homedir(), dir, id)
+    if (preferred !== '' && await directoryExists(preferred)) return preferred
+    const location = await this.sessionLocationPath(id)
+    if (location !== '') {
+      if (await directoryExists(location)) return location
+      // 有的后端给的是会话文件路径：目录名通常就是 sessionId。
+      const parent = dirname(location)
+      if (parent.includes(id) && await directoryExists(parent)) return parent
+    }
+    const root = join(homedir(), '.dsh', 'sessions')
+    try {
+      for (const slug of await readdir(root)) {
+        const candidate = join(root, slug, id)
+        if (await directoryExists(candidate)) return candidate
+      }
+    } catch { /* 没有会话目录就按找不到处理 */ }
+    return ''
+  }
+
+  /** 宿主持久化里这条会话的位置（老后端可能没有 location，返回空串）。 */
+  async sessionLocationPath(sessionId) {
+    const persistence = this.ctx?.get?.('sessionPersistence')
+    if (persistence === undefined || typeof persistence?.stat !== 'function') return ''
+    try {
+      const snapshot = await persistence.stat(sessionId)
+      return String(snapshot?.location?.path ?? '')
+    } catch {
+      return ''
+    }
   }
 
   /** 漂移写进卡上：否则只有翻会话日志才知道「配置是 Flash、实际跑 Pro」。 */
