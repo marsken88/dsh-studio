@@ -9,18 +9,24 @@
  *        破坏性路由是否要求 confirm。
  * 验不了：客户端半边（侧栏入口、面板渲染）—— 桌面窗口走 dsh-app:// + 启动令牌，
  *        外部浏览器拿不到那个页面。这一半只能人眼确认，脚本会在结尾写清楚。
+ *
+ * 需要 STUDIO_TOKEN（`/studio-api` 过宿主的信任栅栏，脚本要用 dsh web 的启动 token 换 cookie）：
+ *   STUDIO_TOKEN=<dsh web 启动 token> DESKTOP_BASE=http://127.0.0.1:55147 npm run verify:desktop
  */
+import { launchTokenFromEnv, studioFetch } from './lib/studio-auth.mjs'
+
 const base = String(process.env.DESKTOP_BASE ?? process.env.DSH_WEB_URL ?? '').replace(/\/+$/, '')
 if (base === '') {
   console.error('需要 DESKTOP_BASE 或 DSH_WEB_URL（形如 http://127.0.0.1:55147）')
   process.exit(2)
 }
+const api = studioFetch(base, launchTokenFromEnv())
 const expectedProfile = process.env.EXPECTED_PROFILE ?? process.env.DSH_PROFILE ?? 'desktop'
 
 const checks = []
 const check = (name, ok, detail = '') => { checks.push({ name, ok, detail }); return ok }
 const post = async (path, body) => {
-  const res = await fetch(base + '/studio-api' + path, {
+  const res = await api('/studio-api' + path, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify(body),
@@ -28,7 +34,7 @@ const post = async (path, body) => {
   return { status: res.status, text: await res.text() }
 }
 
-const stateRes = await fetch(base + '/studio-api/state')
+const stateRes = await api('/studio-api/state')
 if (stateRes.status !== 200) {
   console.log(`FAIL /studio-api/state → ${stateRes.status}`)
   console.log('插件没加载。检查：① package.json 的 dependencies 里有本插件；')
@@ -44,7 +50,7 @@ check(
   `profile=${state.profile}（回退成 web 说明 detectProfile 没认出 scoped 包名）`,
 )
 
-const market = await (await fetch(base + '/studio-api/market')).json()
+const market = await (await api('/studio-api/market')).json()
 const installed = Array.isArray(market?.installed) ? market.installed : []
 check('/market.installed 非空', installed.length > 0, `installed=${installed.length}`)
 check(

@@ -1,6 +1,9 @@
-const BASE = 'http://192.168.120.218:18080/studio-api'
-const post = async (p, b) => { const res = await fetch(BASE + p, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(b ?? {}) }); return { status: res.status, body: await res.json().catch(() => ({})) } }
-const state = async () => (await (await fetch(BASE + '/state')).json()).state
+import { launchTokenFromEnv, studioFetch } from './lib/studio-auth.mjs'
+
+const BASE = 'http://192.168.120.218:18080'
+const api = studioFetch(BASE, launchTokenFromEnv())
+const post = async (p, b) => { const res = await api('/studio-api' + p, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(b ?? {}) }); return { status: res.status, body: await res.json().catch(() => ({})) } }
+const state = async () => (await (await api('/studio-api/state')).json()).state
 const ok = (label, good, detail) => console.log((good ? 'ok   ' : 'FAIL ') + label + (detail === undefined ? '' : ' — ' + detail))
 const stamp = new Date().toISOString().slice(5, 10)
 

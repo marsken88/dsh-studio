@@ -6,6 +6,9 @@
  *   npm run drive:gc -- --base … --apply                             # 真删（进飞书回收站）
  *   npm run drive:gc -- --base … --strict                            # 有孤儿就退出码 1（给定时任务用）
  *
+ * 需要 STUDIO_TOKEN（`/studio-api` 过宿主的信任栅栏，脚本要用 dsh web 的启动 token 换 cookie）：
+ *   STUDIO_TOKEN=<dsh web 启动 token> npm run drive:gc -- --base http://127.0.0.1:<dsh 端口>
+ *
  * 判定逻辑在 src/host/drive-gc.js（纯函数，有单测）：**只删名字像需求目录（REQ-*）
  * 且台账里没有任何引用的文件夹**，其余一律保留。文件永远不碰。
  *
@@ -18,6 +21,7 @@ import { mkdirSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { classifyDriveFolders, gcSummary } from '../src/host/drive-gc.js'
+import { launchTokenFromEnv, studioFetch } from './lib/studio-auth.mjs'
 
 const repo = join(dirname(fileURLToPath(import.meta.url)), '..')
 const argv = process.argv.slice(2)
@@ -32,9 +36,11 @@ if (base === '') {
   process.exit(2)
 }
 const apply = flag('apply')
+// 带会话的 fetch：本文件里的 `api` 已经是「GET 并返回 JSON」的本地包装，所以这里换个名字避免重名。
+const studioApi = studioFetch(base, launchTokenFromEnv())
 
 const api = async path => {
-  const res = await fetch(base + '/studio-api' + path)
+  const res = await studioApi('/studio-api' + path)
   return res.json()
 }
 

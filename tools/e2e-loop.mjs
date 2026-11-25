@@ -6,7 +6,15 @@
 //
 // 每轮都真建一条需求和若干张卡，默认跑完自动删除。
 // 需要：目标项目在主机上有 git 仓库、config.testing.allowShell 打开、shellCwd 指向仓库。
+//
+// 关于鉴权：`/studio-api` 过宿主的信任栅栏，没有已认证的浏览器会话一律 401。
+// 脚本没有浏览器，得用 dsh web 的启动 token 换 cookie —— 所以现在还要给 STUDIO_TOKEN：
+//   STUDIO_TOKEN=$(journalctl -u dsh-web -n 50 | grep -o 'token=[^&]*' | tail -1 | cut -d= -f2) \
+//   STUDIO_BASE=http://<host>:18080 node tools/e2e-loop.mjs
+import { launchTokenFromEnv, studioFetch } from './lib/studio-auth.mjs'
+
 const BASE = process.env.STUDIO_BASE ?? 'http://192.168.120.218:18080'
+const api = studioFetch(BASE, launchTokenFromEnv())
 const PROJECT = process.env.E2E_PROJECT ?? 'admin-portal'
 const SHELL_CWD = process.env.E2E_SHELL_CWD ?? '/home/lyf/repos/admin-portal'
 const argv = process.argv.slice(2)
@@ -15,10 +23,10 @@ const ROUNDS = Math.max(1, Math.min(10, Number(kIndex >= 0 ? argv[kIndex + 1] : 
 const keep = argv.includes('--keep')
 
 const post = async (path, body) => {
-  const res = await fetch(BASE + '/studio-api' + path, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body ?? {}) })
+  const res = await api('/studio-api' + path, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body ?? {}) })
   return { status: res.status, body: await res.json().catch(() => ({})) }
 }
-const state = async () => (await (await fetch(BASE + '/studio-api/state')).json()).state
+const state = async () => (await (await api('/studio-api/state')).json()).state
 
 async function runOnce(round) {
   const failures = []

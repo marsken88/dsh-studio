@@ -270,6 +270,9 @@ studio_task_check          { id, itemId, note }         // 清单逐项勾，附
 | 云盘根目录一堆同名文件夹 | `npm run drive:gc -- --base <端口>` | 先体检；`--apply` 才删（只删孤儿） |
 | 侧栏同一个需求有多个同名工作区 | 设置 → 自动派单 →「工作区分组」 | 选「一个需求一个文件夹」后新派单会复用已有同名工作区；旧注册先 `node tools/workspace-dedupe.mjs --base http://<host>:18080` 看计划，再加 `--apply --yes` 清理（只删注册，会话日志保留）；旧的一卡一 worktree 文件夹加 `--legacy` 一起列 |
 | 面板白屏 / 一行「渲染失败：xxx is not defined」 | 浏览器 console | 这是前端 `ReferenceError`；`node --check` 查不出，重启/升级后复现就报 issue |
+| `curl`/脚本打 `/studio-api/*` 回 **401 `login_required`** | 是不是拿裸 curl 打的（或脚本没带 `STUDIO_TOKEN`） | 接口现在过宿主的信任栅栏：没有已认证的浏览器会话就 401。脚本用 `tools/lib/studio-auth.mjs` 拿启动 token 换 cookie（`STUDIO_TOKEN=$(journalctl -u dsh-web -n 50 \| grep -o 'token=[^&]*' \| tail -1 \| cut -d= -f2)`）。**文档里那条验证命令是 `curl /studio-api/health`**，探活用它 |
+| 打 `/studio-api/*` 回 **403 `bad_origin`** | 请求的 `Host` 是哪个、有没有带 `Origin` | 这是 Host/Origin 栅栏没过：用 `127.0.0.1` 或这台机器登记过的地址访问（回环永远可信）；反向代理没透传 `Host` 时也会命中这条 |
+| 浏览器打开面板正常，但脚本/探针全 401 | 脚本有没有换 cookie | 浏览器靠 `?token=` 那条 URL 自动拿到 cookie，脚本没有；按上一条用启动 token 换。换不到会明确报「换不到会话 cookie（HTTP 401）」 |
 | 改了代码重启没生效 | `npm run sync:profile` 的版本输出 | 确认 profile 版本 = 仓库版本；前端改动还要 `cd web && pnpm build` |
 | 派单没反应/没留言 | 会话日志 `turn/end`、集成健康 | 常见是无可用模型通道（503）；先看「集成健康」 |
 | 改了列负责人，5 秒内一批老卡自己开跑 | 设置 → 列的负责人；`/columns/save` 的返回值 | **这是设计如此**：列 owner 一旦能解析，下一轮 tick 就把存量卡派出去。保存前面板会先 `dryRun` 算出「会让哪几张卡被派给谁」并要求确认，返回值里也带 `affected.cards[].willDispatch` 与 `warning`。只想预览不落库传 `dryRun:true`；不想让某张卡被带走就先把它标阻塞或换列 |

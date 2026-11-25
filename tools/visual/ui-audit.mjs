@@ -22,6 +22,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { dirname, extname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { launchTokenFromEnv, studioFetch } from '../lib/studio-auth.mjs'
 
 const here = dirname(fileURLToPath(import.meta.url))
 const repo = join(here, '..', '..')
@@ -38,6 +39,9 @@ if (base === '') {
 const theme = argOf('theme', 'light')
 const suffix = theme === 'dark' ? '-dark' : ''
 const only = new Set(argOf('only', '').split(',').map(item => item.trim()).filter(Boolean))
+/* `/studio-api` 过宿主信任栅栏：没有已认证的浏览器会话的请求一律 401。脚本没有浏览器，
+   用 dsh web 的启动 token 换 cookie —— api() 与假宿主代理层共用这一份会话（见 tools/lib/studio-auth.mjs）。 */
+const authedFetch = studioFetch(base, launchTokenFromEnv())
 
 const require = createRequire(import.meta.url)
 let puppeteer
@@ -56,7 +60,7 @@ const OUT = join(repo, 'tmp', 'unslop-audit')
 mkdirSync(OUT, { recursive: true })
 
 const api = async (path, body) => {
-  const res = await fetch(base + '/studio-api' + path, {
+  const res = await authedFetch('/studio-api' + path, {
     method: body === undefined ? 'GET' : 'POST',
     headers: { 'content-type': 'application/json' },
     body: body === undefined ? undefined : JSON.stringify(body),
@@ -90,7 +94,7 @@ const server = createServer(async (req, res) => {
     const chunks = []
     for await (const chunk of req) chunks.push(chunk)
     try {
-      const upstream = await fetch(base + url.pathname + url.search, {
+      const upstream = await authedFetch(url.pathname + url.search, {
         method: req.method,
         headers: { 'content-type': req.headers['content-type'] ?? 'application/json' },
         body: ['GET', 'HEAD'].includes(req.method) ? undefined : (chunks.length > 0 ? Buffer.concat(chunks) : undefined),

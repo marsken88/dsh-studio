@@ -26,6 +26,20 @@
 
 ## [0.15.1] — 2026-11-25
 
+### `/studio-api` 接上宿主信任栅栏：浏览器里的网页再也调不动它
+
+社区列表（awesome-dsh-plugin）给本站的条目加了一句披露：「HTTP 路由没有 DSH 的访问检查，浏览器里打开的网页可以调用它们」。实测确实如此：`GET /studio-api/state` 不带任何凭据就回 **200 / 88 KB 全量台账**；把 `Host` 伪造成攻击者域名照样 200；只有 POST 的 `Origin` 比对拦得住跨站，而 **DNS rebinding 下 `Origin` 与 `Host` 同为攻击者域名，这道守卫会一起失效**（实测 `Host`+`Origin` 同为 `evil.example.com` 的 POST 直接进到业务逻辑）。
+
+现在每个请求都先过宿主的 `connection.requestRejection(req)`：
+
+- **403**（Host/Origin 栅栏没过）——谁都不豁免，公开提单页也一样；
+- **401**（没有已认证的 DSH 浏览器会话）——挡住台账，只豁免公开自助提单面与 `/health`；
+- 宿主太老没有这个方法时**放行并记一行警告**（不退回「只信回环」：拿不到宿主那份可信 Host 名单，那样会把局域网里正常打开面板的人一起挡成 403）。
+
+新增 `GET /studio-api/health`（**只回 `{ok:true}`，不带任何台账**）给部署脚本与运维探活用；部署脚本的 `state=` 改成探它，而不是探 `/state`。
+
+**会受影响的地方**：拿 `curl` 裸打 `/studio-api` 的脚本现在会 401。脚本要用 `dsh web` 的启动 token 换一次 cookie，见 `tools/lib/studio-auth.mjs`（`STUDIO_TOKEN=$(journalctl -u dsh-web … | grep -o 'token=[^&]*' | cut -d= -f2)`）。仓库内 16 个脚本已迁移；浏览器里的探针（带 `?token=` 打开）不受影响。
+
 ### 卡片抽屉写清「这次派单用哪套权限」
 
 同事反馈「设置里选了完全访问，为什么还弹审批」——答案是那个设置只管派单会话，手动新开的会话仍按 DSH 自己的权限档位。现在卡片抽屉的「AI 处理」区直接写明：

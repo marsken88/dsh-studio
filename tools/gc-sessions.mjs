@@ -1,16 +1,18 @@
 // #127：清掉「卡已经不在台账里」的派单会话目录（幽灵会话），先报告、--apply 才删。
-import { execFileSync } from 'node:child_process'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { readdirSync, statSync, rmSync } from 'node:fs'
 import { parseStudioSession } from '../src/host/agent-feed.js'
+import { launchTokenFromEnv, studioFetch } from './lib/studio-auth.mjs'
 
 const apply = process.argv.includes('--apply')
 const BASE = process.env.STUDIO_BASE ?? 'http://192.168.120.218:18080'
-const TOKEN = process.env.STUDIO_TOKEN ?? ''
+/* `/studio-api` 过宿主的信任栅栏：没有已认证的浏览器会话就 401。以前这里发
+   `authorization: Bearer …`——宿主只认 cookie，那头发过去从来没被认过。 */
+const TOKEN = launchTokenFromEnv()
 const state = TOKEN === ''
   ? null
-  : JSON.parse(execFileSync('curl', ['-s', '--max-time', '10', BASE + '/studio-api/state', '-H', `authorization: Bearer ${TOKEN}`], { encoding: 'utf8' })).state
+  : (await (await studioFetch(BASE, TOKEN)('/studio-api/state')).json()).state
 const alive = new Set((state?.tasks ?? []).map(task => task.id))
 const sessionsRoot = join(homedir(), '.dsh', 'sessions')
 let dirs = []
