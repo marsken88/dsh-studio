@@ -68,6 +68,21 @@ function Board({ state, onOpen, onMove, onWip, onCreate }) {
   const [requirementFilter, setRequirementFilter] = React.useState('')
   const [hideEmpty, setHideEmpty] = React.useState(false)
   // 列多时默认给可读列宽、横向滚；打开这个把列压到一屏看全（记在本地）
+  /* 横向滚动的边缘阴影：列多时让人一眼看出「右边还有列」。 */
+  const rowRef = React.useRef(null)
+  const [edges, setEdges] = React.useState({ left: false, right: false })
+  const syncEdges = event => {
+    const el = event?.currentTarget ?? rowRef.current
+    if (el === null || el === undefined) return
+    const max = el.scrollWidth - el.clientWidth
+    setEdges({ left: el.scrollLeft > 4, right: max > 4 && el.scrollLeft < max - 4 })
+  }
+  React.useEffect(() => {
+    syncEdges()
+    const onResize = () => syncEdges()
+    window.addEventListener('resize', onResize)
+    return () => window.removeEventListener('resize', onResize)
+  }, [state.statuses?.length, state.config?.columns])
   const [fitWidth, setFitWidth] = React.useState(() => {
     try {
       const saved = window.localStorage.getItem('studio.boardFit')
@@ -258,11 +273,20 @@ function Board({ state, onOpen, onMove, onWip, onCreate }) {
       h('span', { className: STAT, 'data-board-stat': '' },
         `${total} 张卡 · ${designPending > 0 ? `${designPending} 个设计待评审 · ` : ''}${bugCount > 0 ? `${bugCount} 个缺陷` : `${columns.length} 列`}`),
     ),
+    h('div', { className: 'relative flex min-h-0 min-w-0 flex-1' },
     h('div', {
+      ref: rowRef,
       className: BOARD_ROW,
       'data-fit': fitWidth ? '1' : '0',
       tabIndex: 0,
       'aria-label': '看板列，左右滚动或用方向键',
+      onScroll: syncEdges,
+      onKeyDown: event => {
+        if (event.key === 'ArrowRight' || event.key === 'ArrowLeft') {
+          event.preventDefault()
+          event.currentTarget.scrollBy({ left: event.key === 'ArrowRight' ? 240 : -240, behavior: 'smooth' })
+        }
+      },
     },
       columns.map(column => {
         const tasks = byStatus.get(column.id) ?? []
@@ -312,6 +336,17 @@ function Board({ state, onOpen, onMove, onWip, onCreate }) {
           ),
         )
       }),
+    ),
+      edges.left ? h('div', {
+        className: 'pointer-events-none absolute inset-y-0 left-0 w-8',
+        style: { background: 'linear-gradient(to right, var(--color-background-primary-default), transparent)' },
+        'data-board-fade': 'left',
+      }) : null,
+      edges.right ? h('div', {
+        className: 'pointer-events-none absolute inset-y-0 right-0 w-8',
+        style: { background: 'linear-gradient(to left, var(--color-background-primary-default), transparent)' },
+        'data-board-fade': 'right',
+      }) : null,
     ),
   )
 }
