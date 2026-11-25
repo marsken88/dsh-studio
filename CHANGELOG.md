@@ -8,6 +8,8 @@
 
 - **白名单改成 `config.roles`**：默认 产品 / 架构 / 研发 / 测试 / **运营**（新增 `ops` 的内置人设与职责：操作手册、知识库条目、变更与回滚预案）。公司可以 `POST /config { roles:[…] }` 加财务、支持等自定义岗位；删角色前会检查「还有专家或列负责人在用它」，删不掉就报错。
 - **校验不再静默**：`/experts/save` 传不认识的 role 直接 400 并列出可选值；卡片的 `role` 也按白名单校验；列负责人按角色位解析时同样认自定义岗位。
+- **默认列负责人改成角色位**（`defaultColumns(roles)`）：以前默认写死 `{kind:'expert', id:'architect'}`，删掉/换掉那位专家后列就指向一个解析不出的 id、卡静默停在原地；现在按角色位走（按卡的业务领域挑人），白名单里没有的角色退回「没人负责」。`/columns/save {owner:null}` 重置也用当前白名单。
+- **界面同步**：设置 →「列的负责人 → 加候选」的角色位列表、@ 选择器的角色头像配色、卡片负责人角色色都按 `config.roles` 出（以前写死四岗，运营/自定义岗位在面板里选不到）；设置 → 专家顶部新增「角色位（岗位白名单）」——点 × 删、填 id 加（以前只能手打 `POST /config`）；`studio_config_get` / `studio_config_set` 的 `roles` 读/写当前配置。
 - 角色规则单独成模块 `src/host/roles.js`（domain.js 有 2000 行闸门），`domain.js` 继续 re-export，外部 import 路径不变。
 
 ### 改列负责人不再静默降级 role，落库前先算「会派走哪些卡」（#149）
@@ -21,6 +23,7 @@
 
 - **`POST /studio-api/agents/chat { expert 或 team, topic, instruction?, workdir? }`**（工具 `studio_session_start`）：造一个 `studio-chat-<expert>-<hex>` 会话，跑**对话模式**提示词（不开工、不改代码、不建卡、不往看板写评论），transcript 就是普通 DSH 会话；专家团由团长接话，需要成员接手时在回复里 @。面板上「设置 → 专家 / 专家团」每行有「发起会话」。
 - **`/agents/run` 错误分流**：卡不存在 / 目标不存在（或已停用、团里没有成员）/ 这一列没人负责，三种文案分开；`expert` 现在也认专家团 id（派给团长），并支持 `instruction`（以前也没地方传开场白）。
+- **工具层补齐 `studio_requirement_assist`**：以前「需求对话澄清」只有 `POST /requirement/assist`（人在面板里聊），51 个工具里 agent 调不到，人和 AI 的能力不对等。现在路由与工具共用 `streamAssistReply` / `assistMessages`，只读档位（不写库），参数为 `message` + 可选 `history` / `mode` / `project` / `title`。
 - 无卡会话不会冒充某张卡：执行播报（`parseStudioSession`）不认它，成本统计把它算进总量与按专家（`adHoc`），不落成一张空卡。
 - `/columns/save`、`/agents/run`、`/agents/chat` 也纳入 HTTP 入参白名单：多传字段直接 400。
 

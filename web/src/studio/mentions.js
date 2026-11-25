@@ -27,11 +27,14 @@ const TONE = {
   architect: ['hsl(214 80% 94%)', 'hsl(214 65% 46%)'],
   dev: ['hsl(160 55% 92%)', 'hsl(160 55% 34%)'],
   qa: ['hsl(32 90% 93%)', 'hsl(28 75% 45%)'],
+  ops: ['hsl(200 70% 93%)', 'hsl(200 60% 38%)'],
   team: ['hsl(220 14% 93%)', 'hsl(220 12% 40%)'],
 }
 const roleOf = item => {
   const key = String(item.key ?? '')
-  if (key === 'r:product' || key === 'r:architect' || key === 'r:dev' || key === 'r:qa') return key.slice(2)
+  // 角色位候选是 `r:<role id>`：id 来自 config.roles（默认四岗 + 运营，可自定义），
+  // 不能再按四个字面量白名单认——否则运营/自定义岗位的候选头像会退成「团」的灰色。
+  if (key.startsWith('r:')) return key.slice(2)
   if (item.group === '专家团') return 'team'
   const icon = String(item.icon ?? '')
   if (icon === 'expertProduct') return 'product'
@@ -40,6 +43,8 @@ const roleOf = item => {
   if (icon === 'expertQa') return 'qa'
   return 'team'
 }
+/** 色彩：认识的角色有自己的配色，不认识的自定义岗位用一组中性色（不崩、不撞团）。 */
+const toneOf = role => TONE[role] ?? ['hsl(220 14% 94%)', 'hsl(220 12% 42%)']
 const HINT = 'block truncate text-caption-2-regular text-text-tertiary'
 const EMPTY = 'px-3 py-4 text-caption-1-regular text-text-tertiary'
 
@@ -103,7 +108,10 @@ export function createMentionPicker({ h, React, TextField, SearchField }) {
               },
               h('span', {
                 className: AVATAR,
-                style: { background: TONE[roleOf(item)][0], color: TONE[roleOf(item)][1] },
+                style: (() => {
+                  const tone = toneOf(roleOf(item))
+                  return { background: tone[0], color: tone[1] }
+                })(),
               }, uiIcon(h, item.icon) ?? (item.name ?? '?').slice(0, 1)),
               h('span', { className: 'min-w-0 flex-1 truncate text-body-2-regular text-text-primary' }, item.name)),
             ]

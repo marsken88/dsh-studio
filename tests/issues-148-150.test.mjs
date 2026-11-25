@@ -11,8 +11,11 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
 
-import { mergeConfig, normalizePatch, sanitizeColumns, sanitizeExperts } from '../src/host/domain.js'
+import { mergeConfig, normalizePatch, defaultColumns, sanitizeColumns, sanitizeExperts } from '../src/host/domain.js'
 import { ROLE_IDS, ROLE_LABELS, rolesInColumns, sanitizeRoles } from '../src/host/roles.js'
+import { buildRoster } from '../web/src/studio/roster.js'
+import { configureToolHost, registerTools } from '../src/host/tools.js'
+import { toolAccessTable } from '../src/host/tool-access.js'
 import { describeOwner, dispatchPreview, previewWarning } from '../src/host/column-preview.js'
 import { Dispatcher, buildChatPrompt, resolveDispatchTarget, resolveOwner } from '../src/host/dispatcher.js'
 import { parseStudioSession } from '../src/host/agent-feed.js'
@@ -87,6 +90,56 @@ test('#150 index.js：applyConfig 支持 roles 补丁，且删还在用的角色
   const source = readFileSync(new URL('../index.js', import.meta.url), 'utf8')
   assert.match(source, /if \(patch\.roles !== undefined\)/)
   assert.match(source, /还在用（专家或列负责人）/, '删在用角色要拦下来')
+})
+
+test('#150 默认列负责人按角色位算：删掉的角色位退回「没人负责」，不指向解析不出的 id', () => {
+  const base = defaultColumns()
+  assert.deepEqual(base.design, { kind: 'role', id: 'architect' }, '默认挂角色位（按卡的业务领域挑人）')
+  assert.deepEqual(base.test, { kind: 'role', id: 'qa' })
+  assert.deepEqual(base.clarify, { kind: 'none', id: '' }, '澄清列仍然不默认负责人')
+  const narrowed = defaultColumns(['product', 'dev'])
+  assert.deepEqual(narrowed.design, { kind: 'none', id: '' }, '白名单里没有 architect 就退回没人负责')
+  // 配置里剩下的无效角色位也要退回，而不是留着解析不出人
+  const merged = mergeConfig({ roles: ['product', 'dev'], columns: { design: { kind: 'role', id: 'architect' } } })
+  assert.deepEqual(merged.columns.design, { kind: 'none', id: '' })
+})
+
+test('#150 面板「加候选」的名册按 config.roles 出角色位（运营/自定义岗位选得到）', () => {
+  const config = { roles: ['product', 'ops', 'finance'], experts: [], teams: [] }
+  const keys = buildRoster(config).filter(item => item.group === '角色位').map(item => item.key)
+  assert.deepEqual(keys, ['r:product', 'r:ops', 'r:finance'])
+  // 没配 roles 时退回默认（含运营）
+  const fallback = buildRoster({ experts: [], teams: [] }).filter(item => item.group === '角色位').map(item => item.key)
+  assert.ok(fallback.includes('r:ops'))
+})
+
+test('#150 studio_config_get 的 roles 读当前配置；studio_requirement_assist 已注册且只读', async () => {
+  await withStore(async store => {
+    await store.mutate(state => { state.config.roles = ['product', 'ops', 'finance'] })
+    const registered = []
+    const ctx = { tools: { register: tool => { registered.push(tool); return () => {} } }, effect: () => () => {} }
+    configureToolHost({
+      toolOperator: () => '自检',
+      toolLevel: () => 'read',
+      checkToolAccess: () => ({ level: 'read', denial: null }),
+      recordAudit: async () => {},
+      publicConfig: config => config,
+      getActiveDispatcher: () => undefined,
+      getActiveSkills: () => undefined,
+      getLlm: () => undefined,
+      getDefaultModel: () => undefined,
+    })
+    registerTools(ctx, store)
+    const configGet = registered.find(tool => tool.name === 'studio_config_get')
+    const out = await configGet.execute({}, {})
+    assert.deepEqual(out.roles, ['product', 'ops', 'finance'], '工具报的白名单要是当前配置，不是写死的默认值')
+    assert.deepEqual(out.config.roles, ['product', 'ops', 'finance'])
+
+    const assist = registered.find(tool => tool.name === 'studio_requirement_assist')
+    assert.ok(assist !== undefined, '需求对话澄清要有工具入口（issue #148 第 5 条：agent 与人的能力要对等）')
+    assert.equal(toolAccessTable().studio_requirement_assist, 'read', '只读：不写库，和面板的 /requirement/assist 一致')
+    await assert.rejects(() => assist.execute({ message: '做个结算对账' }, {}), /宿主没有可用的 llm 服务/)
+  })
 })
 
 // ------------------------------------------------------------------ #149 列负责人
@@ -202,7 +255,7 @@ test('#149 /columns/save 传不认识的 kind:role / 专家 / 团时直接报错
     await assert.rejects(() => callTask(store, '/columns/save', { status: 'design', kind: 'expert', id: 'ghost' }), /专家「ghost」不存在/)
     await assert.rejects(() => callTask(store, '/columns/save', { status: 'design', kind: 'team', id: 'ghost' }), /专家团「ghost」不存在/)
     await assert.rejects(() => callTask(store, '/columns/save', { status: 'design', members: [{ kind: 'expert', id: 'ghost' }] }), /1 项的专家「ghost」不存在/)
-    assert.deepEqual(store.snapshot().config.columns.design, { kind: 'expert', id: 'architect' }, '报错时不能改坏原配置')
+    assert.deepEqual(store.snapshot().config.columns.design, { kind: 'role', id: 'architect' }, '报错时不能改坏原配置（默认列按角色位）')
   })
 })
 

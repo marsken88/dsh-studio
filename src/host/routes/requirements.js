@@ -30,7 +30,7 @@ import {
   taskExitGate,
 } from '../executor.js'
 import { randomBytes } from 'node:crypto'
-import { REQUIREMENT_ASSIST_SYSTEM, buildRequirementContext, feishuLinks, isSheetLink, requirementAssistPrompt } from '../requirement-assist.js'
+import { assistMessages, buildRequirementContext, feishuLinks, isSheetLink, requirementAssistPrompt, streamAssistReply } from '../requirement-assist.js'
 const INJECTED = ["commentTask","createTask","deleteRequirementFolder","getDefaultModel","getDispatcher","getLlm","publicState","readJsonBody","sendJson"]
 let host = {
   createTask: () => {},
@@ -229,10 +229,7 @@ export async function handleRequirementRoute({ method, route, req, res, store, u
       host.sendJson(res, 503, { ok: false, error: '宿主没有可用的 llm 服务，先用「直接填写」或问答向导' })
       return true
     }
-    const messages = (Array.isArray(body.messages) ? body.messages : [])
-      .map(item => ({ role: item?.role === 'assistant' ? 'assistant' : 'user', content: String(item?.content ?? '').slice(0, 2000) }))
-      .filter(item => item.content.trim() !== '')
-      .slice(-20)
+    const messages = assistMessages(body.messages)
     if (messages.length === 0) {
       host.sendJson(res, 400, { ok: false, error: '先说一句你大概想做什么' })
       return true
@@ -260,34 +257,13 @@ export async function handleRequirementRoute({ method, route, req, res, store, u
     const selection = host.getDefaultModel() ?? {}
     const provider = String(body.provider ?? selection.provider ?? 'deepseek-official')
     const model = String(body.model ?? selection.model ?? 'deepseek-v4.1-flash')
-    const controller = new AbortController()
-    const timer = setTimeout(() => controller.abort(), 90000)
-    let reply = ''
-    let failure = ''
-    try {
-      for await (const chunk of llm.stream({
-        provider, model,
-        system: REQUIREMENT_ASSIST_SYSTEM,
-        messages: [{ role: 'user', content: [{ type: 'text', text: prompt }] }],
-        temperature: 0.3,
-        maxTokens: mode === 'draft' ? 1800 : 1200,
-        signal: controller.signal,
-        purpose: 'requirement-assist',
-      })) {
-        if (chunk?.type === 'text-delta') reply += String(chunk.text ?? '')
-        if (chunk?.type === 'block-end' && chunk.block?.type === 'text' && reply.trim() === '') reply = String(chunk.block.text ?? '')
-        if (chunk?.type === 'finish' && chunk.reason?.kind !== 'stop') failure = chunk.reason?.failure?.message ?? chunk.reason?.kind ?? '模型调用失败'
-      }
-    } catch (cause) {
-      failure = cause instanceof Error ? cause.message : String(cause)
-    } finally {
-      clearTimeout(timer)
-    }
-    if (failure !== '' || reply.trim() === '') {
-      host.sendJson(res, 502, { ok: false, error: failure !== '' ? failure : '模型没有返回内容', provider, model })
+    // 与 studio_requirement_assist 工具共用同一份调用与拼装（issue #148 第 5 条）。
+    const out = await streamAssistReply({ llm, prompt, mode, provider, model })
+    if (out.ok !== true) {
+      host.sendJson(res, 502, { ok: false, error: out.failure, provider, model })
       return true
     }
-    host.sendJson(res, 200, { ok: true, reply: reply.trim(), provider, model, mode })
+    host.sendJson(res, 200, { ok: true, reply: out.reply, provider, model, mode })
     return true
   }
   if (method === 'POST' && route === '/requirement/review') {

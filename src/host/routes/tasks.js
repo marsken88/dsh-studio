@@ -329,7 +329,8 @@ export async function handleTaskRoute({ method, route, req, res, store, url }) {
         ? { kind: 'none', id: '' }
         : { kind: 'pool', id: '', members, strategy: body.strategy }
     } else if (body.owner === null) {
-      columns[status] = defaultColumns()[status]
+      // 重置成默认负责人：默认值也要按当前角色白名单算（删掉的角色位不能指回去）。
+      columns[status] = defaultColumns(roles)[status]
     } else {
       /* 三条写路径必须同一种语义：`kind:'role'` 就是角色位，不许静默降级成「绑死某个专家」。
          issue #149 现象一：面板/脚本按角色位配置，落库变成 kind:'expert'，域路由直接失效。 */

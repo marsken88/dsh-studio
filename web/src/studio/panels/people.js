@@ -106,6 +106,27 @@ export function ExpertsPanel({ config, onChanged }) {
     catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)) } finally { setBusy(false) }
   }
   const set = (key, value) => setDraft({ ...draft, [key]: value })
+  /* 角色位（岗位白名单，issue #150）：没有这个入口的话，「加财务/支持等岗位」就只能手打
+     POST /config —— 能力在接口里、界面里选不到，等于没做。删岗位前平台会检查
+     「还有专家或列负责人在用」，挡下来就把原因显示出来。 */
+  const [roleInput, setRoleInput] = React.useState('')
+  const saveRoles = async next => {
+    setBusy(true); setError(null)
+    try { await api('/config', { roles: next }); await onChanged() }
+    catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)) } finally { setBusy(false) }
+  }
+  const addRole = () => {
+    const id = roleInput.trim().toLowerCase()
+    if (id === '') return
+    if (!/^[a-z][a-z0-9-]{0,31}$/.test(id)) { setError('角色 id 只能是小写字母 / 数字 / 连字符，且以字母开头（如 finance、support-lead）'); return }
+    if (roles.includes(id)) { setError(`角色「${id}」已经在白名单里`); return }
+    setRoleInput('')
+    void saveRoles([...roles, id])
+  }
+  const removeRole = role => {
+    if (roles.length <= 1) { setError('至少保留一个角色位（全删了就没人能被列负责人选中）'); return }
+    void saveRoles(roles.filter(item => item !== role))
+  }
   const [batchDomain, setBatchDomain] = React.useState('')
   const [library, setLibrary] = React.useState([])
   React.useEffect(() => {
@@ -199,6 +220,30 @@ export function ExpertsPanel({ config, onChanged }) {
       onAdd: () => setDraft({ id: '', name: '', emoji: '🧩', role: '', domain: '', description: '', prompt: '', skills: [], model: '', preset: '', sandbox: '', enabled: true }),
       empty: '还没有专家，点「新增专家」建一个。',
     }),
+    h('div', { className: 'flex min-w-0 flex-col gap-3 rounded-xl border border-separator-border bg-background-primary-default p-4', 'data-section': 'roles' },
+      h('div', { className: SECTION_TITLE }, '角色位（岗位白名单）'),
+      h('div', { className: HINT }, '角色位是「按卡的业务领域挑人」的依据：专家的岗位、列负责人的角色位、卡片的 role 都按它校验。默认 产品 / 架构 / 研发 / 测试 / 运营；公司有财务、支持等岗位就在这里加——加完专家和列负责人立刻能选。删岗位前要先把用到它的专家和列改掉（平台会拦并说明还在用）。'),
+      h('div', { className: 'flex min-w-0 flex-wrap items-center gap-2', 'data-role-chips': roles.join(',') },
+        roles.map(role => h(ChipField, { key: role, variant: 'gray', 'data-role-chip': role },
+          ROLE_LABEL[role] ?? role,
+          h(Button, {
+            variant: 'ghost', size: 'xs', disabled: busy || roles.length <= 1,
+            'aria-label': `从岗位白名单里删掉 ${ROLE_LABEL[role] ?? role}`,
+            title: '从白名单里删掉',
+            onClick: () => removeRole(role),
+          }, '×'),
+        )),
+      ),
+      h('div', { className: 'flex min-w-0 flex-wrap items-center gap-2' },
+        h(TextField, {
+          style: { maxWidth: 220 }, value: roleInput, placeholder: '新岗位 id，如 finance',
+          'aria-label': '新岗位 id',
+          onChange: e => setRoleInput(e.target.value),
+          onKeyDown: e => { if (e.key === 'Enter') { e.preventDefault(); addRole() } },
+        }),
+        h(Button, { variant: 'secondary', size: 'sm', disabled: busy || roleInput.trim() === '', onClick: () => addRole() }, '加上岗位'),
+      ),
+    ),
     h('div', { className: 'flex min-w-0 flex-wrap items-center gap-2 rounded-xl border border-separator-border bg-background-primary-default p-4', 'data-section': 'batch-domain' },
       h('span', { className: DESC }, '按业务领域一次生成四位：'),
       h(TextField, {

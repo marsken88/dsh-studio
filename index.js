@@ -2538,6 +2538,9 @@ export function apply(ctx) {
     publishMergeGate,
     releaseGate, releaseNotes, skillsRoot, taskLine, toolLevel, toolOperator, upsertById, workloadReport,
     getActiveDispatcher: () => activeDispatcher, getActiveSkills: () => activeSkills,
+    /* 需求对话澄清（studio_requirement_assist）：和面板里的 /requirement/assist 共用 llm 与默认型号。 */
+    getLlm: () => ctx.get?.('llm'),
+    getDefaultModel: () => ctx.get?.('agentDefaultModel')?.currentSelection?.() ?? undefined,
   })
   const disposeTools = registerTools(ctx, store)
   ctx.effect(() => () => { for (const dispose of disposeTools.splice(0)) dispose() }, 'dsh-studio: tools')

@@ -124,18 +124,27 @@ export const FALLBACK_AGENT_MODEL = 'deepseek-v4.1-flash'
 
 /** The four shipped personas; also the seed for a fresh expert roster. */
 
-/** Column → who owns the work when a card lands there. */
-export function defaultColumns() {
+/**
+ * Column → who owns the work when a card lands there.
+ *
+ * 默认挂**角色位**而不是某位具体专家（issue #150 第 1 条）：角色位会按卡的业务领域挑人
+ * （「支付产品经理」优先接支付的卡），而且公司改白名单/换专家时不会指向一个不存在的 id。
+ * 某个角色位被从 config.roles 里删掉时，这一列退回「没人负责」（等人指定），
+ * 不静默指向一个解析不出人的 id。
+ */
+export function defaultColumns(roles = ROLE_IDS) {
+  const roleIds = Array.isArray(roles) && roles.length > 0 ? roles : ROLE_IDS
+  const byRole = role => (roleIds.includes(role) ? { kind: 'role', id: role } : { kind: 'none', id: '' })
   return {
     // 待澄清没有默认负责人：需求/缺陷的类型不同，交给谁由人来定（设置里可改）。
     clarify: { kind: 'none', id: '' },
-    design: { kind: 'expert', id: 'architect' },
-    dev_ready: { kind: 'expert', id: 'dev' },
-    dev: { kind: 'expert', id: 'dev' },
-    review: { kind: 'expert', id: 'architect' },
-    test: { kind: 'expert', id: 'qa' },
-    accept: { kind: 'expert', id: 'product' },
-    done: { kind: 'expert', id: 'product' },
+    design: byRole('architect'),
+    dev_ready: byRole('dev'),
+    dev: byRole('dev'),
+    review: byRole('architect'),
+    test: byRole('qa'),
+    accept: byRole('product'),
+    done: byRole('product'),
   }
 }
 
@@ -544,10 +553,11 @@ export function sanitizeTeams(input, experts) {
 
 /** Column owners, validated against the roster. Unknown columns are ignored. */
 export function sanitizeColumns(input, experts, teams, roles = ROLE_IDS) {
-  const base = defaultColumns()
+  const roleIds = Array.isArray(roles) && roles.length > 0 ? roles : ROLE_IDS
+  // 默认列也用当前白名单算：删掉的角色位不能让默认值指向一个解析不出人的 id。
+  const base = defaultColumns(roleIds)
   const out = { ...base }
   if (input === null || typeof input !== 'object' || Array.isArray(input)) return out
-  const roleIds = Array.isArray(roles) && roles.length > 0 ? roles : ROLE_IDS
   const expertIds = new Set(experts.map(expert => expert.id))
   const teamIds = new Set(teams.map(team => team.id))
   for (const status of STATUS_IDS) {

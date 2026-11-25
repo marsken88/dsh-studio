@@ -1,7 +1,7 @@
 import { CODING_REVIEW_VERDICT, isSelfReview, reviewDecision } from './quality.js'
 import { randomBytes } from 'node:crypto'
 import {
-  CASE_RESULTS, CODING_REVIEW_STATUS, RELEASE_STATUS_LABEL, REQ_STATUS_LABEL, ROLE_IDS, STATUSES, STATUS_IDS,
+  CASE_RESULTS, CODING_REVIEW_STATUS, FALLBACK_AGENT_MODEL, RELEASE_STATUS_LABEL, REQ_STATUS_LABEL, ROLE_IDS, STATUSES, STATUS_IDS,
   TASK_TYPES, cleanId, codingSummary, defineStudioTool, mergeCoding, sanitizeArtifact, sanitizeCaseHttp,
   sanitizeCases, sanitizeCoding, sanitizeRelease, sanitizeRequirementQuestions, text,
 } from './domain.js'
@@ -15,11 +15,12 @@ import { mineSkillFromCard } from './skill-mine.js'
 import { removeTaskComment, updateTaskComment } from './comments.js'
 import { resolveRequirement, requirementRefHint, reviewRequirement, saveTaskDesign } from './reviews.js'
 import { appendRequirementComment, removeRequirementComment, updateRequirementComment } from './requirement-comments.js'
+import { assistMessages, buildRequirementContext, requirementAssistPrompt, streamAssistReply } from './requirement-assist.js'
 import { splitRequirement } from './split.js'
 import { skillUsage, skillUsageLine } from './skill-usage.js'
 import { mergeGateFor, mergeGateLine } from './merge-gate.js'
 import { REQUIRED_TIERS, TIER_LABEL, applyTierDeclarations, gapMessage, planLine, sanitizeTier, testPlanSummary, tierOf } from './test-plan.js'
-const INJECTED = ["activeDispatcher","activeSkills","addAssertedCases","addDraftCases","applyConfig","auditSummary","buildAnalytics","buildMetrics","burndownReport","checkToolAccess","createTask","markDuplicate","mergeMergeRequest","publicConfig","publishMergeGate","recordAudit","releaseGate","releaseNotes","skillsRoot","taskLine","toolLevel","toolOperator","upsertById","workloadReport"]
+const INJECTED = ["activeDispatcher","activeSkills","addAssertedCases","addDraftCases","applyConfig","auditSummary","buildAnalytics","buildMetrics","burndownReport","checkToolAccess","createTask","getDefaultModel","getLlm","markDuplicate","mergeMergeRequest","publicConfig","publishMergeGate","recordAudit","releaseGate","releaseNotes","skillsRoot","taskLine","toolLevel","toolOperator","upsertById","workloadReport"]
 let host = {
   activeDispatcher: () => {},
   activeSkills: () => {},
@@ -50,13 +51,16 @@ let host = {
   workloadReport: () => {},
   getActiveDispatcher: () => undefined,
   getActiveSkills: () => undefined,
+  /** 需求对话澄清要的宿主能力：没注入时工具会报「宿主没有 llm」，不是 ReferenceError。 */
+  getLlm: () => undefined,
+  getDefaultModel: () => undefined,
 }
 /** Agent-facing tools. 宿主能力由 configureToolHost() 注入（避免反向 import index.js 成环）。 */
 export function configureToolHost(services) {
   host = { ...host, ...(services ?? {}) }
 }
 
-/** 注册 40 个 studio_* 工具。 */
+/** 注册 53 个 studio_* 工具。 */
 export function registerTools(ctx, store) {
   const disposers = []
   /* 写操作的返回值要能对账：读回**库里那份**，而不是回显入参。
@@ -156,7 +160,9 @@ export function registerTools(ctx, store) {
     parameters: {},
     async execute() {
       await store.ready
-      return { ok: true, config: host.publicConfig(store.snapshot().config), statuses: STATUSES, roles: ROLE_IDS }
+      // roles 用当前配置的白名单（默认四岗 + 运营，可自定义岗位），不是写死的默认值。
+      const config = store.snapshot().config
+      return { ok: true, config: host.publicConfig(config), statuses: STATUSES, roles: config.roles ?? ROLE_IDS }
     },
   }))
 
@@ -171,6 +177,8 @@ export function registerTools(ctx, store) {
       feishuAppId: { type: 'string', description: 'Feishu self-built app App ID.' },
       feishuAppSecret: { type: 'string', description: 'Feishu app secret (written once, never returned).' },
       feishuChatId: { type: 'string', description: 'Default Feishu chat id for notifications.' },
+      /** 角色位白名单（issue #150）：数组整体替换，默认 product / architect / dev / qa / ops。 */
+      roles: { type: 'array', items: { type: 'string' }, description: '角色位白名单（整体替换）：默认 product / architect / dev / qa / ops，可加 finance / support 等自定义岗位。删还在用的角色会被拒' },
     },
     async execute(args) {
       const patch = { gitlab: {}, feishu: {} }
@@ -181,6 +189,8 @@ export function registerTools(ctx, store) {
       if (args.feishuAppId !== undefined) patch.feishu.appId = args.feishuAppId
       if (args.feishuAppSecret !== undefined) patch.feishu.appSecret = args.feishuAppSecret
       if (args.feishuChatId !== undefined) patch.feishu.chatId = args.feishuChatId
+      // 角色位白名单：整体替换（validate 在 applyConfig 里，删还在用的角色会抛错）
+      if (args.roles !== undefined) patch.roles = Array.isArray(args.roles) ? args.roles : []
       await host.applyConfig(store, patch)
       return { ok: true, config: host.publicConfig(store.snapshot().config) }
     },
@@ -462,6 +472,42 @@ export function registerTools(ctx, store) {
   }))
 
   register(defineStudioTool({
+    name: 'studio_requirement_assist',
+    description: '需求对话澄清（和模型聊，不是和专家开会话）：把一句模糊想法澄清成可开工、可验收的需求，或按项目沉淀整理成 PRD 草稿。只读：不写库。'
+      + '首轮把想法写清；后续轮把用户补充的事实/回答放进 history（或直接写进 message），模型会先复述「已确认」再只问没答的。'
+      + '和 studio_session_start 的区别：这个是「排版/追问用的产品经理助手」，一次只回一段文字；那个是「和某位专家/专家团真的开会话」。',
+    parameters: {
+      message: { type: 'string', required: true, description: '这一轮用户说的话（首轮就写清想做什么；后续轮补事实或回答待确认项）' },
+      history: {
+        type: 'array',
+        description: '之前的对话（可选）：[{role:"user"|"assistant", content:"..."}]，只保留最近 20 条',
+        items: { type: 'object', properties: { role: { type: 'string' }, content: { type: 'string' } } },
+      },
+      mode: { type: 'string', description: 'chat（澄清对话，默认）| draft（整理成 PRD 草稿）' },
+      project: { type: 'string', description: '业务项目 id：喂「项目沉淀」（已有需求 / PRD / 卡）用，可选' },
+      title: { type: 'string', description: '需求暂定标题（draft 模式用，可选）' },
+    },
+    async execute(args) {
+      const llm = host.getLlm()
+      if (llm === undefined || llm === null || typeof llm.stream !== 'function') {
+        throw new Error('宿主没有可用的 llm 服务：这条工具要在有模型通道的宿主里用（面板里的「需求对话澄清」同一个依赖）')
+      }
+      const messages = assistMessages(args.history, args.message)
+      if (messages.length === 0) throw new Error('先说一句你大概想做什么（message）')
+      const mode = String(args.mode ?? 'chat') === 'draft' ? 'draft' : 'chat'
+      const state = store.snapshot()
+      const context = buildRequirementContext(state, String(args.project ?? ''))
+      const prompt = requirementAssistPrompt({ mode, messages, context, title: String(args.title ?? '') })
+      const selection = host.getDefaultModel() ?? {}
+      const provider = String(selection.provider ?? 'deepseek-official')
+      const model = String(selection.model ?? FALLBACK_AGENT_MODEL)
+      const out = await streamAssistReply({ llm, prompt, mode, provider, model })
+      if (out.ok !== true) throw new Error(out.failure)
+      return out.reply
+    },
+  }))
+
+  register(defineStudioTool({
     name: 'studio_requirement_signoff',
     description: 'Sign off (or clear) a requirement after delivery review; the note is the acceptance conclusion.',
     parameters: {
@@ -536,7 +582,7 @@ export function registerTools(ctx, store) {
     description: 'List work-board tasks, newest first. Filter by status or role. Read this before claiming work; the board is the shared truth between product, architect, developer and QA agents.',
     parameters: {
       status: { type: 'string', description: `Filter by status: ${STATUS_IDS.join(' / ')}` },
-      role: { type: 'string', description: `Filter by role: ${ROLE_IDS.join(' / ')}` },
+      role: { type: 'string', description: `Filter by role id（默认白名单：${ROLE_IDS.join(' / ')}；自定义岗位看 config.roles）` },
       type: { type: 'string', description: `Filter by type: ${TASK_TYPES.join(' / ')}` },
       project: { type: 'string', description: 'Filter by 业务项目 id.' },
       requirementId: { type: 'string', description: 'Filter by 需求 id（只看一条需求下的卡）。' },
@@ -577,7 +623,7 @@ export function registerTools(ctx, store) {
       requirement: { type: 'string', description: 'What the task involves: background, acceptance criteria, links.' },
       type: { type: 'string', description: `requirement | bug | design | dev | test | ops (default requirement). Use bug for a defect: it starts in 待开发 and the owning agent is told to reproduce, find the root cause and fix it.` },
       severity: { type: 'string', description: 'For bug tasks: p0 | p1 | p2 | p3 (default p2, p0 auto-sets urgency to urgent).' },
-      role: { type: 'string', description: 'Owning role: product | architect | dev | qa (default product)' },
+      role: { type: 'string', description: 'Owning role id（默认 product / architect / dev / qa / ops；自定义岗位先加进 config.roles）' },
       status: { type: 'string', description: `Initial status (default clarify): ${STATUS_IDS.join(' / ')}` },
       priority: { type: 'string', description: 'urgent | normal | relaxed (default normal)' },
       gitlabIssue: { type: 'string', description: 'Related GitLab issue URL or iid.' },

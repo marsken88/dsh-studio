@@ -91,7 +91,7 @@ export function isAiSignoff(sign, config) {
 /* 角色名：派单时用角色命名，人手动改状态时也可能只留一个角色。两种都出现过，
    所以这些名字**既不能算人也不能算 AI**，只能记成「来源不明」——
    宁可少算一次介入，也不要把 AI 的活算成人的（那会把自动化率做成假的 0%）。 */
-const ROLE_LABELS = new Set(['产品', '产品经理', '架构师', '开发', '开发工程师', '测试', '测试工程师', '设计', '运维', '超管'])
+const ROLE_LABELS = new Set(['产品', '产品经理', '架构师', '开发', '开发工程师', '测试', '测试工程师', '设计', '运维', '运营', '运营工程师', '超管'])
 
 export function actorOf(name, kind, config) {
   const text = String(name ?? '').trim()

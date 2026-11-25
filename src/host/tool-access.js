@@ -55,6 +55,8 @@ export const TOOL_ACCESS = {
   studio_test_suite: 'write',
   /** 发起无卡会话：会真的起一个 agent 会话（花 token、能读工作目录），按写操作记账。 */
   studio_session_start: 'write',
+  /** 需求对话澄清：只读（不写库），与面板里的 /requirement/assist 一致，只读成员也能用。 */
+  studio_requirement_assist: 'read',
   studio_config_set: 'admin',
   studio_release_publish: 'admin',
   studio_release_save: 'admin',
