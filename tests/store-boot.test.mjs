@@ -282,7 +282,10 @@ test('store: schema 7 drops the retired role templates and keeps their models on
     await store.ready
     const config = store.snapshot().config
     assert.equal(config.schema, 7, 'schema bumps to 7')
-    assert.equal(config.roles, undefined, 'retired role templates are not loaded into the state')
+    /* schema 7 起 `config.roles` 换了个意思：从「角色模板对象」变成「角色位白名单数组」。
+       旧库里的模板对象不许漏进 state（模板的模型已经抄到专家上了，见下面几条），
+       而新的白名单要按默认值补上 —— 旧库读进来不会缺这个键。 */
+    assert.deepEqual(config.roles, ['product', 'architect', 'dev', 'qa', 'ops'], '旧的角色模板对象不会漏进角色白名单，旧库补默认白名单')
     const byId = id => config.experts.find(expert => expert.id === id)
     assert.equal(byId('product').model, 'deepseek-v4-pro', 'an expert with no model inherits the role template model')
     assert.equal(byId('expert-b2').model, 'deepseek-v4.1-flash', '匹配按角色位（role），不是按专家 id')

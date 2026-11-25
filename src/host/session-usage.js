@@ -14,9 +14,16 @@ export function sessionsRoot() {
   return join(homedir(), '.dsh', 'sessions')
 }
 
-/** studio-<taskId>-<expertId>：taskId 形如 t-01a3c8d3，剩下都算专家。 */
+/**
+ * studio-<taskId>-<expertId>：taskId 形如 t-01a3c8d3，剩下都算专家。
+ * 无卡会话 `studio-chat-<expert>-<hex>` 也解析：taskId 为空 + adHoc 标记，
+ * 用量算进总量与按专家，但不冒充某张卡的消耗（issue #148）。
+ */
 export function parseSessionName(name) {
-  const match = /^studio-(t-[a-z0-9]+)-(.+)$/.exec(String(name ?? ''))
+  const text = String(name ?? '')
+  const chat = /^studio-chat-(.+?)-[0-9a-f]{6,}$/.exec(text)
+  if (chat !== null) return { taskId: '', expert: chat[1], adHoc: true }
+  const match = /^studio-(t-[a-z0-9]+)-(.+)$/.exec(text)
   if (match === null) return null
   return { taskId: match[1], expert: match[2] }
 }
@@ -78,7 +85,7 @@ export async function collectSessionUsage(root = sessionsRoot()) {
       if (parsed === null) continue
       const read = await readFileUsage(join(dir, entry, 'session.v4.jsonl.zstd'))
       if (read === null || read.usage.length === 0) continue
-      out.push({ taskId: parsed.taskId, expert: parsed.expert, at: read.at, usage: read.usage, counts: read.counts, volume: read.volume })
+      out.push({ taskId: parsed.taskId, expert: parsed.expert, adHoc: parsed.adHoc === true, at: read.at, usage: read.usage, counts: read.counts, volume: read.volume })
     }
   }
   return out
@@ -90,6 +97,9 @@ export function aggregateUsage(sessions, tasks, prices, costOf, priceOf) {
   const byCard = new Map()
   const byExpert = new Map()
   const totals = { calls: 0, input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 }
+  // 会话（无卡）的消耗也要进总量：它不计入任何一张卡，但不能凭空消失。
+  let costSum = 0
+  let unknownSum = 0
   for (const session of sessions) {
     const summary = summarizeUsage(session.usage)
     const money = costOf(prices, session.usage)
@@ -101,11 +111,16 @@ export function aggregateUsage(sessions, tasks, prices, costOf, priceOf) {
       unpriced.set(model, (unpriced.get(model) ?? 0) + 1)
     }
     for (const key of ['calls', 'input', 'output', 'cacheRead', 'cacheWrite', 'total']) totals[key] += summary[key]
-    const card = byCard.get(session.taskId) ?? { taskId: session.taskId, ...{ calls: 0, input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 }, cost: 0, unknownCalls: 0 }
-    for (const key of ['calls', 'input', 'output', 'cacheRead', 'cacheWrite', 'total']) card[key] += summary[key]
-    if (money.cost !== null) card.cost += money.cost
-    card.unknownCalls += money.unknownCalls
-    byCard.set(session.taskId, card)
+    if (money.cost !== null) costSum += money.cost
+    unknownSum += money.unknownCalls
+    // 无卡会话（studio-chat-*）没有所属卡：只进总量与按专家，不冒充某张卡的消耗。
+    if (session.adHoc !== true) {
+      const card = byCard.get(session.taskId) ?? { taskId: session.taskId, ...{ calls: 0, input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 }, cost: 0, unknownCalls: 0 }
+      for (const key of ['calls', 'input', 'output', 'cacheRead', 'cacheWrite', 'total']) card[key] += summary[key]
+      if (money.cost !== null) card.cost += money.cost
+      card.unknownCalls += money.unknownCalls
+      byCard.set(session.taskId, card)
+    }
     const expert = byExpert.get(session.expert) ?? { expert: session.expert, calls: 0, total: 0, cost: 0, unknownCalls: 0 }
     expert.calls += summary.calls
     expert.total += summary.total
@@ -123,10 +138,8 @@ export function aggregateUsage(sessions, tasks, prices, costOf, priceOf) {
     totals: {
       ...totals,
       // 有算不出价的调用且一分钱都没算出来时，给 null（未知），不要报成 0
-      cost: cards.reduce((sum, card) => sum + card.unknownCalls, 0) > 0 && cards.reduce((sum, card) => sum + card.cost, 0) === 0
-        ? null
-        : round(cards.reduce((sum, card) => sum + card.cost, 0)),
-      unknownCalls: cards.reduce((sum, card) => sum + card.unknownCalls, 0),
+      cost: unknownSum > 0 && costSum === 0 ? null : round(costSum),
+      unknownCalls: unknownSum,
     },
     cards: cards.slice(0, 50),
     unpricedModels: [...unpriced.entries()].map(([model, calls]) => ({ model, calls })).sort((a, b) => b.calls - a.calls).slice(0, 10),

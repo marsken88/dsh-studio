@@ -6,7 +6,7 @@ import { gapMessage, needsTierPlan, sanitizeTier, testPlanSummary } from './test
 import { isAiSignoff } from './intervention.js'
 import { reviewGate } from './quality.js'
 import { overrideSummary } from './override.js'
-import { CASE_HTTP_METHODS, CODE_PREFIX, ROLE_IDS, STATUS_IDS, STATUSES, nextRequirementCode, nextTaskCode, normalizePatch, sanitizeBaseline, sanitizeCase, sanitizeReqDoc, sanitizeRequirement, sanitizeTestRun, sanitizeUrl, text,
+import { CASE_HTTP_METHODS, CODE_PREFIX, ROLE_IDS, STATUS_IDS, STATUSES, nextRequirementCode, nextTaskCode, normalizePatch, roleIdsOf, sanitizeBaseline, sanitizeCase, sanitizeReqDoc, sanitizeRequirement, sanitizeTestRun, sanitizeUrl, text,
   canonicalAuthor,
   sanitizeCoding,
 } from './domain.js'
@@ -1420,7 +1420,8 @@ export class VersionConflictError extends Error {
 
 /** Update one task. */
 export async function updateTask(store, id, patch) {
-  const normalized = normalizePatch(patch)
+  // 角色位白名单跟配置走（自定义岗位）：传了 config 之外的角色会直接报错，不静默清空。
+  const normalized = normalizePatch(patch, roleIdsOf(store.snapshot().config))
   // 乐观锁：调用方给 ifVersion 就按「卡片的编辑版本」比对，不给就保持老行为（兼容面板与 agent）。
   const ifVersion = Number.isInteger(Number(patch?.ifVersion)) ? Number(patch.ifVersion) : null
   const blockFlag = normalized.blocked

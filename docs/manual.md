@@ -143,12 +143,13 @@ studio_task_check          { id, itemId, note }         // 清单逐项勾，附
 - **没登记也不会空着**：卡进「待评审」时，研发若没调 `studio_task_coding`，平台会从 worktree 的 `git log` / `git diff --numstat` 补一条执行记录（`agent = git 自动采集（研发没登记执行记录）`）并留一条评论；研发自报的字段一个都不覆盖，只补空着的部分。
 - **评审意见进讨论区**：`studio_task_coding action=review`（agent 走工具）与面板上的「评审通过 / 要求修改」两条路都会**自动补一条评论**（`代码评审 · 通过（评审人）` + 意见正文），所以讨论区里一定看得到架构的意见；不再只躺在 `coding.review.note` 里。意见里 @ 开发工程师 仍会照常派单。每条评论右上角有「编辑 / 删除」：编辑就地改成 textarea 保存，删除先确认；改删都留历史。
 
-### 5.4 工具清单（47 个，按用途分组）
+### 5.4 工具清单（54 个，按用途分组）
 
 | 组 | 工具 |
 | --- | --- |
-| 看板/卡 | `studio_task_list` `studio_task_get` `studio_task_create` `studio_task_update` `studio_task_block` `studio_task_unblock` `studio_task_comment` `studio_task_check` |
-| 需求 | `studio_requirement_list` `studio_requirement_get` `studio_requirement_save` `studio_requirement_review` `studio_requirement_split` `studio_requirement_signoff` `studio_requirement_folder` `studio_requirement_questions` `studio_requirement_comment` `studio_requirement_doc` `studio_requirement_requester` |
+| 看板/卡 | `studio_task_list` `studio_task_get` `studio_task_create` `studio_task_update` `studio_task_block` `studio_task_unblock` `studio_task_comment` `studio_task_check` `studio_task_mention`（按名字/id 把卡当场派给专家/团/角色位，带开场白——不用写评论碰运气） |
+| 会话（无卡） | `studio_session_start`（选专家或专家团，说一句想聊什么就开聊：不建卡、不派单、不写看板评论，transcript 是普通会话） |
+| 需求 | `studio_requirement_list` `studio_requirement_get` `studio_requirement_save` `studio_requirement_review` `studio_requirement_split` `studio_requirement_signoff` `studio_requirement_folder` `studio_requirement_questions` `studio_requirement_comment` `studio_requirement_doc` `studio_requirement_requester` `studio_requirement_assist`（需求对话澄清，和模型聊；只读，与面板的「需求对话澄清」同一份实现） |
 | 设计/交付物 | `studio_task_design` `studio_task_artifact` |
 | 执行/评审 | `studio_task_coding` `studio_task_quality` `studio_merge_gate` |
 | 测试 | `studio_task_case` `studio_task_add_cases` `studio_task_test_plan` `studio_task_generate_cases` `studio_test_run` `studio_test_suite` |
@@ -179,6 +180,20 @@ studio_task_check          { id, itemId, note }         // 清单逐项勾，附
 
 **不要绕过工具层走 HTTP**：工具层的入参会做白名单校验、回读落库结果、写审计。只有工具确实没覆盖的（例如 Drive 的批量操作）才走 HTTP，并在评论里说明原因。
 
+### 5.6 先聊清楚再建卡（无卡会话）
+
+「下个版本先做哪几张卡」「这个需求到底要不要做」——这类问题不该先建一张卡再等 5 秒 tick 派单。现在可以直接开会话：
+
+- **面板**：设置 → 专家 / 专家团，每一行有「发起会话」；说一句想聊什么就开聊（团长接话）。
+- **HTTP**：`POST /studio-api/agents/chat { expert 或 team, member?, topic, instruction?, workdir? }`（`expert` 既认专家 id 也认专家团 id；专家团默认团长接话，`member` 可以指定团里的某一位）。
+- **工具**：`studio_session_start { expert, member?, topic, instruction?, workdir? }`，agent 自己也能发起。
+
+会话会出现在 `GET /studio-api/agents` 的 `chats` 里（不占卡的派单槽位），要停就 `POST /agents/stop { sessionId }`（只 abort，transcript 留在侧栏）。会话 id 是 `studio-chat-<expert>-<hex>`：跑的是**对话模式**的提示词（不要开工、不改代码、不建卡、不往看板写评论），transcript 就是普通 DSH 会话，在侧栏按会话名接着聊。它不会污染看板，也不会冒充某张卡的消耗（成本页只把它算进总量与按专家）。聊到能落地时，请它给一段可直接复制的需求/卡描述（标题 + 背景 + 可判定的验收要点），再由人决定建不建。
+
+**和「派单」的区别**：派单是 `POST /agents/run { id, expert?, instruction? }`，必须有卡、会把卡上的工位提示词一起注入、跑完要求登记评论并推进列。`expert` 传错时会分开报：卡不存在 / 目标不存在（或停用、团里没人）/ 这一列没人负责——不再一律回「这一列没人负责」。
+
+**和「需求对话澄清」的区别**：需求澄清是和**模型**聊（面板的需求页，或 `POST /requirement/assist`、工具 `studio_requirement_assist`）——它只回一段文字、不写库，用来把一句模糊想法挖成可验收的需求或 PRD 草稿；无卡会话则是和**某位专家/某个团**聊，会真的建一个 DSH 会话、能读工作目录、能记住这几轮。前者便宜、一次性；后者贵、有上下文人设，适合「和这个人/这个团讨论」。两者都可以用来「想清楚再建卡」，按要不要人设与多轮记忆来选。
+
 ---
 
 ## §6 设置项地图（17 个分区）
@@ -186,10 +201,10 @@ studio_task_check          { id, itemId, note }         // 清单逐项勾，附
 | 分区 | 管什么 | 常改的地方 |
 | --- | --- | --- |
 | 项目与迭代 | 业务项目、服务、迭代 | 新建项目：`KEY`、名称、本地 git 路径、基线分支 |
-| 专家 | 角色 AI 名册：名字、模型、提示词、技能 | 新需求先来这里确认每列有专家；**模型与提示词只在这里配**（角色模板已删，专家自己的 model 是唯一来源） |
+| 专家 | 角色 AI 名册：名字、模型、提示词、技能、**角色位**；顶部「角色位（岗位白名单）」可加/删岗位 | 新需求先来这里确认每列有专家；**模型与提示词只在这里配**（角色模板已删，专家自己的 model 是唯一来源）。角色位是白名单 `config.roles`（默认 产品 / 架构 / 研发 / 测试 / **运营**）；在本面板顶部的「角色位（岗位白名单）」里点 × 删、填 id 加（等价于 `POST /config {roles:[…]}`），加完专家与列负责人立刻能选；删还在用的角色会被拒并说明谁在用。写不认识的 role 现在直接 400 并列出可选值，不再静默清空 |
 | 专家团 | 多个专家组的团队（团长拆活） | 大需求用团长编排 |
 | 技能库 | 可复用的做法（命令/坑/清单） | 「用上几张卡 / 返工率」是**相关性**不是因果，0 不代表没用 |
-| **列的负责人** | 每列挂哪个角色/专家；**设计闸门 / 评审闸门 / 用例闸门（含三层测试）/ 拆卡验收条件闸门** | 闸门默认开；关了看板顶部会挂提示 |
+| **列的负责人** | 每列挂哪个角色/专家；**设计闸门 / 评审闸门 / 用例闸门（含三层测试）/ 拆卡验收条件闸门** | 闸门默认开；关了看板顶部会挂提示。**改负责人是一台起动机**：列 owner 一旦能解析，下一轮 tick（5 秒后）就把存量卡派出去——面板会先调 `dryRun` 算出「会让哪几张卡被派给谁」，有就让你确认；`/columns/save` 的返回值也带 `affected`（`cards[].willDispatch`）与 `warning`。落库返回的是**实际落库的那一列**（`column`），`kind:'role'` 就是角色位，不会被悄悄改成「绑死某个专家」；不认识的角色/专家/团直接 400。 |
 | 代码仓库 | GitLab 地址、令牌、项目路径 | 改完点「测试连接」 |
 | 飞书机器人 | 通知 webhook、多维表格、**云盘根文件夹** | 云盘根目录必须配，否则交付物无处可去 |
 | 文档出口 | 交付物同步到哪：只飞书 / 只 WeKnora / 两个都写；WeKnora 地址、API Key、租户、知识库 | `both` 时飞书为主，WeKnora 失败只记 error、不阻塞登记；只写 WeKnora 时它才是主出口，失败会抛 |
@@ -262,6 +277,12 @@ studio_task_check          { id, itemId, note }         // 清单逐项勾，附
 | 浏览器打开面板正常，但脚本/探针全 401 | 脚本有没有换 cookie | 浏览器靠 `?token=` 那条 URL 自动拿到 cookie，脚本没有；按上一条用启动 token 换。换不到会明确报「换不到会话 cookie（HTTP 401）」 |
 | 改了代码重启没生效 | `npm run sync:profile` 的版本输出 | 确认 profile 版本 = 仓库版本；前端改动还要 `cd web && pnpm build` |
 | 派单没反应/没留言 | 会话日志 `turn/end`、集成健康 | 常见是无可用模型通道（503）；先看「集成健康」 |
+| 看板一直显示「处理中」，但「集成健康 → 派单运行状态」的 running 是空的 | 这张卡的 `dispatch`（`/state` 里看 `state/status/at`） | `state=running` 但会话早就没了（进程重启/会话崩）时，tick 每轮会按「真会话表优先、10 分钟超时兜底」判一次：挂死的印记自动收回（清 `status`、历史里写「派单印记已收回…」），下一轮重新派。历史里没有这句，说明还没超时或会话其实还活着 |
+| 评论里 @ 了人却没派单 | 是不是全角 ＠、名字是不是全名、是不是写在代码块里 | `@` 与 `＠` 都认；必须写**全名或专家 id**（`@架构` 不算）；代码块与行内代码里的 @ 一律不算（那是引用）。现在 `@dev` 也不会误命中 `@developer`。要稳定派活可以直接用工具 `studio_task_mention` 或卡详情的「派给谁」下拉 |
+| 想让另一个专家接手，但不想写评论 | 卡详情「AI 处理 → 派给谁」 | 下拉现在有**专家与专家团**（团 = 团长接活），下面还有「开场白」；脚本/agent 用 `POST /mention {taskId, kind, id, instruction}` 或工具 `studio_task_mention`。`kind` 可以是 `expert` / `team` / `role`（角色位），不认识的目标会 400 |
+| 改了列负责人，5 秒内一批老卡自己开跑 | 设置 → 列的负责人；`/columns/save` 的返回值 | **这是设计如此**：列 owner 一旦能解析，下一轮 tick 就把存量卡派出去。保存前面板会先 `dryRun` 算出「会让哪几张卡被派给谁」并要求确认，返回值里也带 `affected.cards[].willDispatch` 与 `warning`。只想预览不落库传 `dryRun:true`；不想让某张卡被带走就先把它标阻塞或换列 |
+| 专家的 role 存进去是空的，永远选不到它 | `config.roles` 里有没有这个岗位（`GET /studio-api/state` 的 `roles`） | 以前白名单写死四岗，`role:'ops'` 之类的自定义岗位会被静默清空。现在：默认白名单是 产品/架构/研发/测试/**运营**，在「设置 → 专家 → 角色位（岗位白名单）」里就能加财务等岗位（等价 `POST /config {roles:[…]}`）；`/experts/save` 传不认识的 role 直接 400 并列出可选值。老数据里被清空过的专家，到「设置 → 专家」重选角色位保存即可。删角色前会检查「还有专家或列负责人在用它」 |
+| `/agents/run` 回「这一列还没人负责」，可列明明配了人 | 传的 `expert` 是专家 id 还是专家团 id；卡 id 对不对 | 以前三种不同的错（卡不存在 / 专家 id 写错 / 传的是团）共用这一句文案。现在分开报：卡不存在、目标不存在（或已停用、团里没有成员）、这一列没人负责；`expert` 传专家团 id 也认（派给团长）。要「不建卡先聊」用 `/agents/chat` 或 `studio_session_start` |
 | 卡上出现「『X』需要提权」的评论；或者智能体总在要目录/文件权限 | 设置 → 自动派单 → 提权审批；`GET /studio-api/agents/policy` 的 `configured.escalation` | 派单是无人值守的，DSH 的 approval 由平台代答：默认「自动批准」= 直接放行（等于始终允许完全访问，每次写成卡上评论）；「自动拒绝」= 只做沙箱允许的事。沙箱选「只读」时一律拒绝。真实生效值还受专家自己的沙箱档位影响（只读 → 拒绝） |
 | 「集成健康 → 派单运行状态」显示「并发 2 / 1（配置 2，已降级）」 | 设置 → 自动派单 → 代码隔离 | 并发 > 1 必须配 worktree 隔离：隔离是 `none` 时多张卡会在**同一目录**并行改代码、互相覆盖，所以系统把有效并发降到 1。要并行就把隔离切到 worktree |
 | 派单会话在 DSH 侧栏里落在「未分组」，看不到它在改哪个仓库 | 卡的所属项目有没有配「本机代码目录」；`/studio-api/agents` 的 `log` 里那行「会话目录（…）」 | 两件事决定它归在哪儿：**跑在哪个目录**（cwd）+ **有没有挂在那个工作区的会话名单里**。项目/服务配了 `repoPath` 时派单直接跑在那个仓库里（worktree 也在仓库内 `.agents/worktrees`），没配才用兜底目录（工作区名「Studio 工作区」）；有了目录之后平台还会 `attachSession` 把会话挂进那个工作区。宿主只在**首次初始化**时按 cwd 自动归组一次，所以老会话要重启一次 dsh 才会被「补挂」回工作区。`log` 里出现「会话没能挂进工作区」说明 attach 三次都没成功（会话头还没落盘），此时它确实仍显示在「未分组」 |

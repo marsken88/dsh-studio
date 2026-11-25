@@ -13,7 +13,7 @@
  */
 
 import { uiIcon, expertIconName } from '../icons.js'
-import { ROLE_LABEL } from '../labels.js'
+import { ROLE_LABEL, knownRoles } from '../labels.js'
 import { client } from '../context.js'
 import { Button } from '../../boardui/index'
 import { EmptyState } from '../../boardui/empty-state'
@@ -70,11 +70,28 @@ function labelTip(h, tipOf, text, hint) {
 }
 
 export function ExpertsPanel({ config, onChanged }) {
-  const { h, React, api, confirmDialog, tipOf, TextField, TextAreaField, ChipField, CheckField, SwitchToggle, SelectField, SideDrawer } = client()
+  const { h, React, api, toast, promptDialog, confirmDialog, tipOf, TextField, TextAreaField, ChipField, CheckField, SwitchToggle, SelectField, SideDrawer } = client()
   const experts = config.experts ?? []
+  const roles = knownRoles(config)
   const [draft, setDraft] = React.useState(null)
   const [error, setError] = React.useState(null)
   const [busy, setBusy] = React.useState(false)
+
+  /* 和某位专家「发起一次会话」（issue #148）：说一句想聊什么就开聊——
+     不建卡、不派单、不往看板写评论，聊清楚再决定建不建需求/卡。 */
+  const startChat = async (expert) => {
+    const topic = await promptDialog(`和「${expert.name}」聊什么？`, {
+      title: '发起会话',
+      placeholder: '例如：下个版本结算模块先做哪几张卡？',
+      okText: '开聊',
+    })
+    if (topic === null || String(topic).trim() === '') return
+    setBusy(true); setError(null)
+    try {
+      const out = await api('/agents/chat', { expert: expert.id, topic: String(topic).trim() })
+      toast(out.hint ?? `已和「${expert.name}」发起会话`, 'success')
+    } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)) } finally { setBusy(false) }
+  }
 
   const save = async () => {
     if (draft === null) return
@@ -89,6 +106,27 @@ export function ExpertsPanel({ config, onChanged }) {
     catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)) } finally { setBusy(false) }
   }
   const set = (key, value) => setDraft({ ...draft, [key]: value })
+  /* 角色位（岗位白名单，issue #150）：没有这个入口的话，「加财务/支持等岗位」就只能手打
+     POST /config —— 能力在接口里、界面里选不到，等于没做。删岗位前平台会检查
+     「还有专家或列负责人在用」，挡下来就把原因显示出来。 */
+  const [roleInput, setRoleInput] = React.useState('')
+  const saveRoles = async next => {
+    setBusy(true); setError(null)
+    try { await api('/config', { roles: next }); await onChanged() }
+    catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)) } finally { setBusy(false) }
+  }
+  const addRole = () => {
+    const id = roleInput.trim().toLowerCase()
+    if (id === '') return
+    if (!/^[a-z][a-z0-9-]{0,31}$/.test(id)) { setError('角色 id 只能是小写字母 / 数字 / 连字符，且以字母开头（如 finance、support-lead）'); return }
+    if (roles.includes(id)) { setError(`角色「${id}」已经在白名单里`); return }
+    setRoleInput('')
+    void saveRoles([...roles, id])
+  }
+  const removeRole = role => {
+    if (roles.length <= 1) { setError('至少保留一个角色位（全删了就没人能被列负责人选中）'); return }
+    void saveRoles(roles.filter(item => item !== role))
+  }
   const [batchDomain, setBatchDomain] = React.useState('')
   const [library, setLibrary] = React.useState([])
   React.useEffect(() => {
@@ -164,6 +202,10 @@ export function ExpertsPanel({ config, onChanged }) {
       (expert.skills ?? []).length > 0 ? h('div', { className: HINT }, `技能：${expert.skills.join('、')}`) : null,
     ),
     h('div', { className: LISTROW_ACTIONS },
+      tipOf('和这位专家发起一次会话（不建卡、不派单）', h(Button, {
+        variant: 'ghost', size: 'sm', disabled: busy, 'data-chat': 'expert',
+        onClick: () => void startChat(expert),
+      }, '发起会话')),
       tipOf('编辑这位专家', h(Button, { variant: 'secondary', size: 'sm', disabled: busy, onClick: () => setDraft({ ...expert }) }, '编辑')),
       tipOf('删除这位专家', h(Button, { variant: 'danger', size: 'sm', disabled: busy, onClick: () => void remove(expert), 'data-danger': '1' }, '删除')),
     ),
@@ -178,6 +220,30 @@ export function ExpertsPanel({ config, onChanged }) {
       onAdd: () => setDraft({ id: '', name: '', emoji: '🧩', role: '', domain: '', description: '', prompt: '', skills: [], model: '', preset: '', sandbox: '', enabled: true }),
       empty: '还没有专家，点「新增专家」建一个。',
     }),
+    h('div', { className: 'flex min-w-0 flex-col gap-3 rounded-xl border border-separator-border bg-background-primary-default p-4', 'data-section': 'roles' },
+      h('div', { className: SECTION_TITLE }, '角色位（岗位白名单）'),
+      h('div', { className: HINT }, '角色位是「按卡的业务领域挑人」的依据：专家的岗位、列负责人的角色位、卡片的 role 都按它校验。默认 产品 / 架构 / 研发 / 测试 / 运营；公司有财务、支持等岗位就在这里加——加完专家和列负责人立刻能选。删岗位前要先把用到它的专家和列改掉（平台会拦并说明还在用）。'),
+      h('div', { className: 'flex min-w-0 flex-wrap items-center gap-2', 'data-role-chips': roles.join(',') },
+        roles.map(role => h(ChipField, { key: role, variant: 'gray', 'data-role-chip': role },
+          ROLE_LABEL[role] ?? role,
+          h(Button, {
+            variant: 'ghost', size: 'xs', disabled: busy || roles.length <= 1,
+            'aria-label': `从岗位白名单里删掉 ${ROLE_LABEL[role] ?? role}`,
+            title: '从白名单里删掉',
+            onClick: () => removeRole(role),
+          }, '×'),
+        )),
+      ),
+      h('div', { className: 'flex min-w-0 flex-wrap items-center gap-2' },
+        h(TextField, {
+          style: { maxWidth: 220 }, value: roleInput, placeholder: '新岗位 id，如 finance',
+          'aria-label': '新岗位 id',
+          onChange: e => setRoleInput(e.target.value),
+          onKeyDown: e => { if (e.key === 'Enter') { e.preventDefault(); addRole() } },
+        }),
+        h(Button, { variant: 'secondary', size: 'sm', disabled: busy || roleInput.trim() === '', onClick: () => addRole() }, '加上岗位'),
+      ),
+    ),
     h('div', { className: 'flex min-w-0 flex-wrap items-center gap-2 rounded-xl border border-separator-border bg-background-primary-default p-4', 'data-section': 'batch-domain' },
       h('span', { className: DESC }, '按业务领域一次生成四位：'),
       h(TextField, {
@@ -212,8 +278,8 @@ export function ExpertsPanel({ config, onChanged }) {
               onChange: e => set('role', e.target.value),
             },
               h('option', { value: '' }, '不限'),
-              ['product', 'architect', 'dev', 'qa'].map(v => h('option', { key: v, value: v }, ROLE_LABEL[v] ?? v))),
-            h('div', { className: HINT }, '决定默认接哪一列'),
+              roles.map(v => h('option', { key: v, value: v }, ROLE_LABEL[v] ?? v))),
+            h('div', { className: HINT }, roles.length === 5 ? '决定默认接哪一列' : `决定默认接哪一列（可选 ${roles.length} 个角色位）`),
           ),
           h('div', { className: FIELD, style: { flex: 1 } },
             labelTip(h, tipOf, '业务领域', '「按专长匹配」看这里：领域相同的卡优先派给它'),
@@ -303,12 +369,26 @@ export function ExpertsPanel({ config, onChanged }) {
 }
 
 export function TeamsPanel({ config, onChanged }) {
-  const { h, React, api, toast, confirmDialog, tipOf, TextField, CheckField, SelectField, SideDrawer } = client()
+  const { h, React, api, toast, promptDialog, confirmDialog, tipOf, TextField, CheckField, SelectField, SideDrawer } = client()
   const teams = config.teams ?? []
   const experts = config.experts ?? []
   const [draft, setDraft] = React.useState(null)
   const [error, setError] = React.useState(null)
   const [busy, setBusy] = React.useState(false)
+  /* 和整个专家团「发起一次会话」：由团长接话，需要成员接手时会 @ 他。同样不建卡（issue #148）。 */
+  const startChat = async (team) => {
+    const topic = await promptDialog(`和「${team.name}」聊什么？（团长 ${(experts.find(item => item.id === team.lead)?.name ?? team.lead) || '—'} 接话）`, {
+      title: '发起会话',
+      placeholder: '例如：下个版本这个团先接哪几张卡？',
+      okText: '开聊',
+    })
+    if (topic === null || String(topic).trim() === '') return
+    setBusy(true); setError(null)
+    try {
+      const out = await api('/agents/chat', { expert: team.id, topic: String(topic).trim() })
+      toast(out.hint ?? `已和「${team.name}」发起会话`, 'success')
+    } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)) } finally { setBusy(false) }
+  }
   // 团级记忆：卡做完/缺陷修完会自动记一条，派活时会带进专家提示词。
   const [memory, setMemory] = React.useState({})
   React.useEffect(() => {
@@ -351,6 +431,10 @@ export function TeamsPanel({ config, onChanged }) {
         : `团队记忆 ${memory[team.id].length} 条 · 最近：${memory[team.id][0]?.outcome ?? ''} ${memory[team.id][0]?.title ?? ''}`),
     ),
     h('div', { className: LISTROW_ACTIONS },
+      tipOf('和这个专家团发起一次会话（团长接话，不建卡）', h(Button, {
+        variant: 'ghost', size: 'sm', disabled: busy, 'data-chat': 'team',
+        onClick: () => void startChat(team),
+      }, '发起会话')),
       tipOf('清空这个团的记忆', h(Button, { variant: 'ghost', size: 'sm', disabled: busy || (memory[team.id] ?? []).length === 0, onClick: () => void clearMemory(team) }, '清空记忆')),
       tipOf('编辑这个专家团', h(Button, { variant: 'secondary', size: 'sm', disabled: busy, onClick: () => setDraft({ ...team }) }, '编辑')),
       tipOf('删除这个专家团', h(Button, { variant: 'danger', size: 'sm', disabled: busy, onClick: () => void remove(team), 'data-danger': '1' }, '删除')),

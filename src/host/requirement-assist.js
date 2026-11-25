@@ -97,6 +97,62 @@ export function buildRequirementContext(state, projectId, limits = {}) {
   return lines.join('\n').slice(0, limits.chars ?? 12000)
 }
 
+/**
+ * 跑一次「需求对话澄清」的模型调用，把回复拼起来。
+ *
+ * 为什么放在这里：`/requirement/assist`（人在面板里聊）与 `studio_requirement_assist`
+ * （agent 自己发起）必须是**同一份实现**，否则两边的话术与截断口径迟早漂
+ * （issue #148 第 5 条：51 个工具里 assist 命中 0 次，agent 与人的能力不对等）。
+ * llm 由调用方注入（宿主服务），这里不碰 ctx。
+ *
+ * @returns {{ ok: boolean, reply: string, failure: string }}
+ */
+export async function streamAssistReply({ llm, prompt, mode = 'chat', provider, model, timeoutMs = 90000 }) {
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), Math.max(1000, Number(timeoutMs) || 90000))
+  let reply = ''
+  let failure = ''
+  try {
+    for await (const chunk of llm.stream({
+      provider,
+      model,
+      system: REQUIREMENT_ASSIST_SYSTEM,
+      messages: [{ role: 'user', content: [{ type: 'text', text: String(prompt ?? '') }] }],
+      temperature: 0.3,
+      maxTokens: mode === 'draft' ? 1800 : 1200,
+      signal: controller.signal,
+      purpose: 'requirement-assist',
+    })) {
+      if (chunk?.type === 'text-delta') reply += String(chunk.text ?? '')
+      if (chunk?.type === 'block-end' && chunk.block?.type === 'text' && reply.trim() === '') reply = String(chunk.block.text ?? '')
+      if (chunk?.type === 'finish' && chunk.reason?.kind !== 'stop') failure = chunk.reason?.failure?.message ?? chunk.reason?.kind ?? '模型调用失败'
+    }
+  } catch (cause) {
+    failure = cause instanceof Error ? cause.message : String(cause)
+  } finally {
+    clearTimeout(timer)
+  }
+  const trimmed = reply.trim()
+  return {
+    ok: failure === '' && trimmed !== '',
+    reply: trimmed,
+    failure: failure !== '' ? failure : (trimmed === '' ? '模型没有返回内容' : ''),
+  }
+}
+
+/** 对话历史 → 模型消息（截断、去空、只留最近 20 条）。路由与工具共用。 */
+export function assistMessages(history, latest) {
+  const list = (Array.isArray(history) ? history : [])
+    .map(item => ({ role: item?.role === 'assistant' ? 'assistant' : 'user', content: String(item?.content ?? '').slice(0, 2000) }))
+    .filter(item => item.content.trim() !== '')
+  if (latest !== undefined && latest !== null) {
+    const content = String(latest).slice(0, 2000)
+    if (content.trim() !== '') list.push({ role: 'user', content })
+  }
+  return list.slice(-20)
+}
+
+/** 澄清对话的系统提示词（路由与工具共用）。 */
 export const REQUIREMENT_ASSIST_SYSTEM = [
   '你是一名资深产品经理，正在帮用户把还没想清楚的想法澄清成可交付的需求。',
   '你会拿到项目沉淀（已有需求、PRD / 验收文档、当前卡），以及用户贴的文档正文（平台读到才有）。',

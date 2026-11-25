@@ -2,7 +2,7 @@
    render an owner chip for a column or card. Pure data-in / string-out —
    callers pass the live config, nothing here touches the store. */
 
-import { ROLE_LABEL, STRATEGY_LABEL } from './labels.js'
+import { ROLE_LABEL, STRATEGY_LABEL, knownRoles } from './labels.js'
 import { expertIconName } from './icons.js'
 
 export function toDateInput(value) {
@@ -42,8 +42,9 @@ export function ownerLabel(config, owner) {
 export function buildRoster(config) {
   const items = []
   // 角色位放最前面：泳道默认按「产品经理 / 研发工程师」配，具体落到哪位
-  // 领域专家由卡片所属业务领域决定。
-  for (const role of ['product', 'architect', 'dev', 'qa']) {
+  // 领域专家由卡片所属业务领域决定。**白名单来自 config.roles**（默认四岗 + 运营，
+  // 公司可以加财务/支持等岗位）——以前这里写死四个，运营与自定义岗位在「加候选」里根本选不到。
+  for (const role of knownRoles(config)) {
     items.push({
       key: 'r:' + role,
       name: '角色 · ' + (ROLE_LABEL[role] ?? role),

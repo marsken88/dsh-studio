@@ -2,7 +2,15 @@
    Pure tables — no React, no API access — so they can be imported by any
    page module without dragging the panel along. */
 
-export const ROLE_LABEL = { product: '产品', architect: '架构', dev: '研发', qa: '测试' }
+/* 角色位的展示名：内置五个（产品/架构/研发/测试/运营）。
+   config.roles 里新加的自定义岗位（finance / support…）没有内置文案，界面回落显示 id 本身。 */
+export const ROLE_LABEL = { product: '产品', architect: '架构', dev: '研发', qa: '测试', ops: '运营' }
+/** 一份配置里的角色白名单（含默认兜底）：面板渲染「角色位」下拉时用它，别写死数组。 */
+export const knownRoles = config => (Array.isArray(config?.roles) && config.roles.length > 0
+  ? config.roles
+  : ['product', 'architect', 'dev', 'qa', 'ops'])
+/** 角色 id → 展示名（自定义岗位回落成 id）。 */
+export const roleLabel = (role, config) => ROLE_LABEL[role] ?? String(role ?? '')
 export const PRIORITY_LABEL = { urgent: '紧急', normal: '普通', relaxed: '宽松' }
 export const TYPE_LABEL = { requirement: '需求', bug: '缺陷', design: '设计', dev: '开发', test: '测试', ops: '运维' }
 export const SEVERITY_LABEL = { p0: 'P0 致命', p1: 'P1 严重', p2: 'P2 一般', p3: 'P3 轻微' }

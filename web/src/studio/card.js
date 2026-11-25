@@ -37,8 +37,10 @@ const FOOT = 'flex flex-wrap items-center gap-x-2 gap-y-1 text-caption-1-regular
 const META_ITEM = 'inline-flex shrink-0 items-center gap-1 whitespace-nowrap tabular-nums'
 const DANGER = 'font-semibold text-text-error-primary'
 
-/* 所有者的角色色：与列头的角色色条同一套 token。 */
-const ROLE_CHIP = { product: 'blue', architect: 'purple', dev: 'lime', qa: 'orange' }
+/* 所有者的角色色：与列头的角色色条同一套 token（取值必须落在 BoardUI Chip 的 color 表里：
+   orange / lime / rose / yellow / cyan / blue / purple / neutral / gray / soft）。
+   自定义岗位没有专属色时回落到 neutral。 */
+const ROLE_CHIP = { product: 'blue', architect: 'purple', dev: 'lime', qa: 'orange', ops: 'cyan' }
 
 export function createCard({ h, ChipField }) {
 function Card({ task, onOpen, config, requirements, onPickRequirement, onPickProject }) {

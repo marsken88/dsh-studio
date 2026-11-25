@@ -18,7 +18,7 @@ import { readFile, mkdir } from 'node:fs/promises'
 import { createRequire } from 'node:module'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { defaultConfig, PRIORITIES, ROLE_IDS, STATUSES } from '../../src/host/domain.js'
+import { defaultConfig, PRIORITIES, STATUSES } from '../../src/host/domain.js'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 const REPO = join(HERE, '..', '..')
@@ -44,9 +44,11 @@ const state = {
   updatedAt: now,
   profile: 'web',
   statuses: STATUSES,
-  roles: ROLE_IDS,
+  // 角色位白名单（issue #150）：假宿主也给一份含运营 + 自定义岗位的配置，
+  // 用来断言「列的负责人 → 加候选」里真的能选到它们（写死四岗时这里会红）。
+  roles: ['product', 'architect', 'dev', 'qa', 'ops', 'finance'],
   priorities: PRIORITIES,
-  config: defaultConfig(),
+  config: { ...defaultConfig(), roles: ['product', 'architect', 'dev', 'qa', 'ops', 'finance'] },
   tasks: [
     { ...baseTask, id: 't-1', code: 'DEV-1', title: '库存预占与超时释放', status: 'dev' },
     { ...baseTask, id: 't-2', code: 'DEV-2', title: '支付回调重试', status: 'test' },
@@ -205,6 +207,61 @@ try {
     check(`「${label}」没有可聚焦却被 aria-hidden 的节点`, trapped === 0, String(trapped))
     await page.screenshot({ path: join(outDir, `${label}.png`) })
   }
+
+  /* 设置 → 列的负责人：角色位候选必须按 config.roles 出（issue #150）。
+     以前 buildRoster 写死 product/architect/dev/qa，运营与自定义岗位在面板里根本选不到——
+     接口能配、界面选不了，等于没修。这里点开「加候选」按 DOM 量候选文字。 */
+  await page.evaluate(() => {
+    [...document.querySelectorAll('[data-dsh-studio] [data-head-tabs] [role="tab"]')]
+      .find(node => (node.textContent || '').trim() === '设置')?.click()
+  })
+  await sleep(900)
+  const columnNav = await page.evaluate(() => {
+    const el = [...document.querySelectorAll('[data-settings-nav-item]')]
+      .find(node => String(node.textContent ?? '').trim().startsWith('列的负责人'))
+    if (el === undefined || el === null) return false
+    el.click()
+    return true
+  })
+  await sleep(800)
+  const opened = await page.evaluate(() => {
+    const row = document.querySelector('[data-column-row]')
+    if (row === null) return false
+    const button = [...row.querySelectorAll('button')].find(node => String(node.textContent ?? '').trim() === '加候选')
+    if (button === undefined) return false
+    button.click()
+    return true
+  })
+  await sleep(600)
+  const candidates = await page.evaluate(() => {
+    const row = document.querySelector('[data-column-row]')
+    if (row === null) return []
+    return [...row.querySelectorAll('button')].map(node => String(node.textContent ?? '').trim())
+  })
+  const hasRole = name => candidates.some(text => text.startsWith(`角色 · ${name}`))
+  check('设置 → 列的负责人能打开并按角色位出候选（运营）', columnNav === true && opened === true && hasRole('运营'), `nav=${columnNav} open=${opened} 运营=${hasRole('运营')}`)
+  check('自定义岗位（finance）也出现在列候选里', hasRole('finance'), candidates.filter(text => text.startsWith('角色 · ')).join(' / '))
+
+  /* 设置 → 专家：角色位白名单要能在界面上加/删（issue #150）。
+     没有这个入口时「加财务岗位」只能手打 POST /config —— 能力在接口里、界面不可达。 */
+  const expertsNav = await page.evaluate(() => {
+    const el = [...document.querySelectorAll('[data-settings-nav-item]')]
+      .find(node => String(node.textContent ?? '').trim().startsWith('专家') && !String(node.textContent ?? '').includes('团'))
+    if (el === undefined || el === null) return false
+    el.click()
+    return true
+  })
+  await sleep(800)
+  const rolesSection = await page.evaluate(() => {
+    const section = document.querySelector('[data-section="roles"]')
+    if (section === null) return { section: false }
+    const chips = [...section.querySelectorAll('[data-role-chip]')].map(node => node.getAttribute('data-role-chip'))
+    const input = section.querySelector('input[aria-label="新岗位 id"]')
+    const addButton = [...section.querySelectorAll('button')].find(node => String(node.textContent ?? '').trim() === '加上岗位')
+    return { section: true, chips, hasInput: input !== null, hasAdd: addButton !== undefined }
+  })
+  check('设置 → 专家有「角色位（岗位白名单）」并能加岗位', expertsNav === true && rolesSection.section === true && rolesSection.hasInput === true && rolesSection.hasAdd === true, `nav=${expertsNav} section=${rolesSection.section} input=${rolesSection.hasInput} add=${rolesSection.hasAdd}`)
+  check('白名单 chip 按 config.roles 出（运营 + 自定义岗位都在）', (rolesSection.chips ?? []).includes('ops') && (rolesSection.chips ?? []).includes('finance'), (rolesSection.chips ?? []).join(','))
 
   /* 工作台（加载完成态）：空分区必须真的写出「没有逾期的卡」这类文字。
      2026-11-23 真机截图里几个分区只剩一个空框——因为假宿主以前永远给不到 dashboard，

@@ -162,6 +162,15 @@ const check = (name, ok, detail = '') => {
 }
 let requirementId = ''
 let taskId = ''
+/* ⑥e/⑥f 会临时改 test 列负责人与角色白名单：跑完必须恢复（探针可能对着真实看板跑）。 */
+let restoreColumns = null
+let restoreRoles = null
+const saveTestColumn = async owner => {
+  if (owner === null || owner === undefined) return
+  if (Array.isArray(owner.members)) return api('/columns/save', { status: 'test', members: owner.members, strategy: owner.strategy })
+  if (owner.kind === 'none' || owner.kind === undefined || String(owner.id ?? '') === '') return api('/columns/save', { status: 'test', kind: 'none', id: '' })
+  return api('/columns/save', { status: 'test', kind: owner.kind, id: String(owner.id ?? '') })
+}
 let browser
 const outDir = join(repo, 'tmp', 'probe')
 try {
@@ -768,6 +777,40 @@ try {
   )
   await page.screenshot({ path: join(outDir, 'experts.png') })
 
+  /* ④h 专家 / 专家团行上的「发起会话」入口（issue #148）：不建卡先聊清楚。
+     判据按 DOM 量到按钮本身（data-chat），不是文字里出现过「会话」两个字。 */
+  const chatEntry = await page.evaluate(() => ({
+    count: document.querySelectorAll('[data-chat="expert"]').length,
+    labels: [...document.querySelectorAll('[data-chat="expert"]')].map(node => String(node.textContent ?? '').trim()),
+  }))
+  check('④h 专家行有「发起会话」入口', chatEntry.count > 0 && chatEntry.labels.every(label => label === '发起会话'), JSON.stringify(chatEntry))
+  const teamsNav = await page.evaluate(() => {
+    const el = [...document.querySelectorAll('[data-settings-nav-item]')]
+      .find(node => String(node.textContent ?? '').trim().startsWith('专家团'))
+    if (el === undefined || el === null) return false
+    el.click()
+    return true
+  })
+  if (teamsNav === true) await new Promise(resolve => setTimeout(resolve, 700))
+  const teamChat = await page.evaluate(() => ({
+    rows: document.querySelectorAll('[data-team-row]').length,
+    chat: document.querySelectorAll('[data-chat="team"]').length,
+  }))
+  /* 空看板没有专家团行时这条不适用（不是缺陷）：只在真有团的时候断言入口存在。 */
+  check(
+    '④h 专家团行也有「发起会话」入口（团长接话）',
+    teamsNav === true && (teamChat.rows === 0 || teamChat.chat >= teamChat.rows),
+    `nav=${teamsNav} rows=${teamChat.rows} chat=${teamChat.chat}`,
+  )
+  const backToExperts = await page.evaluate(() => {
+    const el = [...document.querySelectorAll('[data-settings-nav-item]')]
+      .find(node => String(node.textContent ?? '').trim().startsWith('专家') && !String(node.textContent ?? '').includes('团'))
+    if (el === undefined || el === null) return false
+    el.click()
+    return true
+  })
+  if (backToExperts === true) await new Promise(resolve => setTimeout(resolve, 400))
+
   // ④e 设置 → 自动派单：会话跑在哪个目录要写清楚（决定它落在侧栏哪个工作区）。
   // 以前这一项叫「工作区目录」，看不出会话会跑在 ~/dsh-workspace 里、落在「未分组」。
   const agentsNav = await clickExact('自动派单')
@@ -843,7 +886,9 @@ try {
   if (skillsNav === true) await new Promise(resolve => setTimeout(resolve, 800))
   const skillText = await page.evaluate(() => document.body.innerText)
   check('⑤ 技能库面板能打开', skillsNav === true, skillsNav ? '' : '没找到「技能库」入口')
-  check('⑤ 技能行有使用读数', skillText.includes('用上') || skillText.includes('还没被用上'))
+  const skillRows = await page.evaluate(() => document.querySelectorAll('[data-skill-row]').length)
+  /* 空看板没有技能行时这条不适用：只在真有技能行时要求「用上几张卡」的读数。 */
+  check('⑤ 技能行有使用读数', skillText.includes('用上') || skillText.includes('还没被用上') || (skillRows === 0 && skillText.includes('还没有技能')), `rows=${skillRows}`)
   /* 危险操作要有视觉语言：删除按钮必须是 danger（unslop 体检 S6 —— 以前 variant:'danger' 没登记，
      12 个删除按钮全落成主色蓝，界面上看不出哪一步会删东西）。 */
   const dangerButtons = await page.evaluate(() => [...document.querySelectorAll('button')]
@@ -1080,10 +1125,159 @@ try {
   const movedCard = (movedState?.tasks ?? []).find(item => item.id === taskId)
   check('⑥c 拖拽卡片能换列并落库', dragged.ok === true && movedCard?.status === 'review', JSON.stringify({ dragged, status: movedCard?.status }))
 
+  /* ⑥e 改列负责人：面板先 dryRun 预览「会让哪几张卡被派走」，取消不落库，确认后落库并提示（issue #149）。
+     跑完会在 finally 里把 test 列与角色白名单恢复原样。 */
+  const cfgBefore = (await state()).config
+  restoreColumns = cfgBefore.columns?.test ?? null
+  restoreRoles = Array.isArray(cfgBefore.roles) ? [...cfgBefore.roles] : null
+  const PROBE_ROLE = 'probe-role'
+  if (restoreRoles !== null && restoreRoles.includes(PROBE_ROLE)) {
+    await api('/config', { roles: restoreRoles.filter(role => role !== PROBE_ROLE) })
+  }
+  await saveTestColumn({ kind: 'none', id: '' })
+  await api('/task/update', { id: taskId, status: 'test' })
+  await clickExact('设置')
+  await new Promise(resolve => setTimeout(resolve, 800))
+  const columnsNav = await page.evaluate(() => {
+    const el = [...document.querySelectorAll('[data-settings-nav-item]')]
+      .find(node => String(node.textContent ?? '').trim().startsWith('列的负责人'))
+    if (el === undefined || el === null) return false
+    el.click()
+    return true
+  })
+  await new Promise(resolve => setTimeout(resolve, 800))
+  const openTestRow = () => page.evaluate(() => {
+    const row = document.querySelector('[data-column-row="test"]')
+    const button = row === null ? undefined : [...row.querySelectorAll('button')].find(node => String(node.textContent ?? '').trim() === '加候选')
+    if (button === undefined) return false
+    button.click()
+    return true
+  })
+  const pickRoleCandidate = () => page.evaluate(() => {
+    const row = document.querySelector('[data-column-row="test"]')
+    const button = row === null ? undefined : [...row.querySelectorAll('button')].find(node => String(node.textContent ?? '').trim().startsWith('角色 · '))
+    if (button === undefined) return false
+    button.click()
+    return true
+  })
+  const dialogOf = () => page.evaluate(() => {
+    const node = document.querySelector('[role="dialog"], [role="alertdialog"]')
+    return node === null ? '' : String(node.textContent ?? '').replace(/\s+/g, ' ').trim()
+  })
+  const dialogClick = label => page.evaluate(needle => {
+    const node = document.querySelector('[role="dialog"], [role="alertdialog"]')
+    if (node === null) return ''
+    const button = [...node.querySelectorAll('button')].find(item => String(item.textContent ?? '').trim().startsWith(needle))
+    if (button === undefined) return ''
+    const text = String(button.textContent ?? '').trim()
+    button.click()
+    return text
+  }, label)
+
+  const opened1 = await openTestRow()
+  await new Promise(resolve => setTimeout(resolve, 400))
+  const picked1 = await pickRoleCandidate()
+  await new Promise(resolve => setTimeout(resolve, 1200))
+  const confirmText = await dialogOf()
+  check(
+    '⑥e 改列负责人前先弹「会让 N 张卡被派走」的确认',
+    columnsNav === true && opened1 === true && picked1 === true && /\d+ 张卡/.test(confirmText) && confirmText.includes('继续'),
+    confirmText.slice(0, 90),
+  )
+  const canceled = await dialogClick('取消')
+  await new Promise(resolve => setTimeout(resolve, 800))
+  const afterCancel = (await state()).config.columns?.test ?? {}
+  check('⑥e 点「取消」后配置没被改', canceled !== '' && afterCancel.kind === 'none', JSON.stringify(afterCancel))
+
+  await openTestRow()
+  await new Promise(resolve => setTimeout(resolve, 400))
+  await pickRoleCandidate()
+  await new Promise(resolve => setTimeout(resolve, 1200))
+  const confirmed = await dialogClick('继续')
+  await new Promise(resolve => setTimeout(resolve, 1500))
+  const afterConfirm = (await state()).config.columns?.test ?? {}
+  const isRole = afterConfirm.kind === 'role'
+    || (afterConfirm.kind === 'pool' && (afterConfirm.members ?? []).some(member => member.kind === 'role') && (afterConfirm.members ?? []).every(member => member.kind !== 'expert'))
+  const noticeText = await page.evaluate(() => document.querySelector('[data-column-notice]')?.textContent ?? '')
+  check('⑥e 确认后落库成角色位（没绑死某个专家）', confirmed !== '' && isRole, JSON.stringify(afterConfirm))
+  check('⑥e 保存后把「会派走 N 张」写在面板上', /派走 \d+ 张/.test(noticeText) || noticeText.includes('已保存'), noticeText.slice(0, 80))
+
+  /* ⑥f 角色位白名单能在界面上加 / 删；删还在用的岗位会被拦（issue #150） */
+  const expertsNav2 = await page.evaluate(() => {
+    const el = [...document.querySelectorAll('[data-settings-nav-item]')]
+      .find(node => String(node.textContent ?? '').trim().startsWith('专家') && !String(node.textContent ?? '').includes('团'))
+    if (el === undefined || el === null) return false
+    el.click()
+    return true
+  })
+  await new Promise(resolve => setTimeout(resolve, 900))
+  const typedRole = await page.evaluate(role => {
+    const input = document.querySelector('[data-section="roles"] input[aria-label="新岗位 id"]')
+    if (input === null) return false
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set
+    setter.call(input, role)
+    input.dispatchEvent(new Event('input', { bubbles: true }))
+    return true
+  }, PROBE_ROLE)
+  await new Promise(resolve => setTimeout(resolve, 300))
+  const addedRole = await page.evaluate(() => {
+    const button = [...document.querySelectorAll('[data-section="roles"] button')].find(node => String(node.textContent ?? '').trim() === '加上岗位')
+    if (button === undefined) return false
+    button.click()
+    return true
+  })
+  await new Promise(resolve => setTimeout(resolve, 1500))
+  const rolesAfterAdd = (await state()).config.roles ?? []
+  const chipsAfterAdd = await page.evaluate(() => [...document.querySelectorAll('[data-section="roles"] [data-role-chip]')].map(node => node.getAttribute('data-role-chip')))
+  check('⑥f 在面板里加岗位：落库 + chip 立刻出现', expertsNav2 === true && typedRole === true && addedRole === true && rolesAfterAdd.includes(PROBE_ROLE) && chipsAfterAdd.includes(PROBE_ROLE), `roles=${rolesAfterAdd.join(',')}`)
+
+  /* 删一个没人用的岗位（刚加的 probe-role）：成功 */
+  const removedProbeRole = await page.evaluate(role => {
+    const chip = document.querySelector(`[data-section="roles"] [data-role-chip="${role}"]`)
+    const button = chip === null ? undefined : chip.querySelector('button')
+    if (button === undefined || button === null) return false
+    button.click()
+    return true
+  }, PROBE_ROLE)
+  await new Promise(resolve => setTimeout(resolve, 1500))
+  const rolesAfterRemove = (await state()).config.roles ?? []
+  check('⑥f 删没人用的岗位成功', removedProbeRole === true && !rolesAfterRemove.includes(PROBE_ROLE), `roles=${rolesAfterRemove.join(',')}`)
+
+  /* 删「还在用」的岗位（有专家挂着的角色）：被拦并说明谁在用。只在名册里真有这种角色时断言。 */
+  const expertsNow = (await state()).config.experts ?? []
+  const inUseRole = rolesAfterRemove.find(role => expertsNow.some(expert => expert.role === role)) ?? ''
+  if (inUseRole !== '') {
+    /* 这一步**故意**调一个会被 400 拒绝的接口（删还在用的岗位）：把预期内的 console 400 摘掉，
+       免得「全程没有 pageerror」被自己的负向用例误伤。 */
+    const errorsMarker = errors.length
+    const removedInUse = await page.evaluate(role => {
+      const chip = document.querySelector(`[data-section="roles"] [data-role-chip="${role}"]`)
+      const button = chip === null ? undefined : chip.querySelector('button')
+      if (button === undefined || button === null) return false
+      button.click()
+      return true
+    }, inUseRole)
+    await new Promise(resolve => setTimeout(resolve, 1500))
+    const rolesStill = (await state()).config.roles ?? []
+    const errText = await page.evaluate(() => [...document.querySelectorAll('[data-panel] [role="alert"], [data-panel] .text-text-error-primary')].map(node => String(node.textContent ?? '').trim()).join(' | '))
+    check('⑥f 删还在用的岗位被拦（说明谁在用）', removedInUse === true && rolesStill.includes(inUseRole) && errText.includes('还在用'), `${inUseRole} / ${errText.slice(0, 70)}`)
+    const expected = errors.slice(errorsMarker).filter(text => /status of 4\d\d/.test(text))
+    for (const text of expected) {
+      const index = errors.indexOf(text, errorsMarker)
+      if (index >= 0) errors.splice(index, 1)
+    }
+  }
+  await page.screenshot({ path: join(outDir, 'settings-roles.png') })
+
   check('全程没有 pageerror / console 错误', errors.length === 0, errors.slice(0, 3).join(' | '))
 } finally {
   if (browser !== undefined) await browser.close()
   await new Promise(resolve => server.close(resolve))
+  /* 先把探针改过的配置恢复原样（这一条优先于删数据：配置是对着真实看板改的）。 */
+  try {
+    if (restoreColumns !== null) await saveTestColumn(restoreColumns)
+    if (restoreRoles !== null) await api('/config', { roles: restoreRoles })
+  } catch { /* 恢复失败不影响结论，但会在下面提一句 */ }
   if (keep !== true) {
     try {
       if (taskId !== '') await api('/task/delete', { id: taskId, confirm: 'DELETE' })

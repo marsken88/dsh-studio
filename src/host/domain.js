@@ -49,7 +49,13 @@ export const LEGACY_BLOCKED_STATUS = 'blocked'
 export const STATUS_IDS = STATUSES.map(s => s.id)
 /** 解析时接受历史数据里的 blocked，但它永远不会被当成一列渲染。 */
 export const STATUS_SET = new Set([...STATUS_IDS, LEGACY_BLOCKED_STATUS])
-export const ROLE_IDS = ['product', 'architect', 'dev', 'qa']
+
+/**
+ * 角色位白名单与工具函数都在 roles.js（domain.js 有 2000 行闸门，规则类逻辑单独成模块）。
+ * 这里 import + re-export：外部一直从 domain 取 ROLE_IDS / ROLE_LABELS，别让它们改 import 路径。
+ */
+import { ROLE_IDS, ROLE_ID_PATTERN, ROLE_LABELS, sanitizeRoles, roleIdsOf, rolesInColumns, roleLabelsFor } from './roles.js'
+export { ROLE_IDS, ROLE_ID_PATTERN, ROLE_LABELS, sanitizeRoles, roleIdsOf, rolesInColumns, roleLabelsFor }
 export const PRIORITIES = ['urgent', 'normal', 'relaxed']
 /** 卡片类型：需求与缺陷走同一条流水线，但派单提示词和默认落列不同。 */
 export const TASK_TYPES = ['requirement', 'bug', 'design', 'dev', 'test', 'ops']
@@ -118,18 +124,27 @@ export const FALLBACK_AGENT_MODEL = 'deepseek-v4.1-flash'
 
 /** The four shipped personas; also the seed for a fresh expert roster. */
 
-/** Column → who owns the work when a card lands there. */
-export function defaultColumns() {
+/**
+ * Column → who owns the work when a card lands there.
+ *
+ * 默认挂**角色位**而不是某位具体专家（issue #150 第 1 条）：角色位会按卡的业务领域挑人
+ * （「支付产品经理」优先接支付的卡），而且公司改白名单/换专家时不会指向一个不存在的 id。
+ * 某个角色位被从 config.roles 里删掉时，这一列退回「没人负责」（等人指定），
+ * 不静默指向一个解析不出人的 id。
+ */
+export function defaultColumns(roles = ROLE_IDS) {
+  const roleIds = Array.isArray(roles) && roles.length > 0 ? roles : ROLE_IDS
+  const byRole = role => (roleIds.includes(role) ? { kind: 'role', id: role } : { kind: 'none', id: '' })
   return {
     // 待澄清没有默认负责人：需求/缺陷的类型不同，交给谁由人来定（设置里可改）。
     clarify: { kind: 'none', id: '' },
-    design: { kind: 'expert', id: 'architect' },
-    dev_ready: { kind: 'expert', id: 'dev' },
-    dev: { kind: 'expert', id: 'dev' },
-    review: { kind: 'expert', id: 'architect' },
-    test: { kind: 'expert', id: 'qa' },
-    accept: { kind: 'expert', id: 'product' },
-    done: { kind: 'expert', id: 'product' },
+    design: byRole('architect'),
+    dev_ready: byRole('dev'),
+    dev: byRole('dev'),
+    review: byRole('architect'),
+    test: byRole('qa'),
+    accept: byRole('product'),
+    done: byRole('product'),
   }
 }
 
@@ -154,12 +169,13 @@ export function seedExperts() {
     }
   })
 }
-
 /** Fresh default settings. */
 export function defaultConfig() {
   return {
     schema: 7,
     board: { title: '需求&任务工作空间' },
+    /** 角色位白名单：defaultColumns 之外的自定义岗位（运营 / 财务 / 支持…）在这里登记后，列负责人和专家都能选（issue #150）。 */
+    roles: [...ROLE_IDS],
     experts: seedExperts(),
     teams: [],
     columns: defaultColumns(),
@@ -346,8 +362,11 @@ export function mergeSection(defaults, saved) {
 export function mergeConfig(saved) {
   const base = defaultConfig()
   if (saved === null || typeof saved !== 'object') return base
-  const experts = sanitizeExperts(saved.experts)
+  // 角色白名单先定下来：专家与列负责人都按它校验（自定义岗位不能在这一步被抹掉）。
+  const roles = sanitizeRoles(saved.roles)
+  const experts = sanitizeExperts(saved.experts, roles)
   const roster = experts.length > 0 ? experts : base.experts
+  const teams = sanitizeTeams(saved.teams, roster)
   const gitlab = { ...mergeSection(base.gitlab, saved.gitlab), projects: sanitizeProjects(saved.gitlab?.projects) }
   const feishu = { ...mergeSection(base.feishu, saved.feishu), bots: sanitizeBots(saved.feishu?.bots), projectFolders: sanitizeProjectFolders(saved.feishu?.projectFolders) }
   // A settings file written before multi-project/multi-bot support carries the
@@ -372,9 +391,10 @@ export function mergeConfig(saved) {
   return {
     schema: Number.isInteger(saved.schema) ? saved.schema : 1,
     board: mergeSection(base.board, saved.board),
+    roles,
     experts: roster,
-    teams: sanitizeTeams(saved.teams, roster),
-    columns: sanitizeColumns(saved.columns, roster, sanitizeTeams(saved.teams, roster)),
+    teams,
+    columns: sanitizeColumns(saved.columns, roster, teams, roles),
     projects: sanitizeWorkProjects(saved.projects),
     templates: sanitizeTemplates(saved.templates),
     gitlab,
@@ -465,8 +485,9 @@ export function cleanId(value, prefix) {
 }
 
 /** Coerce whatever is in the settings file into a valid expert roster. */
-export function sanitizeExperts(input) {
+export function sanitizeExperts(input, roles = ROLE_IDS) {
   if (!Array.isArray(input)) return []
+  const roleIds = Array.isArray(roles) && roles.length > 0 ? roles : ROLE_IDS
   const seen = new Set()
   const out = []
   for (const raw of input.slice(0, 80)) {
@@ -479,7 +500,7 @@ export function sanitizeExperts(input) {
       id,
       name,
       emoji: String(raw.emoji ?? '🤖').trim().slice(0, 4) || '🤖',
-      role: ROLE_IDS.includes(String(raw.role ?? '')) ? String(raw.role) : (ROLE_IDS.includes(id) ? id : ''),
+      role: roleIds.includes(String(raw.role ?? '')) ? String(raw.role) : (roleIds.includes(id) ? id : ''),
       domain: String(raw.domain ?? '').trim().slice(0, 40),
       description: String(raw.description ?? '').slice(0, 600),
       prompt: String(raw.prompt ?? '').slice(0, 8000),
@@ -531,8 +552,10 @@ export function sanitizeTeams(input, experts) {
 }
 
 /** Column owners, validated against the roster. Unknown columns are ignored. */
-export function sanitizeColumns(input, experts, teams) {
-  const base = defaultColumns()
+export function sanitizeColumns(input, experts, teams, roles = ROLE_IDS) {
+  const roleIds = Array.isArray(roles) && roles.length > 0 ? roles : ROLE_IDS
+  // 默认列也用当前白名单算：删掉的角色位不能让默认值指向一个解析不出人的 id。
+  const base = defaultColumns(roleIds)
   const out = { ...base }
   if (input === null || typeof input !== 'object' || Array.isArray(input)) return out
   const expertIds = new Set(experts.map(expert => expert.id))
@@ -550,7 +573,7 @@ export function sanitizeColumns(input, experts, teams) {
         // 解析成对应的领域专家；也可以写具体专家或专家团。
         const kind = entry.kind === 'team' ? 'team' : entry.kind === 'role' ? 'role' : 'expert'
         const id = String(entry.id ?? '').trim()
-        if (kind === 'role' ? !ROLE_IDS.includes(id) : kind === 'team' ? !teamIds.has(id) : !expertIds.has(id)) continue
+        if (kind === 'role' ? !roleIds.includes(id) : kind === 'team' ? !teamIds.has(id) : !expertIds.has(id)) continue
         const key = `${kind}:${id}`
         if (seen.has(key)) continue
         seen.add(key)
@@ -564,7 +587,7 @@ export function sanitizeColumns(input, experts, teams) {
     const kind = raw.kind === 'team' ? 'team' : raw.kind === 'none' ? 'none' : raw.kind === 'role' ? 'role' : 'expert'
     if (kind === 'none') { out[status] = { kind: 'none', id: '' }; continue }
     const id = String(raw.id ?? raw.role ?? '').trim()
-    if (kind === 'role' && ROLE_IDS.includes(id)) out[status] = { kind: 'role', id, ...(out[status]?.wip !== undefined ? { wip: out[status].wip } : {}) }
+    if (kind === 'role' && roleIds.includes(id)) out[status] = { kind: 'role', id, ...(out[status]?.wip !== undefined ? { wip: out[status].wip } : {}) }
     else if (kind === 'team' && teamIds.has(id)) out[status] = { kind: 'team', id }
     else if (kind === 'expert' && expertIds.has(id)) out[status] = { kind: 'expert', id }
   }
@@ -1687,7 +1710,7 @@ export function text(value, max = 2000) {
 }
 
 /** Coerce one arbitrary input object into a well-formed task patch. */
-export function normalizePatch(input) {
+export function normalizePatch(input, roles = ROLE_IDS) {
   const patch = {}
   if (input.title !== undefined) {
     const title = text(input.title, 200)
@@ -1706,7 +1729,10 @@ export function normalizePatch(input) {
   }
   if (input.role !== undefined) {
     const role = String(input.role)
-    if (!ROLE_IDS.includes(role)) throw new Error(`unknown role ${role}`)
+    /* 角色位白名单来自 config.roles（默认四岗 + 运营）；调用方传了配置就按配置校验，
+       否则按默认。非法值直接报错并列出可选值，别静默清空（issue #150 第 3 条）。 */
+    const allowed = roleIdsOf(roles)
+    if (role !== '' && !allowed.includes(role)) throw new Error(`unknown role ${role}（可选：${allowed.join(' / ')}）`)
     patch.role = role
   }
   if (input.status !== undefined) {
@@ -1919,7 +1945,6 @@ export function canonicalAuthor(who, config) {
   return byRole === undefined ? raw : byRole.name
 }
 
-export const ROLE_LABELS = Object.fromEntries(ROLE_IDS.map(role => [role, DEFAULT_ROLES[role].label]))
 /** Compile the author-facing parameter spec into a registry-ready tool. */
 export function defineStudioTool(spec) {
   const properties = {}
