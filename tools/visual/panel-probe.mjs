@@ -162,6 +162,9 @@ const check = (name, ok, detail = '') => {
 }
 let requirementId = ''
 let taskId = ''
+/* 命令面板那条判据要搜「探针自己造的卡」的编号：以前写死 BUG-041，
+   看板里没有那张卡时必然 0 命中，把探针假红误报成面板坏了（issue #159）。 */
+let taskCode = ''
 /* ⑥e/⑥f 会临时改 test 列负责人与角色白名单：跑完必须恢复（探针可能对着真实看板跑）。 */
 let restoreColumns = null
 let restoreRoles = null
@@ -187,7 +190,8 @@ try {
   await api('/requirement/doc', { id: requirementId, action: 'add', doc: { kind: 'prd', title: '（探针）PRD', content: '探针正文', at: Date.now() } })
   const card = await api('/task/create', { title: '（探针）看板卡片', type: 'dev', role: 'dev', status: 'dev', requirementId, pointId: 'p1' })
   taskId = card.json.task?.id ?? ''
-  check('准备：造出需求与卡片', requirementId !== '' && taskId !== '')
+  taskCode = card.json.task?.code ?? ''
+  check('准备：造出需求与卡片', requirementId !== '' && taskId !== '' && taskCode !== '', `需求=${requirementId} 卡=${taskId} 编号=${taskCode}`)
   /* 执行记录 + 评审结论：卡面要能看到「代码 N 文件 +A −D」「评审通过」两个 chip，
      讨论区要能看到评审结论。以前走工具评审只写 coding.review.note，人翻卡片一个字都看不到。 */
   await api('/task/case', {
@@ -962,7 +966,8 @@ try {
   const paletteOpen = await page.evaluate(() => document.querySelector('[data-palette]') !== null)
   let paletteHit = null
   if (paletteOpen === true) {
-    await page.type('[data-palette-input]', 'BUG-041', { delay: 20 })
+    /* 搜探针自己造的卡的编号：不写死任何真实卡（以前写死 BUG-041，看板里没有那张卡就必红——issue #159）。 */
+    await page.type('[data-palette-input]', taskCode, { delay: 20 })
     await new Promise(resolve => setTimeout(resolve, 500))
     paletteHit = await page.evaluate(() => {
       const items = [...document.querySelectorAll('[data-palette] [data-palette-item]')]
@@ -971,7 +976,11 @@ try {
     await page.keyboard.press('Escape')
     await new Promise(resolve => setTimeout(resolve, 300))
   }
-  check('⑥b 命令面板能打开并搜到卡', paletteOpen === true && paletteHit !== null && paletteHit.count > 0 && paletteHit.text.some(text => text.includes('BUG-041')), JSON.stringify(paletteHit))
+  check(
+    '⑥b 命令面板能打开并按编号搜到探针自己造的卡',
+    paletteOpen === true && paletteHit !== null && paletteHit.count > 0 && paletteHit.text.some(text => text.includes(taskCode)),
+    `搜「${taskCode}」→ ${JSON.stringify(paletteHit)}`,
+  )
 
   /* ⑥d 效能页分区：总览 / 交付效率 / AI 与成本 / 上下文 */
   await clickExact('效能')
