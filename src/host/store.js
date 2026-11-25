@@ -398,6 +398,18 @@ export class StudioStore {
       }
       this.state.config.schema = 7
     }
+    if (Number(this.state.config.schema ?? 1) < 8) {
+      /* 自动派单的默认白名单扩大：旧默认只有 design / dev_ready / test，
+         卡停在「开发中 / 待评审 / 待验收」就再也不动（真机 22 张开着的卡里 20 张在白名单外）。
+         只在用户**没动过默认值**时才换（值恰好等于旧默认），自己收窄过的保持原样。 */
+      const agents = this.state.config.agents ?? {}
+      const legacy = ['design', 'dev_ready', 'test']
+      const untouched = Array.isArray(agents.autoStatuses)
+        && agents.autoStatuses.length === legacy.length
+        && legacy.every(id => agents.autoStatuses.includes(id))
+      if (untouched) this.state.config.agents = { ...agents, autoStatuses: STATUS_IDS.filter(id => id !== 'done') }
+      this.state.config.schema = 8
+    }
   }
 
   snapshot() {

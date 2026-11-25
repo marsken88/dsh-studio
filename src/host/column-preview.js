@@ -10,6 +10,8 @@
  * 纯函数，单测在 tests/issues-148-150.test.mjs。
  */
 
+import { dispatchPhase, handoffRetry } from './dispatch-state.js'
+
 /** 一个 owner（resolveOwner 的返回值）压成面板能显示的三元组。 */
 export function describeOwner(owner) {
   if (owner === null || owner === undefined) return undefined
@@ -37,18 +39,31 @@ export function describeOwner(owner) {
  * @param {number} input.now           现在（退避窗口判定用；测试可注入）
  * @returns {{status:string, auto:boolean, count:number, cards:Array}}
  */
-export function dispatchPreview({ tasks, status, autoStatuses, running, before, after, now = Date.now() }) {
+export function dispatchPreview({ tasks, status, autoStatuses, running, before, after, now = Date.now(), handoff = {} }) {
   const list = Array.isArray(tasks) ? tasks : []
   const auto = Array.isArray(autoStatuses) && autoStatuses.includes(status)
   const busy = new Set((Array.isArray(running) ? running : []).map(id => String(id ?? '')))
   const cards = []
   for (const task of list) {
     if (String(task?.status ?? '') !== status) continue
-    // tick 的判据：阻塞、在跑、这一列已经派过一轮、还在失败退避窗口里——都不会派。
+    // 「已完成」列永远不派（与 tick 一致）。
+    if (status === 'done') continue
+    /* 判据与 dispatcher.tick() 对齐（2026-11-25 起）：
+       阻塞 / 在跑 / 退避中不会派；不在自动列也可能因为「重启续跑」被派；
+       已正常跑完但没推进的卡，冷却后还会被催一次（次数用完就挂阻塞）。 */
     if (task.blocked !== null && task.blocked !== undefined) continue
     if (busy.has(String(task.id ?? ''))) continue
-    if (String(task.dispatch?.status ?? '') === status) continue
     if ((Number(task.retryAt) || 0) > now) continue
+    const dispatch = task.dispatch ?? null
+    const resume = dispatch?.resume === true
+    if (auto !== true && resume !== true) continue
+    const phase = dispatchPhase(task, { now })
+    if (phase === 'running' || phase === 'idle') continue
+    if (phase === 'done') {
+      if (dispatch.advanced === true) continue
+      const plan = handoffRetry(dispatch, { ...handoff, now })
+      if (plan.exhausted) continue
+    }
     const next = typeof after === 'function' ? after(task) : undefined
     if (next === undefined) continue
     const previous = typeof before === 'function' ? before(task) : undefined
@@ -59,7 +74,7 @@ export function dispatchPreview({ tasks, status, autoStatuses, running, before, 
       owner: describeOwner(next),
       // 以前没人负责、改完有人了：这就是「改配置把卡带走了」的那批。
       wasUnassigned: previous === undefined,
-      willDispatch: auto,
+      willDispatch: auto === true || resume === true,
     })
   }
   return {

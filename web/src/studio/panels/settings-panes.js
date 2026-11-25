@@ -86,7 +86,7 @@ export function AutoDispatchPane({ form, setForm, saveBar }) {
       h('div', { className: FIELD },
         h('div', { className: LABEL }, '哪些列自动派单'),
         h('div', { className: CHECK_GROUP },
-          [['design', '待方案'], ['dev_ready', '待开发'], ['dev', '开发中'], ['test', '待测试']].map(([id, label]) =>
+          [['clarify', '待澄清'], ['design', '待方案'], ['dev_ready', '待开发'], ['dev', '开发中'], ['review', '待评审'], ['test', '待测试'], ['accept', '待验收']].map(([id, label]) =>
             h('label', { className: CHECK_ROW, key: id },
               h(CheckField, { checked: form.agentsAuto.includes(id),
                 onChange: e => setForm({
@@ -99,7 +99,7 @@ export function AutoDispatchPane({ form, setForm, saveBar }) {
               h('span', {}, label),
             )),
         ),
-        h('div', { className: HINT }, '勾选的列在卡片进入时自动派给该列对应的负责人；其余列只能手动「马上处理」。'),
+        h('div', { className: HINT }, '勾选的列在卡片进入时自动派给该列对应的负责人；列上没人负责的会自己跳过（如「待澄清」默认没人）。默认除「已完成」外全勾。正常跑完但没推进的卡，冷却后会自动再派一次，次数用完挂阻塞——这样卡不会「跑完就停在原地」。'),
       ),
       field('agentsMaxConcurrent', '同时最多几个 agent', '2'),
       field('agentsPreset', 'Agent 预设', 'standard'),

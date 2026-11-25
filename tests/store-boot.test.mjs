@@ -281,7 +281,7 @@ test('store: schema 7 drops the retired role templates and keeps their models on
     store = new StudioStore(file, { dbFile: join(dir, 'dsh-studio.db'), secrets: new SecretStore(join(dir, '.secrets.json')) })
     await store.ready
     const config = store.snapshot().config
-    assert.equal(config.schema, 7, 'schema bumps to 7')
+    assert.equal(config.schema, 8, 'schema bumps to 8（schema 7 搬角色模板，schema 8 扩自动派单默认列）')
     /* schema 7 起 `config.roles` 换了个意思：从「角色模板对象」变成「角色位白名单数组」。
        旧库里的模板对象不许漏进 state（模板的模型已经抄到专家上了，见下面几条），
        而新的白名单要按默认值补上 —— 旧库读进来不会缺这个键。 */
@@ -295,4 +295,42 @@ test('store: schema 7 drops the retired role templates and keeps their models on
     try { store?.db?.close?.() } catch { /* already closed */ }
     await rm(dir, { recursive: true, force: true, maxRetries: 3, retryDelay: 50 }).catch(() => {})
   }
+})
+
+test('store: schema 8 把「旧默认自动派单列」扩成除已完成外全部，自定义过的保持原样', async () => {
+  const bootstrap = async (autoStatuses) => {
+    const dir = await mkdtemp(join(tmpdir(), 'dsh-studio-auto-'))
+    const file = join(dir, 'dsh-studio.json')
+    await writeFile(file, JSON.stringify({
+      revision: 3,
+      updatedAt: Date.now(),
+      config: { schema: 7, agents: { enabled: true, autoStatuses } },
+      tasks: [],
+      requirements: [],
+      releases: [],
+      audit: [],
+    }), 'utf8')
+    const store = new StudioStore(file, { dbFile: join(dir, 'dsh-studio.db'), secrets: new SecretStore(join(dir, '.secrets.json')) })
+    await store.ready
+    const config = store.snapshot().config
+    return { config, cleanup: async () => {
+      try { store?.db?.close?.() } catch { /* already closed */ }
+      await rm(dir, { recursive: true, force: true, maxRetries: 3, retryDelay: 50 }).catch(() => {})
+    } }
+  }
+  const legacy = await bootstrap(['design', 'dev_ready', 'test'])
+  try {
+    assert.equal(legacy.config.schema, 8)
+    assert.deepEqual(
+      legacy.config.agents.autoStatuses,
+      ['clarify', 'design', 'dev_ready', 'dev', 'review', 'test', 'accept'],
+      '旧默认的三个列扩成「除已完成外全部」：卡停在开发中/待评审/待验收时不该再也不动',
+    )
+    assert.equal(legacy.config.agents.autoStatuses.includes('done'), false, '「已完成」永远不自动派单')
+  } finally { await legacy.cleanup() }
+
+  const custom = await bootstrap(['design', 'test'])
+  try {
+    assert.deepEqual(custom.config.agents.autoStatuses, ['design', 'test'], '用户自己收窄过的不许被迁移改掉')
+  } finally { await custom.cleanup() }
 })

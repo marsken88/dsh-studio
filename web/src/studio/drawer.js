@@ -1519,8 +1519,12 @@ function Drawer({ task, state, onClose, onChanged }) {
               : task.dispatch?.state === 'failed'
                 ? `上次派单失败：${task.dispatch.error ?? '未知原因'}`
                 : task.dispatch?.state === 'stopped'
-                  ? '上次派单已被停止'
-                  : '这张卡还没有派给 AI'),
+                  ? '上次派单已被停止（重启也不会自己接着跑，点「马上处理」继续）'
+                  : task.dispatch?.state === 'done'
+                    ? (task.dispatch.advanced === true
+                        ? `上一轮已结束并推进到下一列 · ${ownerLabel(state.config ?? {}, { kind: 'expert', id: task.dispatch.expert ?? '' }) || 'AI'}`
+                        : `上一轮已结束但没有换列（第 ${Number(task.dispatch.attempts) || 1} 次）：冷却后平台会自动再派一次，次数用完挂阻塞等补指令`)
+                    : '这张卡还没有派给 AI'),
           policy === null ? null : (() => {
             const cfg = policy.configured ?? {}
             const expertId = (picked.startsWith('expert:') ? picked.slice('expert:'.length) : picked) || task.dispatch?.expert || task.expert || ''

@@ -828,6 +828,25 @@ try {
   )
   await page.screenshot({ path: join(outDir, 'agents.png') })
 
+  // ④e2 自动派单的列：默认除「已完成」外全都能勾。
+  // 以前只列了 4 列（待方案/待开发/开发中/待测试），于是「待评审 / 待验收」里的卡
+  // 在面板上根本没有开关可点 —— 用户看到的「卡停着不动」有一半是这个。
+  const autoColumns = await page.evaluate(() => {
+    const pane = document.querySelector('[data-settings-pane="agents"]')
+    if (pane === null) return { pane: false, labels: [] }
+    return {
+      pane: true,
+      labels: [...pane.querySelectorAll('label')].map(label => String(label.innerText ?? '').trim()).filter(Boolean),
+    }
+  })
+  const wantedColumns = ['待澄清', '待方案', '待开发', '开发中', '待评审', '待测试', '待验收']
+  const missingColumns = wantedColumns.filter(label => !autoColumns.labels.includes(label))
+  check(
+    '④e2 自动派单能按列勾选（除「已完成」外七列都在）',
+    autoColumns.pane === true && missingColumns.length === 0 && !autoColumns.labels.includes('已完成'),
+    JSON.stringify({ missing: missingColumns, done: autoColumns.labels.includes('已完成') }),
+  )
+
   // ④f 设置 → 自动派单 → 提权审批：用户要的「始终允许完全访问」必须有地方配。
   // 判据按 DOM 量：这个面板里得有一个带两个口径（allow/deny）的下拉，
   // 而不是只在别处出现一句文案。

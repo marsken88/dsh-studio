@@ -172,7 +172,7 @@ export function seedExperts() {
 /** Fresh default settings. */
 export function defaultConfig() {
   return {
-    schema: 7,
+    schema: 8,
     board: { title: '需求&任务工作空间' },
     /** 角色位白名单：defaultColumns 之外的自定义岗位（运营 / 财务 / 支持…）在这里登记后，列负责人和专家都能选（issue #150）。 */
     roles: [...ROLE_IDS],
@@ -219,7 +219,11 @@ export function defaultConfig() {
       workspaceDir: '',
       /** Agent preset that gives the card session its real tools (shell, fs). */
       agentPreset: 'standard',
-      autoStatuses: ['design', 'dev_ready', 'test'],
+      /** 自动派单的列：默认**除「已完成」外全部**（列上没人负责时 tick 会自己跳过）。
+       *  以前默认只有 design/dev_ready/test，于是卡停在「开发中 / 待评审 / 待验收」就再也不动了
+       *  ——真机上 22 张开着的卡里 20 张停在白名单外（2026-11-25 用户反馈「程序启动也不接着跑」）。
+       *  想收窄就在设置里去掉勾选。 */
+      autoStatuses: ['clarify', 'design', 'dev_ready', 'dev', 'review', 'test', 'accept'],
       /** 沙箱：卡会话的操作系统级文件/命令边界（DSH 的 permission preset）；提权审批（allow/deny）口径见 escalation.js。 */
       sandbox: 'workspace-write',
       escalation: 'allow',
@@ -231,7 +235,9 @@ export function defaultConfig() {
       worktreeRoot: '',
       /** on_done = 卡进「已完成」时回收 worktree；manual = 留着等人看。 */
       cleanupWorktree: 'manual',
-      /** AI 失败重试：失败后按 baseMs × factor^n 退避，超过 max 次升级成人处理。 */
+      /** AI 失败重试：失败后按 baseMs × factor^n 退避，超过 max 次升级成人处理。
+       *  同一组数字也用于「跑完但没推进」的催派：最多 max + 1 次，两次之间隔 baseMs
+       *  （见 dispatcher.tick 的 handoff 分支与 dispatch-state.handoffRetry）。 */
       retry: { max: 2, baseMs: 60000, factor: 2 },
     },
     /** 发布准入：需要的话可以要求「上过预发」「需求签过字」才能发布。 */

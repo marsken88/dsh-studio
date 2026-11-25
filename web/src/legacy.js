@@ -1038,7 +1038,7 @@ html[data-dsh-theme="light"] [class*="rightbarCol"] { background: #fafafa !impor
         agentsGrouping: config.agents?.workspaceGrouping === 'requirement' ? 'requirement' : 'card',
         agentsWorktreeRoot: config.agents?.worktreeRoot ?? '',
         agentsCleanup: config.agents?.cleanupWorktree ?? 'manual',
-        agentsAuto: Array.isArray(config.agents?.autoStatuses) ? config.agents.autoStatuses : ['design', 'dev_ready', 'test'],
+        agentsAuto: Array.isArray(config.agents?.autoStatuses) ? config.agents.autoStatuses : ['clarify', 'design', 'dev_ready', 'dev', 'review', 'test', 'accept'],
       })
       const [status, setStatus] = React.useState(null)
       const [error, setError] = React.useState(null)
@@ -1119,7 +1119,7 @@ html[data-dsh-theme="light"] [class*="rightbarCol"] { background: #fafafa !impor
         columns: ['列的负责人', '看板每一列默认派给谁。选「默认」用系统自带的那一位。'],
         gitlab: ['代码仓库', '一个仓库一条记录：地址、路径、令牌各自独立，同步时互不干扰。'],
         feishu: ['飞书机器人', '卡片状态变化时往群里发消息。可以按团队或项目建多个机器人。'],
-        agents: ['自动派单', '卡片进入勾选的列时，自动把活派给该列的负责人；这里是全局开关与并发上限。'],
+        agents: ['自动派单', '卡片进入勾选的列时，自动把活派给该列的负责人；默认除「已完成」外全勾，列上没人负责的会跳过。'],
         testing: ['测试执行', '接口用例跑在哪、能访问哪些域名、超时多少。执行器就跑在这台机器上（.218），不依赖外部 CI。'],
         costs: ['成本与预算', '一个月允许派多少次活、跑多少小时，超了在效能页亮黄亮红。'],
         environments: ['部署环境', '版本可以登记「上过哪个环境」，只留痕：平台不接 CD，不会触发任何部署。'],

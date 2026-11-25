@@ -1,7 +1,7 @@
 // ------------------------------------------------------------------ dispatcher
 import { DEFAULT_ROLES, FALLBACK_AGENT_MODEL, ROLE_IDS, SANDBOX_MODES, STATUSES, codingSummary, normalizeStrategy, worktreeRoot } from './domain.js'
 import { effectiveConcurrency } from './parallel-guard.js'
-import { abandonedRetry, dispatchPhase } from './dispatch-state.js'
+import { abandonedRetry, dispatchPhase, handoffRetry, restartResume } from './dispatch-state.js'
 import { driftNote, isModelDrift, sessionDirOf } from './model-drift.js'
 import { stripQuotedCode } from './mention-note.js'
 import { handoffBlock } from './handoff.js'
@@ -42,6 +42,19 @@ export const ROLE_BRIEF = {
   dev: '按方案实现代码：先读相关源码，改动小步可验证；需要时开分支提 MR 并把链接写进 gitlabMR；自测通过后推进到「待测试」。',
   qa: '按需求与方案设计用例并验证：正常路径、边界、异常；记录实际执行的命令与结果；通过推进到「待验收」，不通过退回「待开发」并写明原因。',
   ops: '把交付变成用得起来的东西：操作手册、知识库条目、变更与回滚预案；与产品一起收口需求，结论写进交付物（kind=doc）。',
+}
+
+/** 「跑完但卡片没换列」时追加的派单指令（tick 的催派分支用）。
+ *  为什么写得这么硬：agent 正常结束、只回一句结论就把卡留在原列，
+ *  是 2026-11-25 用户看到「卡停着不动」的直接原因。 */
+export function nudgeInstruction(column, plan = {}) {
+  const label = String(column?.label ?? '当前列')
+  const attempt = Math.max(1, Math.trunc(Number(plan.attempts ?? 0)) + 1)
+  return [
+    `这张卡上一轮已经结束，但仍停在「${label}」列没有推进（第 ${attempt} 次接手）。`,
+    '请接着把这一列该做的活做完，结束时必须调用 studio_task_update 把卡片推进到下一列；',
+    '如果确实推进不了（缺信息 / 要人拍板 / 被门禁挡住），调用 studio_task_block 写明原因——不要只解释一下就结束。',
+  ].join('')
 }
 
 /** 这个角色在当前配置下认不认识（config.roles 优先，默认四岗 + 运营）。 */
@@ -581,37 +594,66 @@ export class Dispatcher {
     this.timer.unref?.()
   }
 
-  /** 把上次进程留下的 running 印记改成 stopped，免得看板一直显示「AI 处理中」。 */
+  /**
+   * 开机收尾：把上次进程留下的「跑着」印记改成可续跑的形状，别让看板一直显示「AI 处理中」。
+   *
+   * 两种卡要接（用户 2026-11-25 反馈「重启后卡不会自己接着跑」）：
+   *  ① 进程结束时还在跑：清掉本列印记（status 置空）+ 打 resume（不看自动列白名单也要派一次）；
+   *  ② 上一轮正常结束、但卡片没换列：同样打 resume —— 否则它永远停在原列，
+   *     要么等人点「马上处理」，要么要等下一次重启。
+   * 人主动「停止」的（stopped）不动：那是人的意图，重启不该改。
+   */
   async reconcile() {
     const state = this.store.snapshot()
     for (const task of state.tasks) {
-      if (task.dispatch?.state !== 'running') continue
-      /* 必须把 status 一起清掉：tick() 的判据是「dispatch.status === task.status 就跳过」，
-         只改 state 会让这张卡永久停摆 —— 看着是"已停止"，实际再也不会被派单。
-         清掉 status 之后，下一轮 tick 会重新拾起它（并把本轮记为一次 abandoned 尝试）。 */
-      const retry = abandonedRetry(task.dispatch)
-      await markDispatch(this.store, task.id, { state: 'stopped', at: Date.now(), status: '', attempts: retry.attempts })
-      /* 这一轮是"进程没跑完就没了"，要留痕：事件 + 卡片历史。
-         以前只静默清印记，事后完全看不出这张卡崩过几次（事件账本里也只有业务事件）。 */
-      emitEvent('task/abandoned', {
-        taskId: task.id,
-        title: task.title,
-        attempts: retry.attempts,
-        exhausted: retry.exhausted,
-        sessionId: String(task.dispatch?.sessionId ?? ''),
-        reason: 'process-restart',
-      })
-      await this.store.mutate(state => {
-        const target = state.tasks.find(entry => entry.id === task.id)
-        if (target === undefined) return
-        target.history = [...(target.history ?? []), {
+      const dispatch = task.dispatch
+      if (dispatch === null || typeof dispatch !== 'object') continue
+      const sameColumn = String(dispatch.status ?? '') === String(task.status ?? '')
+      if (dispatch.state === 'running') {
+        /* 必须把 status 一起清掉：tick() 的判据是「dispatch.status === task.status 就跳过」，
+           只改 state 会让这张卡永久停摆 —— 看着是"已停止"，实际再也不会被派单。
+           清掉 status 之后，下一轮 tick 会重新拾起它（并把本轮记为一次 abandoned 尝试）。 */
+        const retry = abandonedRetry(dispatch)
+        await markDispatch(this.store, task.id, {
+          ...dispatch,
+          state: 'stopped',
+          status: '',
+          attempts: retry.attempts,
+          resume: true,
           at: Date.now(),
-          by: 'dispatcher',
-          status: target.status,
-          note: `abandoned：上次进程结束时这张卡还在跑（第 ${retry.attempts} 次尝试）`,
-        }]
-      }).catch(() => {})
-      this.note(`清掉上次进程留下的派单印记，允许重新派单 ${task.id}（第 ${retry.attempts} 次尝试）`)
+        })
+        /* 这一轮是"进程没跑完就没了"，要留痕：事件 + 卡片历史。
+           以前只静默清印记，事后完全看不出这张卡崩过几次（事件账本里也只有业务事件）。 */
+        emitEvent('task/abandoned', {
+          taskId: task.id,
+          title: task.title,
+          attempts: retry.attempts,
+          exhausted: retry.exhausted,
+          sessionId: String(dispatch.sessionId ?? ''),
+          reason: 'process-restart',
+        })
+        await this.store.mutate(state => {
+          const target = state.tasks.find(entry => entry.id === task.id)
+          if (target === undefined) return
+          target.history = [...(target.history ?? []), {
+            at: Date.now(),
+            by: 'dispatcher',
+            status: target.status,
+            note: `abandoned：上次进程结束时这张卡还在跑（第 ${retry.attempts} 次尝试）`,
+          }]
+        }).catch(() => {})
+        this.note(`清掉上次进程留下的派单印记，允许重新派单 ${task.id}（第 ${retry.attempts} 次尝试）`)
+        continue
+      }
+      /* 上一轮正常结束、没换列：重启后接着派一次。
+         人主动停的（stopped）不碰；换过列的记录 status 与当前列已经不同，交给正常派单。 */
+      if (sameColumn && restartResume(dispatch) && dispatch.advanced !== true) {
+        /* 不清 at：它同时是「上一轮什么时候结束」和催派冷却的起点。
+           reconcile 把它改成现在，等于重启后又白等一个冷却周期。 */
+        await markDispatch(this.store, task.id, { ...dispatch, resume: true }).catch(() => {})
+        await this.appendHistory(task.id, '重启：上一轮结束后卡片没有推进，重新派一次（人不用从头再点）')
+        this.note(`重启续跑 ${task.id}：上一轮结束但没有推进`)
+      }
     }
   }
 
@@ -620,16 +662,23 @@ export class Dispatcher {
     this.timer = undefined
   }
 
-  /** Drop a card from the running set once its agent goes idle. */
+  /** Drop a card from the running set once its agent goes idle.
+   *
+   * 这里写的是「这一列的这一轮跑完了」：state=done + **保留 status** + advanced（有没有换列）。
+   * 以前把 info 整条铺进去、state 改成 idle，status 顺势丢了 —— 下一轮 tick 就当成
+   * 「这一列没派过」立刻再派一遍，同一个会话 20 秒一轮无限循环（2026-11-22 真机）。
+   * 现在没换列的卡由 tick 按 handoffRetry 冷却后「催一次」，换列的直接交给下一列。 */
   settle(sessionId) {
     for (const [slot, info] of this.running) {
       if (info.sessionId !== sessionId) continue
       this.running.delete(slot)
-      markDispatch(this.store, info.taskId, { ...info, state: 'idle', at: Date.now() }).catch(() => {})
+      const task = this.store.snapshot().tasks.find(entry => entry.id === info.taskId)
+      const advanced = task !== undefined && String(task.status ?? '') !== String(info.status ?? '')
+      markDispatch(this.store, info.taskId, { ...info, state: 'done', advanced, at: Date.now() }).catch(() => {})
       settleRun(sessionId)
       // 会话刚空闲：趁 session 还活着，把引擎自己的 token 计量取下来（真实构成，不是估算）
       void this.captureMeasurement(sessionId, info).catch(() => {})
-      this.note(`${sessionId} went idle`)
+      this.note(`${sessionId} went idle${advanced ? '（已换列）' : '（没有换列）'}`)
       return
     }
   }
@@ -770,6 +819,14 @@ export class Dispatcher {
       this.note(concurrency.reason)
     }
     const auto = new Set(Array.isArray(cfg.autoStatuses) ? cfg.autoStatuses : [])
+    /* 「跑完但没推进」催一次的档位：复用失败重试的配置 —— retry.max 次失败重试 + 首轮，
+       retry.baseMs 就是两次催派之间的冷却。没有冷却的话 tick 每 5 秒一轮，
+       会把「跑完→立刻再派」连成一条永不停的链（2026-11-22 真机 20 秒一轮）。 */
+    const retryCfg = cfg.retry ?? {}
+    const handoff = {
+      maxAttempts: Math.max(1, Math.trunc(Number(retryCfg.max ?? 2)) + 1),
+      cooldownMs: Math.max(0, Number(retryCfg.baseMs ?? 60_000)),
+    }
     // 完成的卡按策略回收它的 worktree（manual 就留着等人看 diff）。
     if (String(cfg.cleanupWorktree ?? 'manual') === 'on_done') {
       for (const task of state.tasks) {
@@ -781,49 +838,109 @@ export class Dispatcher {
     for (const task of state.tasks) {
       if (this.running.size >= limit) break
       if (this.busy(task.id)) continue
+      // 「已完成」永远不派：就算有人把 done 勾进 autoStatuses，也不该再叫 AI 跑一遍。
+      if (task.status === 'done') continue
       // 阻塞的卡停在原地等人处理，不自动往下派。
       if (task.blocked !== null && task.blocked !== undefined) continue
       // 上次失败还在退避窗口里：到点再试，别每 5 秒硬撞。
       if ((Number(task.retryAt) || 0) > Date.now()) continue
-      if (!auto.has(task.status)) continue
+      const dispatch = task.dispatch ?? null
+      /* 重启续跑（dispatch.resume）的卡不受「自动派单列」白名单限制：
+         它本来就是被上次进程打断（或被重启接上的），人的意图是「接着跑完」——
+         以前这里只看白名单，于是 dev / review / accept 列里的中断卡重启后一张都不动。 */
+      if (!auto.has(task.status) && dispatch?.resume !== true) continue
       const column = STATUSES.find(entry => entry.id === task.status)
       if (column === undefined) continue
       // 这一列没人负责（或没匹配到领域专家）就停着，等人指派，不算失败。
       if (ownerFor(state.config, task, column, this.loadByExpert(), state) === undefined) continue
-      // One hand-off per (card, column): after that the card waits for a human
-      // or for the agent to move it on. "马上处理" is the way to run it again.
-      if (task.dispatch?.status === task.status) {
-        /* 但「印记说在跑、会话其实早就没了」必须先收回来（issue #157）：
-           否则这张卡既不会重派、也不会给任何提示，看板一直显示「处理中」。
-           判据与工作台的「停摆」同一份（dispatch-state.js）：真会话表优先，其次 10 分钟超时。 */
+      /* 本列已经有印记：先判它处于什么阶段（判据与工作台「停摆」同一份，见 dispatch-state.js）。 */
+      if (dispatch !== null && typeof dispatch === 'object' && String(dispatch.status ?? '') === String(task.status ?? '')) {
         const phase = dispatchPhase(task, { isLive: sessionId => this.hasLiveSession(sessionId) })
         if (phase === 'stalled') {
-          const minutes = Math.max(1, Math.round((Date.now() - (Number(task.dispatch.at) || Date.now())) / 60000))
-          const retry = abandonedRetry(task.dispatch)
-          await markDispatch(this.store, task.id, { ...task.dispatch, state: 'stopped', status: '', at: Date.now(), attempts: retry.attempts })
-          await this.appendHistory(task.id, `派单印记已收回：会话 ${String(task.dispatch.sessionId ?? '')} 约 ${minutes} 分钟前就没有在跑了，下一轮会重新派单`)
+          /* 「印记说在跑、会话其实早就没了」（issue #157）：收回来，下一轮重派。
+             清 status 之后 tick 才会重新拾起；resume 让它不受自动列白名单限制。 */
+          const minutes = Math.max(1, Math.round((Date.now() - (Number(dispatch.at) || Date.now())) / 60000))
+          const retry = abandonedRetry(dispatch)
+          await markDispatch(this.store, task.id, {
+            ...dispatch,
+            state: 'stopped',
+            status: '',
+            attempts: retry.attempts,
+            resume: true,
+            at: Date.now(),
+          })
+          await this.appendHistory(task.id, `派单印记已收回：会话 ${String(dispatch.sessionId ?? '')} 约 ${minutes} 分钟前就没有在跑了，下一轮会重新派单`)
           this.note(`reclaim stale dispatch ${task.id}（${minutes} 分钟）`)
+          continue
         }
+        if (phase === 'done') {
+          /* 正常跑完但卡片没换列（advanced 由 settle 记录）。
+             换过列的不会走到这里（status 已经不同了）；没换列的冷却后催一次，
+             最多 retry.max + 1 次，用完挂阻塞等人 —— 既不无限空转，也不会「跑完就再也不动」。 */
+          if (dispatch.advanced === true) continue
+          const plan = handoffRetry(dispatch, { ...handoff, now: Date.now() })
+          if (plan.exhausted) {
+            await this.parkHandoff(task, column, plan)
+            continue
+          }
+          if (plan.waitMs > 0) continue
+          await this.dispatchCard(task, column, `${task.id}:${task.status}:nudge:${plan.attempts + 1}`, {
+            nudge: true,
+            instruction: nudgeInstruction(column, plan),
+          })
+          continue
+        }
+        // running（会话活着）/ idle（人主动停止）：都不该再派。
         continue
       }
-      const key = `${task.id}:${task.status}`
-      await this.launch(task, column, key).then(async () => {
-        // 派单成功：把失败计数清掉，避免历史失败影响下一次判断。
-        if ((Number(task.agentFailures) || 0) > 0) {
-          await this.store.mutate(draft => {
-            const found = draft.tasks.find(entry => entry.id === task.id)
-            if (found === undefined) return
-            found.agentFailures = 0
-            found.retryAt = 0
-          })
-        }
-      }).catch(async error => {
-        this.lastError = String(error?.message ?? error).slice(0, 400)
-        this.note(`launch ${task.id} failed: ${this.lastError}`)
-        await markDispatch(this.store, task.id, { key, status: task.status, state: 'failed', error: this.lastError, at: Date.now() })
-        // 失败要退避重试；连续失败超过上限就升级成人处理。
-        await noteAgentFailure(this.store, task.id, error).catch(() => {})
-      })
+      await this.dispatchCard(task, column, `${task.id}:${task.status}`, {})
+    }
+  }
+
+  /** 派一次并把成败记进卡：tick 的首轮与「催派」共用这一段。 */
+  async dispatchCard(task, column, key, extra = {}) {
+    if (extra.nudge === true) {
+      await this.appendHistory(task.id, `AI 上一轮结束了但卡片没换列，冷却时间到，再派一次（第 ${Number(task.dispatch?.attempts ?? 0) + 1} 次）`)
+    }
+    await this.launch(task, column, key, extra).then(async () => {
+      // 派单成功：把失败计数清掉，避免历史失败影响下一次判断。
+      if ((Number(task.agentFailures) || 0) > 0) {
+        await this.store.mutate(draft => {
+          const found = draft.tasks.find(entry => entry.id === task.id)
+          if (found === undefined) return
+          found.agentFailures = 0
+          found.retryAt = 0
+        })
+      }
+    }).catch(async error => {
+      this.lastError = String(error?.message ?? error).slice(0, 400)
+      this.note(`launch ${task.id} failed: ${this.lastError}`)
+      await markDispatch(this.store, task.id, { key, status: task.status, state: 'failed', error: this.lastError, at: Date.now() })
+      // 失败要退避重试；连续失败超过上限就升级成人处理。
+      await noteAgentFailure(this.store, task.id, error).catch(() => {})
+    })
+  }
+
+  /** 催派次数用完：把卡挂成阻塞，等人补一句更具体的指令再「马上处理」。
+   *  不挂阻塞的话，下次 tick 还会在同一张卡上循环判「已用尽」，看不出来需要人介入。 */
+  async parkHandoff(task, column, plan) {
+    const reason = `AI 连续 ${plan.attempts} 轮跑完都没有推进这张卡（还停在「${column.label}」），先停下等人：看看卡上缺什么，补一条更具体的指令后点「马上处理」`
+    let parked = false
+    await this.store.mutate(draft => {
+      const found = draft.tasks.find(entry => entry.id === task.id)
+      if (found === undefined) return
+      if (found.blocked !== null && found.blocked !== undefined) return
+      found.blocked = { by: '系统', at: Date.now(), reason }
+      found.blockedReason = reason
+      found.history = [...(found.history ?? []), { at: Date.now(), by: '系统', status: found.status, note: reason }]
+      parked = true
+    }).catch(() => {})
+    if (parked !== true) return
+    this.note(`催派用完，挂阻塞 ${task.id}`)
+    emitEvent('agent/failed', { taskId: task.id, attempts: plan.attempts, exhausted: true, error: reason, by: '系统' })
+    if (typeof host.feishuBroadcast === 'function') {
+      host.feishuBroadcast(this.store.snapshot().config, `【AI 没推进】${task.code || task.id} ${task.title}\n${reason}`)
+        .catch(() => undefined)
     }
   }
 
@@ -841,10 +958,10 @@ export class Dispatcher {
     if (typeof expertId === 'string' && expertId.trim().length > 0) {
       const target = resolveDispatchTarget(state.config, expertId)
       if (target.error !== undefined) throw new Error(target.error)
-      await this.launch(task, column, key, { owner: target.owner, instruction })
+      await this.launch(task, column, key, { owner: target.owner, instruction, manual: true })
       return
     }
-    await this.launch(task, column, key, { instruction })
+    await this.launch(task, column, key, { instruction, manual: true })
   }
 
   /** Hand a card to whoever a comment just @mentioned. */
@@ -855,6 +972,7 @@ export class Dispatcher {
     await this.launch(task, column, `${task.id}:${task.status}:mention:${Date.now()}`, {
       owner: { kind: mention.kind, id: mention.id },
       instruction,
+      manual: true,
     })
   }
 
@@ -998,7 +1116,28 @@ export class Dispatcher {
     const expert = resolved.expert
     const sessionId = `studio-${task.id}-${expert.id}`
     const slot = `${task.id}#${expert.id}`
-    this.running.set(slot, { taskId: task.id, sessionId, expert: expert.id, team: resolved.team?.id ?? '', at: Date.now(), state: 'running' })
+    /* 这是这一列的第几次尝试（催派 / 崩溃续跑的计数，上限见 config.agents.retry.max）：
+       - 人手动派的（马上处理 / @ 派活）：重新计数，别让人被 AI 的失败次数挡住；
+       - 同一列再来一次（催派）或重启续跑：在原有次数上 +1；
+       - 换了一列（正常推进）：从 1 开始。 */
+    const prior = task.dispatch ?? null
+    const sameColumn = prior !== null && typeof prior === 'object'
+      && String(prior.status ?? '') === String(task.status ?? '')
+    const previousAttempts = Number(prior?.attempts) || 0
+    const attempts = extra.manual === true
+      ? 1
+      : ((sameColumn || prior?.resume === true) ? previousAttempts + 1 : 1)
+    this.running.set(slot, {
+      taskId: task.id,
+      sessionId,
+      expert: expert.id,
+      team: resolved.team?.id ?? '',
+      at: Date.now(),
+      status: task.status,
+      attempts,
+      key,
+      state: 'running',
+    })
     try {
       const agent = await this.ensureSession(sessionId, task, expert, cfg)
       await markDispatch(this.store, task.id, {
@@ -1008,6 +1147,7 @@ export class Dispatcher {
         team: resolved.team?.id ?? '',
         sessionId,
         state: 'running',
+        attempts,
         at: Date.now(),
       })
       const requirement = this.store.snapshot().requirements.find(entry => entry.id === task.requirementId)

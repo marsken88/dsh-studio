@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { describe, it, test } from 'node:test'
 
-import { countStalled, dispatchPhase, isStalled, RUNNING_TIMEOUT_MS } from '../src/host/dispatch-state.js'
+import { abandonedRetry, countStalled, dispatchPhase, handoffRetry, isStalled, restartResume, RUNNING_TIMEOUT_MS } from '../src/host/dispatch-state.js'
 
 /* 这两个 bug 都是「状态形状看着对、语义不对」，只能靠断言防住：
    ① 崩溃重启后 reconcile 只清 state 不清 status → 卡永久停摆
@@ -77,5 +77,33 @@ test('dispatchPhase：不传 ctx 时默认就按 10 分钟兜底（否则挂死�
   const stale = { status: 'dev', dispatch: { status: 'dev', state: 'running', sessionId: 's1', at: Date.now() - RUNNING_TIMEOUT_MS - 1000 } }
   assert.equal(dispatchPhase(fresh), 'running', '刚派出去的算在跑')
   assert.equal(dispatchPhase(stale), 'stalled', '没动静超过阈值算停摆')
-  assert.equal(isStalled({ status: 'dev', dispatch: { status: 'dev', state: 'idle', at: 1 } }), true, 'idle 仍然立刻算停摆')
+  /* 2026-11-25 改口径：老版本 settle 写的是 state:'idle'，那是「这一轮正常跑完了」，
+     不该报成停摆（否则看板会给一堆正常结束的卡挂黄条）。 */
+  assert.equal(dispatchPhase({ status: 'dev', dispatch: { status: 'dev', state: 'idle', at: 1 } }), 'done', '老的 idle 印记按「已结束」算')
+  assert.equal(isStalled({ status: 'dev', dispatch: { status: 'dev', state: 'idle', at: 1 } }), false, '正常结束不是停摆')
+})
+
+test('handoffRetry：跑完没推进时按冷却 + 次数上限催派', () => {
+  const now = 1_000_000
+  const done = { status: 'dev', state: 'done', advanced: false, attempts: 1, at: now - 10_000 }
+  const waiting = handoffRetry(done, { now, maxAttempts: 3, cooldownMs: 60_000 })
+  assert.equal(waiting.attempts, 1)
+  assert.equal(waiting.exhausted, false)
+  assert.equal(waiting.waitMs, 50_000, '冷却窗口内还要等')
+  const ready = handoffRetry({ ...done, at: now - 90_000 }, { now, maxAttempts: 3, cooldownMs: 60_000 })
+  assert.equal(ready.waitMs, 0, '过了冷却就能派')
+  const used = handoffRetry({ ...done, attempts: 3 }, { now, maxAttempts: 3, cooldownMs: 60_000 })
+  assert.equal(used.exhausted, true, '次数用完就不该再自动派')
+  const blank = handoffRetry({}, {})
+  assert.equal(blank.max, 3, '不传参数时用默认上限')
+  assert.equal(blank.waitMs, 0, '没有时间戳就当冷却已过')
+})
+
+test('restartResume：重启要接住「被中断」和「跑完没推进」，人停的不接', () => {
+  assert.equal(restartResume(null), false)
+  assert.equal(restartResume({ status: 'dev', state: 'running' }), true, '进程结束时在跑')
+  assert.equal(restartResume({ status: 'dev', state: 'done', advanced: false }), true, '正常结束但没换列')
+  assert.equal(restartResume({ status: 'dev', state: 'idle' }), true, '老印记也按没推进算')
+  assert.equal(restartResume({ status: 'dev', state: 'done', advanced: true }), false, '换过列的交给下一列')
+  assert.equal(restartResume({ status: 'dev', state: 'stopped' }), false, '人主动停的不接')
 })

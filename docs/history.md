@@ -1260,3 +1260,37 @@ TDZ 41 文件，`pnpm build` 后 `cmp dist/client.js client.js` 一致，`probe:
 侧栏里这些会话已经出现在各自工作区下，「未分组」整组消失。
 `npm test` 也在切到完全权限后跑通：492/492（本地 + `TZ=UTC`）。
 仍未实测的只有「新派单当场挂上」这一条（要真派一张卡才会走到 `joinWorkspace`）。
+
+## 卡跑完就停在原地 / 重启后不续跑（2026-11-25）
+
+用户反馈：卡在「正常结束」或进程重启之后，程序起来了也不会自动继续推进；指名的一张卡是
+`REQ-2026-003-3 · 开发中`（更新停在 03:00），另外 .218 上 22 张开着的卡里有 20 张停在
+`autoStatuses` 白名单之外（dev 8 / accept 11 / review 2 / clarify 2 / dev_ready 2）。
+
+查下来三件事叠在一起：
+
+1. **`settle()` 把「这一列派过」的印记抹掉了**。它写的是 `{...info, state:'idle'}`，
+   而 `info` 里没有 `status`，整条覆盖后 `dispatch.status` 变成 undefined —— 下一轮 tick
+   认为「这一列没派过」，立刻再派一遍。本机复现：同一个会话连续 3 轮都在派（真实数据里
+   2026-11-22 11:14–11:16 每 20 秒一轮）。现在正常结束写 `state:'done'` + 保留 `status` +
+   `advanced`（这一轮有没有换列）；没换列的按 `config.agents.retry` 冷却（`baseMs`）后催一次，
+   最多 `retry.max + 1` 轮，用完挂阻塞并写清「AI 连续 N 轮没有推进」。换列的直接交给下一列，
+   `attempts` 重新从 1 算。
+2. **`reconcile()` 只接住 `state:'running'`**。正常结束但没推进的卡重启后没人管；而且 tick 的
+   自动列白名单会把 dev / review / accept 里的中断卡直接过滤掉。现在两种形状都打 `resume`，
+   `tick` 对 `resume` 的卡**不看白名单**也要派一次；人主动「停止」（`stopped`）的不动。
+3. **默认自动列太窄**（design / dev_ready / test）。默认改成「除已完成外全部」，schema 8 迁移，
+   只改「还是旧默认」的配置，用户自己收窄过的保持原样；设置页补齐七列勾选（原来只列 4 列，
+   `review/accept` 根本没有开关）。
+
+配套：换列时清掉旧列的派单印记（卡被打回原列也能重新派）、解除阻塞时把催派次数清零、
+看板/抽屉按 `queued/running/stalled/done/idle` 五态显示、`done` 列永不派（配置里勾了也不派）。
+
+验证：`npm run check` 588 条（新增 `tests/dispatch-continue.test.mjs` 11 条 + `dispatch-state`
+3 条，`store-boot` 补 schema 8 迁移，本地与 `TZ=UTC` 全绿）；`pnpm build` + `cmp` 一致；
+用**真库副本**（本机 `~/.dsh/dsh-studio.db` 三件套拷到 tmp）起 `StudioStore`：schema 8、
+`autoStatuses` 已迁移、`REQ-003`（review）与 `accept` 列的两张卡在 tick 里能被派出，
+正常结束的卡在冷却窗口内不再重派；`probe:panel` 对 .218 跑 **87/92**（新增 ④e2 七列勾选断言
+通过；❌ 的 5 条与**改前基线完全同 5 条**，是 .218 还跑 0.15.1 后端导致，不是这次改动）。
+
+没验到的：目标机还没部署这一版，所以「真重启 dsh-web 后逐张续跑」要等部署后再看一次。

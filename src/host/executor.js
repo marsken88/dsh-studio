@@ -1505,10 +1505,30 @@ export async function updateTask(store, id, patch) {
       task.blockedReason = ''
       task.history.push({ at: task.updatedAt, by, status: task.status, note: 'unblocked' })
       blocking = 'unblocked'
+      /* 解除阻塞 = 「接着走」：把催派次数清掉，否则被系统因「连续几轮没推进」挂起的卡
+         一解除就立刻又到上限、再被挂上（人会觉得按钮失效）。 */
+      if (task.dispatch !== null && typeof task.dispatch === 'object') {
+        task.dispatch = { ...task.dispatch, attempts: 0 }
+      }
     }
     // 换列时负责人会被这一列的默认负责人覆盖，团队记忆要用「换列前」的那个人去认团。
     const expertBefore = task.expert
     if (normalized.status !== undefined) {
+      /* 换列 = 新的一棒：把上一列的派单印记清成「本列还没派过」。
+         不清的话，卡被打回原来那一列时 dispatch.status 又等于当前列，
+         tick 会当成「这一列已经派过一轮」——永远不动（2026-11-25 反馈的「卡停着」之一）。
+         保留 sessionId / expert 只是为了抽屉里还能看到上一次是谁跑的。 */
+      if (previous !== task.status && task.dispatch !== null && typeof task.dispatch === 'object') {
+        task.dispatch = {
+          status: '',
+          state: 'queued',
+          at: task.updatedAt,
+          attempts: 0,
+          sessionId: String(task.dispatch.sessionId ?? ''),
+          expert: String(task.dispatch.expert ?? ''),
+          team: String(task.dispatch.team ?? ''),
+        }
+      }
       if (override !== '') task.override = { by, at: Date.now(), reason: String(override).slice(0, 300) }
     task.history.push({ at: task.updatedAt, by, status: normalized.status, ...(override !== '' ? { note: `override：${override}` } : {}) })
       // 缺陷从「已完成」被打回去 = 重开，重开次数是质量信号（谁的老毛病又犯了）。

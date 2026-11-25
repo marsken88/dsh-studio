@@ -361,6 +361,10 @@ export async function handleTaskRoute({ method, route, req, res, store, url }) {
       tasks: snapshot.tasks,
       status,
       autoStatuses: config.agents?.autoStatuses,
+      handoff: {
+        maxAttempts: Math.max(1, Math.trunc(Number(config.agents?.retry?.max ?? 2)) + 1),
+        cooldownMs: Math.max(0, Number(config.agents?.retry?.baseMs ?? 60_000)),
+      },
       running: dispatcher === undefined ? [] : [...dispatcher.running.values()].map(info => info.taskId),
       before: task => ownerFor(config, task, column, dispatcher?.loadByExpert?.() ?? new Map(), snapshot),
       after: task => ownerFor({ ...config, columns: next }, task, column, dispatcher?.loadByExpert?.() ?? new Map(), snapshot),

@@ -17,6 +17,6 @@ test('abandonedRetry：崩过的一轮要计入 attempts，到上限标记 exhau
 test('dispatcher.reconcile 真的发 task/abandoned 并写进卡片历史', () => {
   const source = readFileSync(new URL('../src/host/dispatcher.js', import.meta.url), 'utf8')
   assert.match(source, /emitEvent\('task\/abandoned'/, '要发 task/abandoned 事件')
-  assert.match(source, /abandonedRetry\(task\.dispatch\)/, 'attempts 要按 abandonedRetry 递增')
+  assert.match(source, /abandonedRetry\((?:task\.)?dispatch\)/, 'attempts 要按 abandonedRetry 递增')
   assert.match(source, /abandoned：上次进程结束时这张卡还在跑/, '卡片历史里要留一条')
 })

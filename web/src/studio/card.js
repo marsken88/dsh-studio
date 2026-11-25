@@ -48,10 +48,17 @@ function Card({ task, onOpen, config, requirements, onPickRequirement, onPickPro
   const running = task.dispatch?.state === 'running'
   /* 崩溃后 reconcile 会把 state 改成 stopped，但印记仍匹配当前列 —— 这时卡既不在跑、
      也不会再被派单。以前这种卡和"排队中"长得一模一样，看板上看不出来。
-     三态：running（正在跑）/ stalled（停摆了，要人管）/ queued（排队中）。 */
-  const dispatchPhase = task.dispatch === null || task.dispatch === undefined || task.dispatch.status !== task.status
-    ? 'queued'
-    : (task.dispatch.state === 'running' ? 'running' : 'stalled')
+     阶段：running（正在跑）/ stalled（停摆了，要人管）/ idle（人主动停止）/
+          done（本轮已结束，没推进的会被催派）/ queued（排队中）。
+     判据要和 src/host/dispatch-state.js 的 dispatchPhase 一致。 */
+  const dispatchPhase = (() => {
+    const dispatch = task.dispatch
+    if (dispatch === null || dispatch === undefined || dispatch.status !== task.status) return 'queued'
+    if (dispatch.state === 'running') return 'running'
+    if (dispatch.state === 'stopped') return 'idle'
+    if (dispatch.state === 'done' || dispatch.state === 'idle') return 'done'
+    return 'stalled'
+  })()
   const blocked = task.blocked ?? null
   const project = (config?.projects ?? []).find(entry => entry.id === task.project)
   const iteration = (project?.iterations ?? []).find(entry => entry.id === task.iteration)

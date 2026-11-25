@@ -84,8 +84,8 @@ AI 是执行手，判定权在确定性规则和人手里。要变成 AI Native�
 
 | # | 能力 | 断言 | 今天 |
 | --- | --- | --- | --- |
-| 1 | 崩溃自愈 | `kill -9` 后重启，≤2 tick 内重派**恰好 1 次**；events 出现 `abandoned` + `dispatched` | ✅ 已做（0.9.10：`abandonedRetry` 把崩掉那轮计入 attempts 并发 `task/abandoned`；`reconcile` 清掉印记后下一个 tick 重派） |
-| 2 | 停摆可测 | `dispatch.status===status && state!=='running'` 持续超过 2 tick 的卡数 **= 0** | ✅ 已做（`dispatch-state.js` 的 `dispatchPhase`/`isStalled`/`countStalled`；2026-11-20 接进工作台与 `/state`） |
+| 1 | 崩溃自愈 | `kill -9` 后重启，≤2 tick 内重派**恰好 1 次**（不管那一列是否勾了「自动派单」）；「正常结束但没换列」的卡重启后也续跑一次；人主动「停止」的不被拉起；events 出现 `abandoned` + `dispatched` | ✅ 已做（0.9.10 `abandonedRetry` 会计 attempts 并发 `task/abandoned`；2026-11-25 起 `reconcile` 对 running 与 done-未推进两种形状都打 `resume`，`tick` 的续跑不受自动列白名单限制；`tests/dispatch-continue.test.mjs`） |
+| 2 | 停摆可测 | `dispatchPhase(task)==='stalled'` 的卡数 **= 0**；**正常结束（`done`）不算停摆**，人主动停止（`stopped`）也不算 | ✅ 已做（`dispatch-state.js` 的 `dispatchPhase`/`isStalled`/`countStalled`，判据含 `queued/running/stalled/done/idle` 五态；2026-11-20 接进工作台与 `/state`，2026-11-25 补 `done`/`idle`） |
 | 3 | 写不丢 | 两进程各建一卡 → 重启后两张都在，或第二实例启动即被拒 | ✅ 已做（单写者：落盘前比对 revision，不一致就拒绝并重读；`tests/store-boot` + `tests/store-cas`） |
 | 4 | 失败不留半截 | 注入 persist 失败后，内存态 == 磁盘态 | ✅ 已做（`store.mutate` 落盘失败回滚内存，`tests/store-cas.test.mjs` 覆盖） |
 | 5 | 入站幂等 | 同 `Idempotency-Key` 连发 2 次评论 → 评论数 = 1 | ✅ 已做（0.6.0：POST 带 `Idempotency-Key`，同 key 回放第一次的响应并标 `x-idempotent-replay`；24h TTL、上限 200 条，存在 side 键不涨 revision） |
