@@ -397,7 +397,7 @@ export     function RequirementsPage({ state, onOpenTask, onChanged, createSigna
         const messages = intake.messages
         const bubbles = [
           h('div', { key: 'intro', className: 'rounded-xl bg-background-secondary-default px-3 py-2 text-body-2-regular text-text-primary' },
-            '先说一句你大概想解决什么？我会结合这个项目已有的需求、PRD 和当前卡继续追问，避免重复或冲突。'),
+            '先说一句你大概想解决什么？我会先查重，再按「已确认 / 待确认」追问；信息够了就停下来，提示你整理 PRD。'),
           ...messages.map((message, index) => h('div', {
             key: 'm' + index,
             className: message.role === 'assistant'
@@ -415,7 +415,14 @@ export     function RequirementsPage({ state, onOpenTask, onChanged, createSigna
             }),
           ),
           h('div', { className: 'flex min-w-0 flex-col gap-2', 'data-intake-messages': '' }, bubbles),
-          intake.error === null ? null : h('div', { className: 'text-caption-1-regular text-text-error-primary', 'data-intake-error': '' }, `模型没回上来：${intake.error}（可以重试，或切「直接填写」）`),
+          intake.error === null ? null : (() => {
+            /* 权限拒绝不是「模型没回上来」：把服务端那句原话放出来，别让人以为是模型挂了。 */
+            const denied = /不在成员名单|需要成员权限|需要管理员权限|权限名单/.test(String(intake.error))
+            return h('div', { className: 'text-caption-1-regular text-text-error-primary', 'data-intake-error': '' },
+              denied
+                ? `权限不足：${intake.error}`
+                : `模型没回上来：${intake.error}（可以重试，或切「直接填写」）`)
+          })(),
           h('div', { className: 'flex min-w-0 flex-col gap-2' },
             h(TextAreaField, {
               rows: 3, value: intake.input, 'aria-label': '回答当前问题',

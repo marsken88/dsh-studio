@@ -86,3 +86,40 @@ test('/task/signoff 用的是卡 id，不是需求引用（批量归一化误伤
     rmSync(dir, { recursive: true, force: true })
   }
 })
+
+test('/requirement/assist：提示词带首轮指令与材料标注，且不写库', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'dsh-req-assist-'))
+  const store = new StudioStore(join(dir, 'state.json'), { dbFile: join(dir, 'state.db'), secrets: new SecretStore(join(dir, '.secrets.json')) })
+  let seen = null
+  configureRequirementRoutes({
+    getLlm: () => ({
+      stream: async function * (args) {
+        seen = args
+        yield { type: 'text-delta', text: '信息够了，可以整理 PRD 草稿了' }
+        yield { type: 'finish', reason: { kind: 'stop' } }
+      },
+    }),
+    getDefaultModel: () => ({ provider: 'deepseek-official', model: 'deepseek-v4.1-flash' }),
+  })
+  try {
+    await store.ready
+    const rev = store.snapshot().revision
+    const empty = await call(store, '/requirement/assist', { messages: [] })
+    assert.equal(empty.res.status, 400, '没有对话就别调模型')
+
+    const out = await call(store, '/requirement/assist', {
+      project: '',
+      messages: [{ role: 'user', content: '看这个 https://x.feishu.cn/sheets/S1 里的字段' }],
+    })
+    assert.equal(out.res.status, 200, JSON.stringify(out.res.body?.error ?? ''))
+    assert.equal(out.res.body.reply, '信息够了，可以整理 PRD 草稿了')
+    const prompt = String(seen?.messages?.[0]?.content?.[0]?.text ?? '')
+    assert.match(prompt, /这是第一轮/, '首轮指令要进提示词')
+    assert.match(prompt, /用户贴的材料/, '材料段要进提示词')
+    assert.match(prompt, /飞书表格暂不支持自动读取正文/, '表格链接要如实标注，别让模型假装读过')
+    assert.equal(store.snapshot().revision, rev, '只读：不写库、不涨 revision')
+  } finally {
+    store.db?.close?.()
+    rmSync(dir, { recursive: true, force: true })
+  }
+})

@@ -30,7 +30,7 @@ import {
   taskExitGate,
 } from '../executor.js'
 import { randomBytes } from 'node:crypto'
-import { REQUIREMENT_ASSIST_SYSTEM, buildRequirementContext, requirementAssistPrompt } from '../requirement-assist.js'
+import { REQUIREMENT_ASSIST_SYSTEM, buildRequirementContext, feishuLinks, isSheetLink, requirementAssistPrompt } from '../requirement-assist.js'
 const INJECTED = ["commentTask","createTask","deleteRequirementFolder","getDefaultModel","getDispatcher","getLlm","publicState","readJsonBody","sendJson"]
 let host = {
   createTask: () => {},
@@ -240,7 +240,23 @@ export async function handleRequirementRoute({ method, route, req, res, store, u
     const snapshot = store.snapshot()
     const context = buildRequirementContext(snapshot, body.project)
     const mode = String(body.mode ?? 'chat') === 'draft' ? 'draft' : 'chat'
-    const prompt = requirementAssistPrompt({ mode, messages, context, title: body.title })
+    /* 用户贴的飞书文档：平台先拉正文再交给模型（读不到就写清楚，别让它假装读过）。
+       链接从**原始正文**里找（messages 已被截到 2000 字，长粘贴末尾的链接会被切掉）；
+       只看最后一轮用户消息，最多 2 条；表格链接 lark-cli 拉不了，如实标注。 */
+    const rawMessages = Array.isArray(body.messages) ? body.messages : []
+    const lastRawUser = [...rawMessages].reverse().find(item => String(item?.role ?? 'user') !== 'assistant')
+    const attachments = []
+    for (const url of (lastRawUser === undefined ? [] : feishuLinks(lastRawUser.content)).slice(0, 2)) {
+      if (isSheetLink(url)) {
+        attachments.push(`- ${url}：飞书表格暂不支持自动读取正文，请把关键字段 / 行贴进对话`)
+        continue
+      }
+      const pulled = await pullFeishuDoc(url)
+      attachments.push(pulled.ok === true
+        ? `- ${url}${String(pulled.title ?? '') === '' ? '' : `（${pulled.title}）`}：\n${String(pulled.text ?? '').slice(0, 3000)}`
+        : `- ${url}：读取失败（${String(pulled.error ?? '未知原因').slice(0, 160)}）；不要假装读过，需要时请用户贴关键内容`)
+    }
+    const prompt = requirementAssistPrompt({ mode, messages, context, title: body.title, attachments })
     const selection = host.getDefaultModel() ?? {}
     const provider = String(body.provider ?? selection.provider ?? 'deepseek-official')
     const model = String(body.model ?? selection.model ?? 'deepseek-v4.1-flash')
@@ -254,7 +270,7 @@ export async function handleRequirementRoute({ method, route, req, res, store, u
         system: REQUIREMENT_ASSIST_SYSTEM,
         messages: [{ role: 'user', content: [{ type: 'text', text: prompt }] }],
         temperature: 0.3,
-        maxTokens: mode === 'draft' ? 1800 : 900,
+        maxTokens: mode === 'draft' ? 1800 : 1200,
         signal: controller.signal,
         purpose: 'requirement-assist',
       })) {
