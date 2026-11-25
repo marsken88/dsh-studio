@@ -6,12 +6,12 @@
 
 | 项 | 值 |
 | --- | --- |
-| dsh-studio | `package.json` `version: 0.14.0` |
+| dsh-studio | `package.json` `version: 0.15.0` |
 | DeepSeek Harness | `0.2.2-rc.1`（`dsh --version`） |
 | Node | `v24.22.2`（Linux 目标机）；本机 Windows `v24.19.0` |
 | 目标系统 | Ubuntu 24.04，`dsh web` 监听 `18080`，nginx `:80` 反代并注入 `dsh-auth-*` cookie |
 | 插件安装方式 | npm：`dsh plugin --profile web add @marsken/dsh-studio`；本地开发：`add link:~/dsh-studio`（profile `web`） |
-| 验证范围 | 0.14.0：**目标机部署 + CI**（519 单测 / 48 项页面与 AX 探针 / `probe:panel` 90 项 / `audit:ui` 30 模块 0 违规 / `review:layout` 0 溢出）；**目标机已部署 0.14.0**（`tools/deploy.mjs`，`restart=sudo active=active files=90 state=200`；`package.json` version 0.14.0） |
+| 验证范围 | 0.15.0：**目标机部署 + CI**（527 单测 / 48 项页面与 AX 探针 / `probe:panel` 81 项全绿 / `audit:ui` 30 模块 0 违规 / `review:layout` 0 溢出）；**目标机已部署 0.15.0**（`tools/deploy.mjs`，`restart=sudo active=active files=91 state=200`；`package.json` version 0.15.0），并在真机上跑了三轮「先聊清楚」模型验证（首轮查重 + 待确认 / 后续只补问没答的 / 够了就停） |
 | 兼容声明 | `engines.dsh: ">=0.2.2-rc.1"`、`dsh.compatibility.dshReleases: { "0.2.2-rc.1+": "compatible" }` |
 
 > 结论：只在 **0.2.2-rc.1** 上做过端到端验证。0.2.2 正式版、以及 `<0.2.2` 均未验证。
