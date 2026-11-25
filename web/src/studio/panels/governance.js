@@ -245,6 +245,7 @@ export function ColumnsPanel({ state, onChanged }) {
   const { h, sessionToken, api, toast, currentUser, confirmDialog, TextField, ChipField, CheckField, SwitchToggle, SelectField , React } = client()
   const config = state.config
   const [error, setError] = React.useState(null)
+  const [notice, setNotice] = React.useState(null)
   const [busy, setBusy] = React.useState(false)
   const [openFor, setOpenFor] = React.useState(null)
   const [query, setQuery] = React.useState('')
@@ -323,7 +324,25 @@ export function ColumnsPanel({ state, onChanged }) {
   const save = async (status, members, strategy) => {
     setBusy(true); setError(null)
     try {
-      await api('/columns/save', { status, members, strategy })
+      /* 改列负责人不只是改配置：列 owner 一旦能解析，下一轮 tick（5 秒后）就把存量卡派出去。
+         先 dryRun 问一次「会让哪些卡被带走」，有就让人确认；真落库后再把结果写在面板上
+         （issue #149 现象二：调组织架构本身就有业务后果）。 */
+      const preview = await api('/columns/save', { status, members, strategy, dryRun: true })
+      const affected = preview?.affected
+      const count = Number(affected?.cards?.filter(card => card.willDispatch).length ?? 0)
+      if (count > 0) {
+        const title = statuses.find(column => column.id === status)?.label ?? status
+        const ok = await confirmDialog(
+          preview.warning || `这次改动会让 ${count} 张卡在下一轮自动派单里被派给新的负责人`,
+          { title: `改「${title}」的负责人`, okText: `继续（会派 ${count} 张）` },
+        )
+        if (ok !== true) { setBusy(false); return }
+      }
+      const out = await api('/columns/save', { status, members, strategy })
+      const dispatched = Number(out?.affected?.cards?.filter(card => card.willDispatch).length ?? 0)
+      setNotice(dispatched > 0
+        ? `已保存：下一轮自动派单会派走 ${dispatched} 张卡（${out.affected.cards.filter(card => card.willDispatch).slice(0, 5).map(card => card.code || card.id).join('、')}${dispatched > 5 ? ' 等' : ''}）`
+        : '已保存')
       await onChanged()
     } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)) } finally { setBusy(false) }
   }
@@ -402,8 +421,8 @@ export function ColumnsPanel({ state, onChanged }) {
       ),
       error !== null ? h('div', { className: ERR, role: 'alert' }, error) : null,
     ),
-    h('div', { className: SECTION, 'data-section': 'column-owners' },
-      h('div', { className: SECTION_HEAD },
+    notice !== null ? h('div', { className: OK, role: 'status', 'data-column-notice': '1' }, notice) : null,
+    h('div', { className: SECTION, 'data-section': 'column-owners' },      h('div', { className: SECTION_HEAD },
         h('div', { className: 'flex min-w-0 flex-col gap-1' },
           h('div', { className: SECTION_TITLE }, '每一列由谁负责'),
           h('div', { className: DESC }, '推荐挂「角色位」：澄清/验收挂产品经理、开发挂研发工程师、测试挂测试工程师——派单时会按卡片的业务领域自动挑对应领域专家（如支付产品经理）；也可以直接指定某位专家或专家团。一列可挂多人（候选池），一个都不挂就只把卡停在原地等人认领。'),

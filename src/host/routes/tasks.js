@@ -5,7 +5,8 @@ import { designPatchFrom } from '../design.js'
 import { rejectUnknownFields } from '../route-contract.js'
 import { resolveRequirement, requirementRefHint, saveTaskDesign } from '../reviews.js'
 import { publishNoteMentions } from '../mention-note.js'
-import { parseMentions } from '../dispatcher.js'
+import { parseMentions, ownerFor } from '../dispatcher.js'
+import { dispatchPreview, previewWarning } from '../column-preview.js'
 import { emitEvent } from '../events.js'
 import { collectCases, groupCaseKeys, loadSuites, resolveSuiteKeys, sanitizeSuite, saveSuites, summarizeRun } from '../cases.js'
 import { clearTeamMemory, loadTeamMemory } from '../team-memory.js'
@@ -23,9 +24,11 @@ import {
   CASE_RESULTS,
   cleanId,
   defaultColumns,
+  roleIdsOf,
   sanitizeArtifact,
   sanitizeCaseHttp,
   sanitizeCases,
+  sanitizeColumns,
   text } from '../domain.js'
 import { runSuite } from '../executor.js'
 import { caseNeedsRerun, requirementDocUpdatedAt } from '../impact.js'
@@ -248,9 +251,18 @@ export async function handleTaskRoute({ method, route, req, res, store, url }) {
     const body = await host.readJsonBody(req)
     const incoming = body.expert ?? body
     if (String(incoming.name ?? '').trim() === '') throw new Error('专家名称不能为空')
+    /* 传了不认识的 role 就 400 并列出可选值：以前 sanitizeExperts 静默清空，
+       200 + role:"" 让人以为配好了，实际这个人永远进不了任何角色位候选池（issue #150）。 */
+    const roles = roleIdsOf(store.snapshot().config)
+    const wantedRole = String(incoming.role ?? '').trim()
+    if (wantedRole !== '' && !roles.includes(wantedRole)) {
+      throw new Error(`角色「${wantedRole}」不在 config.roles 里：可选 ${roles.join(' / ')}；要新增岗位先到「设置 → 角色位」把它加上`)
+    }
     await host.applyConfig(store, { experts: host.upsertById(store.snapshot().config.experts, incoming) })
     // 把保存后的集合一起返回：脚本 / 前端不用再猜刚存的是哪一条。
-    host.sendJson(res, 200, { ok: true, experts: store.snapshot().config.experts, state: host.publicState(store) })
+    const saved = store.snapshot().config.experts
+    const record = saved.find(entry => entry.id === cleanId(incoming.id ?? incoming.name, 'expert')) ?? saved[saved.length - 1]
+    host.sendJson(res, 200, { ok: true, expert: record, experts: saved, state: host.publicState(store) })
     return true
   }
   if (method === 'POST' && route === '/experts/delete') {
@@ -293,26 +305,76 @@ export async function handleTaskRoute({ method, route, req, res, store, url }) {
 
   if (method === 'POST' && route === '/columns/save') {
     const body = await host.readJsonBody(req)
+    rejectUnknownFields('/columns/save', body)
     const status = String(body.status ?? '')
     if (!STATUS_SET.has(status)) throw new Error(`unknown status ${status}`)
-    const columns = { ...store.snapshot().config.columns }
+    const snapshot = store.snapshot()
+    const config = snapshot.config
+    const roles = roleIdsOf(config)
+    const expertIds = new Set((config.experts ?? []).map(entry => entry.id))
+    const teamIds = new Set((config.teams ?? []).map(entry => entry.id))
+    const columns = { ...config.columns }
     if (Array.isArray(body.members)) {
-      columns[status] = body.members.length === 0
+      /* 候选池里的每一项都要真存在：以前非法项被 sanitizeColumns 静默丢掉，
+         调用方拿到 200 还以为配上了（issue #149 现象一）。 */
+      const members = body.members.map((entry, index) => {
+        const kind = entry?.kind === 'team' ? 'team' : entry?.kind === 'role' ? 'role' : 'expert'
+        const id = String(entry?.id ?? '').trim()
+        if (kind === 'role' && !roles.includes(id)) throw new Error(`${index + 1} 项的角色「${id}」不在 config.roles 里（可选：${roles.join(' / ')}）`)
+        if (kind === 'team' && !teamIds.has(id)) throw new Error(`${index + 1} 项的专家团「${id}」不存在：先到「设置 → 专家团」建一个`)
+        if (kind === 'expert' && !expertIds.has(id)) throw new Error(`${index + 1} 项的专家「${id}」不存在：核对「设置 → 专家」里的 id`)
+        return { kind, id }
+      })
+      columns[status] = members.length === 0
         ? { kind: 'none', id: '' }
-        : {
-          kind: 'pool',
-          id: '',
-          members: body.members.map(entry => ({ kind: entry?.kind === 'team' ? 'team' : entry?.kind === 'role' ? 'role' : 'expert', id: String(entry?.id ?? '') })),
-          strategy: body.strategy,
-        }
+        : { kind: 'pool', id: '', members, strategy: body.strategy }
     } else if (body.owner === null) {
       columns[status] = defaultColumns()[status]
     } else {
-      const kind = body.kind === 'team' ? 'team' : body.kind === 'none' ? 'none' : 'expert'
-      columns[status] = { kind, id: String(body.id ?? '') }
+      /* 三条写路径必须同一种语义：`kind:'role'` 就是角色位，不许静默降级成「绑死某个专家」。
+         issue #149 现象一：面板/脚本按角色位配置，落库变成 kind:'expert'，域路由直接失效。 */
+      const kind = body.kind === 'team' ? 'team' : body.kind === 'none' ? 'none' : body.kind === 'role' ? 'role' : 'expert'
+      const id = String(body.id ?? '').trim()
+      if (kind === 'role' && !roles.includes(id)) throw new Error(`角色「${id}」不在 config.roles 里（可选：${roles.join(' / ')}）：先到「设置 → 角色位」加上，或换一个角色`)
+      if (kind === 'team' && !teamIds.has(id)) throw new Error(`专家团「${id}」不存在：先到「设置 → 专家团」建一个`)
+      if (kind === 'expert' && !expertIds.has(id)) throw new Error(`专家「${id}」不存在：核对「设置 → 专家」里的 id`)
+      columns[status] = { kind, id, ...(columns[status]?.wip !== undefined ? { wip: columns[status].wip } : {}) }
     }
-    await host.applyConfig(store, { columns })
-    host.sendJson(res, 200, { ok: true, state: host.publicState(store) })
+    const next = sanitizeColumns(columns, config.experts, config.teams, roles)
+    /* 改列负责人是一台起动机：列 owner 一旦能解析，下一轮 tick 就把存量卡派出去。
+       先把「会让哪些卡被带走」算出来（issue #149 现象二）——dryRun 只看不写，真落库也带回 affected。 */
+    const dispatcher = host.getDispatcher()
+    const column = STATUSES.find(entry => entry.id === status)
+    const affected = column === undefined ? undefined : dispatchPreview({
+      tasks: snapshot.tasks,
+      status,
+      autoStatuses: config.agents?.autoStatuses,
+      running: dispatcher === undefined ? [] : [...dispatcher.running.values()].map(info => info.taskId),
+      before: task => ownerFor(config, task, column, dispatcher?.loadByExpert?.() ?? new Map(), snapshot),
+      after: task => ownerFor({ ...config, columns: next }, task, column, dispatcher?.loadByExpert?.() ?? new Map(), snapshot),
+    })
+    if (body.dryRun === true) {
+      host.sendJson(res, 200, {
+        ok: true,
+        dryRun: true,
+        status,
+        column: next[status],
+        affected,
+        warning: previewWarning(affected),
+      })
+      return true
+    }
+    await host.applyConfig(store, { columns: next })
+    host.sendJson(res, 200, {
+      ok: true,
+      status,
+      // 回读实际落库的那一列：调用方不用再猜「我刚配的到底是 role 还是 expert」。
+      column: store.snapshot().config.columns[status],
+      affected,
+      warning: previewWarning(affected),
+      columns: store.snapshot().config.columns,
+      state: host.publicState(store),
+    })
     return true
   }
   if (method === 'POST' && route === '/task/delete') {

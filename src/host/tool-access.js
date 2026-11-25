@@ -53,6 +53,8 @@ export const TOOL_ACCESS = {
   studio_bug_duplicate: 'write',
   studio_test_run: 'write',
   studio_test_suite: 'write',
+  /** 发起无卡会话：会真的起一个 agent 会话（花 token、能读工作目录），按写操作记账。 */
+  studio_session_start: 'write',
   studio_config_set: 'admin',
   studio_release_publish: 'admin',
   studio_release_save: 'admin',

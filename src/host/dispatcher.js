@@ -41,6 +41,15 @@ export const ROLE_BRIEF = {
   architect: '产出技术方案：改哪些模块、数据流、接口、风险与替代方案；结论写进评论并附关键文件路径；定稿后推进到「待开发」。',
   dev: '按方案实现代码：先读相关源码，改动小步可验证；需要时开分支提 MR 并把链接写进 gitlabMR；自测通过后推进到「待测试」。',
   qa: '按需求与方案设计用例并验证：正常路径、边界、异常；记录实际执行的命令与结果；通过推进到「待验收」，不通过退回「待开发」并写明原因。',
+  ops: '把交付变成用得起来的东西：操作手册、知识库条目、变更与回滚预案；与产品一起收口需求，结论写进交付物（kind=doc）。',
+}
+
+/** 这个角色在当前配置下认不认识（config.roles 优先，默认四岗 + 运营）。 */
+export function isKnownRole(config, role) {
+  const wanted = String(role ?? '').trim()
+  if (wanted === '') return false
+  const list = Array.isArray(config?.roles) && config.roles.length > 0 ? config.roles : ROLE_IDS
+  return list.includes(wanted)
 }
 
 /** 一个角色位在本领域下的候选人：本领域优先，其次通用（没有领域归属），最后其他领域。 */
@@ -59,7 +68,7 @@ export function resolveOwner(config, owner, domain) {
   // 角色位：泳道配的是「产品经理/研发工程师」，具体落到哪位由卡的业务领域决定。
   if (owner.kind === 'role') {
     const role = String(owner.id ?? owner.role ?? '').trim()
-    if (!ROLE_IDS.includes(role)) return undefined
+    if (!isKnownRole(config, role)) return undefined
     const picks = roleCandidates(config, role, domain)
     if (picks.length === 0) return undefined
     const expert = picks[0]
@@ -76,6 +85,35 @@ export function resolveOwner(config, owner, domain) {
   const expert = (config.experts ?? []).find(entry => entry.id === owner.id)
   if (expert === undefined) return undefined
   return { kind: 'expert', expert, team: undefined, label: expert.name }
+}
+
+/**
+ * 「手动派单 / 发起会话」的目标：既认专家 id，也认专家团 id（团派给团长）。
+ *
+ * 以前 `/agents/run` 只把字符串原样塞进 `{kind:'expert'}`，于是
+ * 「卡不存在」「专家 id 写错」「传的是团」三种原因都落到同一句
+ * 「这一列还没人负责」（issue #148 第 3 条），而那句指向的设置面板根本解决不了问题。
+ * 这里把三种情况分开，返回 { owner } 或 { error }，路由与工具共用。
+ */
+export function resolveDispatchTarget(config, rawId) {
+  const id = String(rawId ?? '').trim()
+  if (id === '') return { error: '没说派给谁：传 expert（专家 id 或专家团 id）' }
+  const expert = (config?.experts ?? []).find(entry => entry.id === id)
+  if (expert !== undefined) {
+    if (expert.enabled === false) return { error: `专家「${expert.name}」已停用：先到「设置 → 专家」启用，或换一位` }
+    return { owner: { kind: 'expert', id: expert.id }, expert, team: undefined }
+  }
+  const team = (config?.teams ?? []).find(entry => entry.id === id)
+  if (team !== undefined) {
+    if (team.enabled === false) return { error: `专家团「${team.name}」已停用：先到「设置 → 专家团」启用` }
+    const members = Array.isArray(team.members) ? team.members : []
+    if (members.length === 0) return { error: `专家团「${team.name}」没有成员：先到「设置 → 专家团」给它加人（团长 = 第一个成员）` }
+    return { owner: { kind: 'team', id: team.id }, expert: undefined, team }
+  }
+  const hint = (config?.experts ?? []).filter(entry => entry.enabled !== false).slice(0, 8).map(entry => entry.id).join(' / ')
+  return {
+    error: `没有 id 为「${id}」的专家或专家团${hint === '' ? '' : `（现有专家：${hint}）`}：核对「设置 → 专家 / 专家团」里的 id，不是名字`,
+  }
 }
 
 /** 卡片业务领域：卡上写了用卡的，没写就用它所属需求的。 */
@@ -674,17 +712,24 @@ export class Dispatcher {
     }
   }
 
-  /** Force one card through the same path, used by the panel's "马上处理" button. */
-  async launchNow(id, expertId) {
-    const task = this.store.snapshot().tasks.find(entry => entry.id === id)
-    if (task === undefined) throw new Error(`no task ${id}`)
+  /**
+   * Force one card through the same path, used by the panel's "马上处理" button.
+   * `expertId` 可以是专家 id，也可以是专家团 id（派给团长）；`instruction` 会拼进提示词。
+   * 三种失败分开报：卡不存在 / 目标不存在（或停用、团没成员）/ 这一列没人负责。
+   */
+  async launchNow(id, expertId, instruction) {
+    const state = this.store.snapshot()
+    const task = state.tasks.find(entry => entry.id === id)
+    if (task === undefined) throw new Error(`卡 ${id} 不存在：看板里没有这张卡（可能已被删除），核对卡 id`)
     const column = STATUSES.find(entry => entry.id === task.status) ?? STATUSES[0]
     const key = `${task.id}:${task.status}:manual:${Date.now()}`
-    if (typeof expertId === 'string' && expertId.length > 0) {
-      await this.launch(task, column, key, { owner: { kind: 'expert', id: expertId } })
+    if (typeof expertId === 'string' && expertId.trim().length > 0) {
+      const target = resolveDispatchTarget(state.config, expertId)
+      if (target.error !== undefined) throw new Error(target.error)
+      await this.launch(task, column, key, { owner: target.owner, instruction })
       return
     }
-    await this.launch(task, column, key)
+    await this.launch(task, column, key, { instruction })
   }
 
   /** Hand a card to whoever a comment just @mentioned. */
@@ -696,6 +741,83 @@ export class Dispatcher {
       owner: { kind: mention.kind, id: mention.id },
       instruction,
     })
+  }
+
+  /**
+   * 和一位专家 / 一个专家团「发起一次会话」——不带卡。
+   *
+   * 为什么要有（issue #148）：会话以前是卡的副产物（`sessionId = studio-<task>-<expert>`），
+   * 「先聊清楚再建卡」被逼成「先建卡 → 等 5 秒 tick 派单」，而且对话会把评论区灌满。
+   * 这里造一个 `studio-chat-<expert>-<hex>` 会话：跑在 workdir（或工作区目录），
+   * 用**对话模式**的提示词（不派工、不改代码、不往任何卡写评论），transcript 就是普通会话。
+   */
+  async startChat({ expert, topic, instruction, workdir } = {}) {
+    const state = this.store.snapshot()
+    const cfg = state.config.agents
+    const target = resolveDispatchTarget(state.config, expert)
+    if (target.error !== undefined) throw new Error(target.error)
+    const team = target.team
+    const leadId = team === undefined ? '' : (team.members.includes(team.lead) ? team.lead : (team.members[0] ?? ''))
+    const who = target.expert ?? (state.config.experts ?? []).find(entry => entry.id === leadId)
+    if (who === undefined) throw new Error(`「${String(expert ?? '')}」解析不到具体的人：专家团里没有可用成员`)
+    const said = String(topic ?? '').trim().slice(0, 500)
+    const note = String(instruction ?? '').trim().slice(0, 2000)
+    if (said === '' && note === '') throw new Error('先说一句想聊什么（topic）：没有话题的会话只会空转')
+    const sessionId = `studio-chat-${who.id}-${randomBytes(4).toString('hex')}`
+    const dir = await this.chatDir(workdir, cfg)
+    let workspace
+    try {
+      workspace = await this.ctx.workspaceRegistry.create(dir, STUDIO_WORKSPACE_TITLE)
+    } catch (error) {
+      this.note(`workspace: ${error?.message ?? error}`)
+    }
+    this.note(`会话目录：${dir}`)
+    const title = `[${who.name}] 会话：${said.slice(0, 60) || '未命名话题'}`
+    const agent = await this.mountAgentSession({ sessionId, expert: who, cfg, dir, workspace, title, task: undefined })
+    const prompt = buildChatPrompt({ expert: who, team, topic: said, instruction: note, config: state.config })
+    await this.deliverChat(agent, sessionId, prompt)
+    this.note(`chat ${sessionId} → ${who.name}`)
+    return {
+      ok: true,
+      sessionId,
+      expert: { id: who.id, name: who.name },
+      team: team === undefined ? null : { id: team.id, name: team.name, lead: who.id },
+      workdir: dir,
+      topic: said,
+      // 会话在哪接着聊：DSH 侧栏里按这个名字找（已挂进工作区，不会落在「未分组」）。
+      hint: `会话已建好：在 DSH 侧栏打开「${title}」继续聊；它不会往任何卡写评论。`,
+    }
+  }
+
+  /** 无卡会话跑在哪个目录：显式 workdir 优先（必须存在），否则工作区目录。 */
+  async chatDir(workdir, cfg) {
+    const wanted = String(workdir ?? '').trim().replace(/^~(?=$|[/\\])/, homedir())
+    if (wanted !== '') {
+      if (!(await directoryExists(wanted))) throw new Error(`工作目录不存在：${wanted}（先建好目录，或留空用工作区目录）`)
+      return wanted
+    }
+    const base = (cfg?.workspaceDir ?? '').trim() || join(homedir(), 'dsh-workspace')
+    await mkdir(base, { recursive: true })
+    return base
+  }
+
+  /** 对话模式的投递：没有「完成后推进卡片」那套工位要求（那是派单，不是聊天）。 */
+  async deliverChat(agent, sessionId, text) {
+    const stamp = Date.now()
+    agent.inject({
+      id: `studio:${sessionId}:${stamp}:frame`,
+      role: 'user',
+      content: [{ type: 'text', text: '【需求&任务工作空间 · 会话】这是一次对话，不是派单：不要开工、不要改代码、不要建卡或写看板评论，除非人明确要求。' }],
+      source: { kind: 'user' },
+    })
+    agent.followup({
+      id: `studio:${sessionId}:${stamp}:body`,
+      role: 'user',
+      content: [{ type: 'text', text }],
+      source: { kind: 'user' },
+    })
+    this.deliveryVia = 'followup'
+    return 'followup'
   }
 
   /** 每个专家手上正在跑几张卡——轮询策略靠它挑人。 */
@@ -865,6 +987,28 @@ export class Dispatcher {
       this.note(`workspace: ${error?.message ?? error}`)
     }
     this.note(`会话目录（${title}）：${dir}`)
+    /* 会话本体（模型/预设/漂移守卫/工作区/沙箱/改名）与无卡会话共用，见 mountAgentSession。 */
+    return await this.mountAgentSession({
+      sessionId,
+      expert,
+      cfg,
+      dir,
+      workspace,
+      task,
+      // 卡派单在 worktree 隔离下要提权写主仓 .git；无卡会话没有 worktree，不提权。
+      escalateForWorktree: String(cfg.isolation ?? 'none') === 'worktree',
+    })
+  }
+
+  /**
+   * 会话的公共部分：卡派单与 `/agents/chat`（无卡会话）共用。
+   *
+   * 为什么抽出来：无卡会话要的是一模一样的会话（同一个模型、同一个预设、同一个沙箱口径），
+   * 只是没有卡、目录与标题不同。复制一份的逻辑迟早会漂：一边改了审批策略、另一边忘掉，
+   * 表现就是「卡上能跑、会话里跑不动」。
+   */
+  async mountAgentSession({ sessionId, expert, cfg, dir, workspace, title = '', task, escalateForWorktree = false }) {
+    const ctx = this.ctx
     let agent
     // A session created by the factory carries no model unless we hand one in;
     // without it every turn ends with "agent has no provider/model".
@@ -910,7 +1054,7 @@ export class Dispatcher {
     // worktree 隔离时，提交要写主仓的 .git（在 worktree 之外），workspace-write 会直接拒绝并弹审批；
     // 无人值守的会话就卡死等审批（2026-11-16 实测：approval/asked 后再无动作）。
     // 所以 worktree 模式一律提权到 danger-full-access，并在卡上留一句解释。
-    if (String(cfg.isolation ?? 'none') === 'worktree' && sandbox !== 'danger-full-access') {
+    if (escalateForWorktree === true && sandbox !== 'danger-full-access') {
       sandbox = 'danger-full-access'
       this.note('worktree 隔离需要写主仓 .git 才能提交，沙箱提到 danger-full-access')
     }
@@ -929,8 +1073,11 @@ export class Dispatcher {
         this.note(`approval policy ask failed: ${error?.message ?? error}`)
       }
     }
+    const sessionTitle = task === undefined
+      ? (String(title ?? '') !== '' ? String(title) : `[${expert.name}] 会话`)
+      : `[${expert.name}] ${task.title}`
     try {
-      await ctx.sessionController.rename({ sessionId, title: `[${expert.name}] ${task.title}`.slice(0, 120) })
+      await ctx.sessionController.rename({ sessionId, title: sessionTitle.slice(0, 120) })
     } catch (error) {
       this.note(`rename failed: ${error?.message ?? error}`)
     }
@@ -1094,6 +1241,36 @@ export class Dispatcher {
     this.deliveryVia = 'followup'
     return 'followup'
   }
+}
+
+/**
+ * 无卡会话的提示词（issue #148）：对话模式，不是工位派单。
+ * 与 buildExpertPrompt 的分工：那边是「接手一张卡、干完推进列」，这边是「和人聊清楚再决定建不建卡」。
+ */
+export function buildChatPrompt({ expert, team, topic, instruction, config }) {
+  const members = team === undefined
+    ? ''
+    : (team.members ?? [])
+      .map(id => (config?.experts ?? []).find(entry => entry.id === id))
+      .filter(Boolean)
+      .map(entry => `- @${entry.name}：${entry.description || ROLE_BRIEF[entry.role] || '按分工协作'}`)
+      .join('\n')
+  return [
+    `你是「${expert.name}」，需求&任务工作空间里的一名专家。现在是在和人对话，不是在接工单。`,
+    expert.description ? `\n你的定位：${expert.description}` : '',
+    expert.domain ? `\n业务领域：${expert.domain}（判断与取舍以这个领域的规范和风险偏好为准）` : '',
+    (expert.skills ?? []).length > 0 ? `\n你可以使用的技能：${(expert.skills ?? []).join('、')}（需要时用 skill 工具加载）` : '',
+    team !== undefined ? `\n你在「${team.name}」专家团里，这次由你先接话（你是团长）。本团成员：\n${members}\n需要成员接手时，在回复里写「@名字 + 要他做什么」，人会决定要不要转给他。` : '',
+    '',
+    '这次会话的规矩：',
+    '1) 这是讨论，不是开工：不要改代码、不要建卡、不要往看板写评论，除非人明确让你做。',
+    '2) 先给取舍与风险，再给建议；不确定就说不确定，并写清要谁来定（谁拍板、什么时候要）。',
+    '3) 需要事实（现有实现、历史卡、文档）就自己读，不凭印象下结论。',
+    '4) 聊到能落地时，给人一段可直接复制的需求/卡描述：标题 + 背景一句话 + 验收要点（可判定），由人决定建不建。',
+    '',
+    `话题：${topic}`,
+    String(instruction ?? '') !== '' ? `\n补充说明：${instruction}` : '',
+  ].join('\n')
 }
 
 /** The work order one expert (or a whole team) receives. */

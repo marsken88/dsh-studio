@@ -759,6 +759,32 @@ try {
   )
   await page.screenshot({ path: join(outDir, 'experts.png') })
 
+  /* ④h 专家 / 专家团行上的「发起会话」入口（issue #148）：不建卡先聊清楚。
+     判据按 DOM 量到按钮本身（data-chat），不是文字里出现过「会话」两个字。 */
+  const chatEntry = await page.evaluate(() => ({
+    count: document.querySelectorAll('[data-chat="expert"]').length,
+    labels: [...document.querySelectorAll('[data-chat="expert"]')].map(node => String(node.textContent ?? '').trim()),
+  }))
+  check('④h 专家行有「发起会话」入口', chatEntry.count > 0 && chatEntry.labels.every(label => label === '发起会话'), JSON.stringify(chatEntry))
+  const teamsNav = await page.evaluate(() => {
+    const el = [...document.querySelectorAll('[data-settings-nav-item]')]
+      .find(node => String(node.textContent ?? '').trim().startsWith('专家团'))
+    if (el === undefined || el === null) return false
+    el.click()
+    return true
+  })
+  if (teamsNav === true) await new Promise(resolve => setTimeout(resolve, 700))
+  const teamChat = await page.evaluate(() => document.querySelectorAll('[data-chat="team"]').length)
+  check('④h 专家团行也有「发起会话」入口（团长接话）', teamsNav === true && teamChat > 0, `nav=${teamsNav} count=${teamChat}`)
+  const backToExperts = await page.evaluate(() => {
+    const el = [...document.querySelectorAll('[data-settings-nav-item]')]
+      .find(node => String(node.textContent ?? '').trim().startsWith('专家') && !String(node.textContent ?? '').includes('团'))
+    if (el === undefined || el === null) return false
+    el.click()
+    return true
+  })
+  if (backToExperts === true) await new Promise(resolve => setTimeout(resolve, 400))
+
   // ④e 设置 → 自动派单：会话跑在哪个目录要写清楚（决定它落在侧栏哪个工作区）。
   // 以前这一项叫「工作区目录」，看不出会话会跑在 ~/dsh-workspace 里、落在「未分组」。
   const agentsNav = await clickExact('自动派单')

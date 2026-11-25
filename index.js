@@ -27,7 +27,7 @@ export const inject = ['tools', 'systemPrompt']
 // ------------------------------------------------------------------ domain
 
 
-import { sanitizeProjectFolders, ACCESS_ROLE_LABEL, ACCESS_ROLES, ADMIN_ROUTES, ARTIFACT_KINDS, ARTIFACT_STATUS, CASE_HTTP_METHODS, CASE_PRIORITIES, CASE_RESULTS, CASE_TYPE_LABEL, CASE_TYPES, cleanId, CODE_PREFIX, CODING_FILE_CHANGES, CODING_REVIEW_STATUS, codingSummary, COLUMN_STRATEGIES, DEFAULT_ROLES, defaultColumns, defaultConfig, defaultDeployEnvs, defaultTemplates, DEPLOY_ENV_KINDS, FALLBACK_AGENT_MODEL, hashLocalPassword, ISOLATION_MODES, LEGACY_BLOCKED_STATUS, LEVEL_RANK, LOCAL_DEFAULT_PASSWORD, mergeCoding, mergeConfig, mergeSection, nextRequirementCode, nextTaskCode, normalizePatch, normalizeStrategy, publicArtifact, publicCases, publicChecklist, publicComments, PRIORITIES, ROLE_LABELS, canonicalAuthor, RELEASE_STATUSES, RELEASE_STATUS_LABEL, REQ_DOC_KIND_LABEL, REQ_DOC_KINDS, REQ_DOC_STATUS, REQ_REVIEW_LABEL, REQ_REVIEW_STATUS, REQ_STATUS_LABEL, REQ_STATUSES, ROLE_IDS, ROLE_LEVEL, SANDBOX_MODES, sanitizeAccess, sanitizeAllowHosts, sanitizeArtifact, sanitizeArtifacts, sanitizeBaseline, sanitizeBots, sanitizeBugSource, sanitizeCase, sanitizeCaseHttp, sanitizeCaseRun, sanitizeCases, sanitizeChangedFile, sanitizeChangedFiles, sanitizeChecklist, sanitizeChecklistItem, sanitizeCaseGate, sanitizeCoding, sanitizeColumns, sanitizeCommit, sanitizeCommits, sanitizeCosts, sanitizeDeployEnvs, sanitizeEnvs, sanitizeExperts, sanitizeIterations, sanitizeLdap, sanitizeLocalAuth, sanitizeProjects, sanitizeReqDoc, sanitizeReqDocs, sanitizeRelease, sanitizeRequirement, sanitizeRequirementChange, sanitizeRequirementGate, sanitizeRequirementHistory, sanitizeRequirementPoint, sanitizeRequirementPoints, sanitizeRequirementPool, sanitizeRequirementQuestions, sanitizeRequirementReview, sanitizeRequirements, sanitizeReviewGate, sanitizeServices, sanitizeSla, sanitizeTeams, sanitizeTemplates, sanitizeTesting, sanitizeTestRun, sanitizeTestRuns, sanitizeUsers, sanitizeWorkProjects, seedExperts, SEVERITIES, STATUS_IDS, STATUS_SET, STATUSES, TASK_TYPES, text, verifyLocalPassword, worktreeRoot } from './src/host/domain.js'
+import { sanitizeProjectFolders, ACCESS_ROLE_LABEL, ACCESS_ROLES, ADMIN_ROUTES, ARTIFACT_KINDS, ARTIFACT_STATUS, CASE_HTTP_METHODS, CASE_PRIORITIES, CASE_RESULTS, CASE_TYPE_LABEL, CASE_TYPES, cleanId, CODE_PREFIX, CODING_FILE_CHANGES, CODING_REVIEW_STATUS, codingSummary, COLUMN_STRATEGIES, DEFAULT_ROLES, defaultColumns, defaultConfig, defaultDeployEnvs, defaultTemplates, DEPLOY_ENV_KINDS, FALLBACK_AGENT_MODEL, hashLocalPassword, ISOLATION_MODES, LEGACY_BLOCKED_STATUS, LEVEL_RANK, LOCAL_DEFAULT_PASSWORD, mergeCoding, mergeConfig, mergeSection, nextRequirementCode, nextTaskCode, normalizePatch, normalizeStrategy, publicArtifact, publicCases, publicChecklist, publicComments, PRIORITIES, ROLE_LABELS, roleIdsOf, rolesInColumns, canonicalAuthor, RELEASE_STATUSES, RELEASE_STATUS_LABEL, REQ_DOC_KIND_LABEL, REQ_DOC_KINDS, REQ_DOC_STATUS, REQ_REVIEW_LABEL, REQ_REVIEW_STATUS, REQ_STATUS_LABEL, REQ_STATUSES, ROLE_IDS, ROLE_LEVEL, SANDBOX_MODES, sanitizeAccess, sanitizeAllowHosts, sanitizeArtifact, sanitizeArtifacts, sanitizeBaseline, sanitizeBots, sanitizeBugSource, sanitizeCase, sanitizeCaseHttp, sanitizeCaseRun, sanitizeCases, sanitizeChangedFile, sanitizeChangedFiles, sanitizeChecklist, sanitizeChecklistItem, sanitizeCaseGate, sanitizeCoding, sanitizeColumns, sanitizeCommit, sanitizeCommits, sanitizeCosts, sanitizeDeployEnvs, sanitizeEnvs, sanitizeExperts, sanitizeIterations, sanitizeLdap, sanitizeLocalAuth, sanitizeProjects, sanitizeReqDoc, sanitizeReqDocs, sanitizeRelease, sanitizeRequirement, sanitizeRequirementChange, sanitizeRequirementGate, sanitizeRequirementHistory, sanitizeRequirementPoint, sanitizeRequirementPoints, sanitizeRequirementPool, sanitizeRequirementQuestions, sanitizeRequirementReview, sanitizeRequirements, sanitizeReviewGate, sanitizeServices, sanitizeSla, sanitizeRoles, sanitizeTeams, sanitizeTemplates, sanitizeTesting, sanitizeTestRun, sanitizeTestRuns, sanitizeUsers, sanitizeWorkProjects, seedExperts, SEVERITIES, STATUS_IDS, STATUS_SET, STATUSES, TASK_TYPES, text, verifyLocalPassword, worktreeRoot } from './src/host/domain.js'
 import { accessLevelFor, checkAccess, isCrossSiteRequest, isLoopbackRequest, needsConfirm, needsLocalSource, READ_ONLY_POST_ROUTES } from './src/host/access.js'
 import { Dispatcher, RUN_LOG, attachRunLog, claimDispatchLock, clearAgentFailure, configureDispatcher, noteAgentFailure, parseMentions, runSummary } from './src/host/dispatcher.js'
 import { worktreeBaseFor } from './src/host/dispatch-cwd.js'
@@ -356,6 +356,8 @@ async function readJsonBody(req) {
 function publicConfig(config) {
   return {
     board: config.board,
+    /** 角色位白名单（默认四岗 + 运营）：面板的「角色位」下拉和列负责人候选都按它渲染。 */
+    roles: config.roles ?? ROLE_IDS,
     experts: config.experts,
     teams: config.teams,
     columns: config.columns,
@@ -924,7 +926,7 @@ function publicState(store) {
     updatedAt: state.updatedAt,
     profile: hostProfile || 'web',
     statuses: STATUSES,
-    roles: ROLE_IDS,
+    roles: state.config.roles ?? ROLE_IDS,
     priorities: PRIORITIES,
     /* 两道闸门当前是否生效：默认关上时要能一眼看见「现在是裸奔状态」，
        而不是靠 agent 读源码才知道（issue #9 第 3 条）。 */
@@ -1010,18 +1012,31 @@ async function applyConfig(store, patch) {
         config.board.title = patch.board.title.trim().slice(0, 120)
       }
     }
+    if (patch.roles !== undefined) {
+      /* 角色位白名单（issue #150）：默认四岗 + 运营，公司可以按自己的岗位表加。
+         收紧白名单前先看还在用不用：直接把一个正在用的角色删掉，会让专家的 role 变空、
+         列的候选被丢掉 —— 那就是「静默降级」，比报错更糟。 */
+      const next = sanitizeRoles(patch.roles)
+      const used = new Set([...config.experts.map(expert => expert.role ?? '').filter(Boolean), ...rolesInColumns(config.columns)])
+      const dropped = [...used].filter(role => !next.includes(role))
+      if (dropped.length > 0) throw new Error(`角色 ${dropped.join(' / ')} 还在用（专家或列负责人）：先把它们改掉，再从角色位里删`)
+      config.roles = next
+      config.experts = sanitizeExperts(config.experts, next)
+      config.columns = sanitizeColumns(config.columns, config.experts, config.teams, next)
+    }
     if (patch.experts !== undefined) {
-      const next = sanitizeExperts(patch.experts)
+      const roles = roleIdsOf(config)
+      const next = sanitizeExperts(patch.experts, roles)
       if (next.length > 0) config.experts = next
       // A column whose expert disappeared falls back to the shipped default.
-      config.columns = sanitizeColumns(config.columns, config.experts, config.teams)
+      config.columns = sanitizeColumns(config.columns, config.experts, config.teams, roles)
     }
     if (patch.teams !== undefined) {
       config.teams = sanitizeTeams(patch.teams, config.experts)
-      config.columns = sanitizeColumns(config.columns, config.experts, config.teams)
+      config.columns = sanitizeColumns(config.columns, config.experts, config.teams, roleIdsOf(config))
     }
     if (patch.columns !== undefined && typeof patch.columns === 'object') {
-      config.columns = sanitizeColumns({ ...config.columns, ...patch.columns }, config.experts, config.teams)
+      config.columns = sanitizeColumns({ ...config.columns, ...patch.columns }, config.experts, config.teams, roleIdsOf(config))
     }
     if (patch.projects !== undefined) {
       config.projects = sanitizeWorkProjects(patch.projects)
@@ -1180,7 +1195,8 @@ async function applyConfig(store, patch) {
 async function createTask(store, input) {
   const title = text(input.title, 200)
   if (title === undefined) throw new Error('title is required')
-  const patch = normalizePatch(input)
+  // 角色位白名单来自配置：自定义岗位（运营 / 财务…）在 config.roles 里登记后卡上也能用。
+  const patch = normalizePatch(input, roleIdsOf(store.snapshot().config))
   const now = Date.now()
   // 缺陷默认直接进「待开发」，需求默认从「待澄清」开始。
   const initialStatus = patch.status ?? (patch.type === 'bug' ? 'dev_ready' : 'clarify')
@@ -1995,11 +2011,14 @@ async function recordLogin(store, user, ip) {
 
 
 
-/** 会话名形如 `studio-<taskId>-<expertId>`，从里面认出是哪个专家在调用。 */
+/** 会话名形如 `studio-<taskId>-<expertId>`（或 `studio-chat-<expertId>-<hex>`），从里面认出是哪个专家在调用。 */
 function operatorFromSessionId(sessionId, config) {
-  const match = /^studio-(t-[0-9a-z]+)-(.+)$/.exec(String(sessionId))
-  if (match === null) return null
-  const expertId = match[2]
+  const text = String(sessionId ?? '')
+  // 无卡会话：没有卡，但仍然是某位专家在调工具，身份要认出来（issue #148）。
+  const chat = /^studio-chat-(.+?)-[0-9a-f]{6,}$/.exec(text)
+  const match = chat === null ? /^studio-(t-[0-9a-z]+)-(.+)$/.exec(text) : null
+  if (chat === null && match === null) return null
+  const expertId = chat === null ? match[2] : chat[1]
   const expert = (config?.experts ?? []).find(item => item.id === expertId)
   return { id: expertId, name: String(expert?.name ?? expertId) }
 }

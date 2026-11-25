@@ -1726,6 +1726,35 @@ export function registerTools(ctx, store) {
   }))
 
   register(defineStudioTool({
+    name: 'studio_session_start',
+    description: '和一位专家 / 一个专家团「发起一次会话」——不带卡：选人 + 说一句想聊什么就开聊，'
+      + '不建卡、不派单、不往看板写评论（transcript 就是普通会话）。用来「先聊清楚再建需求/建卡」。'
+      + '返回 sessionId 与在哪接着聊；专家团由团长接话，需要成员接手时在回复里 @ 名字。',
+    parameters: {
+      expert: { type: 'string', required: true, description: '专家 id 或专家团 id（不是名字；看 studio_config_get 的 experts / teams）' },
+      topic: { type: 'string', required: true, description: '这次想聊什么（一句话，会作为首轮消息发出去）' },
+      instruction: { type: 'string', description: '补充说明（可选）' },
+      workdir: { type: 'string', description: '会话跑在哪个目录（可选；默认用自动派单配置里的工作区目录）' },
+    },
+    async execute(args) {
+      const dispatcher = host.getActiveDispatcher()
+      if (dispatcher === undefined) throw new Error('派单引擎还没就绪（刚启动时会有几秒），稍后再试')
+      const out = await dispatcher.startChat({
+        expert: String(args.expert ?? ''),
+        topic: String(args.topic ?? ''),
+        instruction: String(args.instruction ?? ''),
+        workdir: String(args.workdir ?? ''),
+      })
+      return [
+        `已发起会话 ${out.sessionId}：${out.expert.name}${out.team === null ? '' : `（专家团「${out.team.name}」，团长接话）`}`,
+        `话题：${out.topic}`,
+        `目录：${out.workdir}`,
+        out.hint,
+      ].join('\n')
+    },
+  }))
+
+  register(defineStudioTool({
     name: 'studio_skill_list',
     description: 'List the company skill library: every skill you can load with the skill tool. Check this before inventing a procedure, and after saving a new one.',
     parameters: {},

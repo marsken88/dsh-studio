@@ -18,6 +18,9 @@ export function parseStudioSession(sessionId) {
   const text = String(sessionId ?? '')
   if (!text.startsWith('studio-')) return null
   const body = text.slice('studio-'.length)
+  /* 无卡会话（`studio-chat-<expert>-<hex>`）不是派单会话：它没有卡，
+     拆出来的「taskId=chat」会让执行播报往一张不存在的卡上灌评论（issue #148）。 */
+  if (body.startsWith('chat-')) return null
   /* 任务 id 恒为 t-<8位hex>，专家 id 可能自带连字符（expert-2d22ad）。
      以前用 lastIndexOf('-') 切，会把 studio-t-x-expert-2d22ad 解析成
      taskId=t-x-expert / expertId=2d22ad —— 派单会话认错卡（issue #127）。 */

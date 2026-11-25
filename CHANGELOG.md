@@ -1,5 +1,29 @@
 # 更新日志
 
+## [未发布]
+
+### 角色位可配置：运营等岗位不再被静默清空（#150）
+
+`ROLE_IDS` 以前写死 `product / architect / dev / qa`：给「运营」建专家写 `role:'ops'`，`/experts/save` 返回 200，回读却是 `role:""`——这位专家从此进不了任何角色位候选池（列配 `{kind:'role'}` 永远选不到他），只能靠评论里 @ 名字。
+
+- **白名单改成 `config.roles`**：默认 产品 / 架构 / 研发 / 测试 / **运营**（新增 `ops` 的内置人设与职责：操作手册、知识库条目、变更与回滚预案）。公司可以 `POST /config { roles:[…] }` 加财务、支持等自定义岗位；删角色前会检查「还有专家或列负责人在用它」，删不掉就报错。
+- **校验不再静默**：`/experts/save` 传不认识的 role 直接 400 并列出可选值；卡片的 `role` 也按白名单校验；列负责人按角色位解析时同样认自定义岗位。
+- 角色规则单独成模块 `src/host/roles.js`（domain.js 有 2000 行闸门），`domain.js` 继续 re-export，外部 import 路径不变。
+
+### 改列负责人不再静默降级 role，落库前先算「会派走哪些卡」（#149）
+
+- **`kind:'role'` 就是角色位**：`/columns/save` 以前把它归到 `expert`，落库成「绑死某个专家」，领域路由直接失效，而界面看起来差不多。现在返回 `column`（实际落库的那一列）；不认识的角色 / 专家 / 专家团直接 400，不再被 `sanitizeColumns` 静默丢掉；候选池里的每一项也逐条校验（错误里点名第几项）。
+- **`dryRun` + `affected`**：改列负责人是一台起动机——列 owner 一旦能解析，下一轮 tick（5 秒后）就把存量卡派出去。现在可以先 `POST /columns/save {status, kind, id, dryRun:true}` 看「会让哪几张卡被派给谁」而不落库；真落库时返回值也带 `affected`（`cards[].willDispatch`）与 `warning`。面板「设置 → 列的负责人」保存前会先 dryRun，有卡会被带走就先让人确认，保存后把「会派走 N 张」写在面板上。判据与 tick 完全一致：阻塞 / 在跑 / 这一列已派过 / 失败退避中的卡都不算。
+
+### 和专家 / 专家团「发起会话」：不建卡先聊清楚（#148）
+
+会话以前是卡的副产物（`studio-<task>-<expert>`），「先聊清楚再建卡」被逼成「先建卡 → 等 5 秒 tick 派单」，对话还会把评论区灌满。
+
+- **`POST /studio-api/agents/chat { expert 或 team, topic, instruction?, workdir? }`**（工具 `studio_session_start`）：造一个 `studio-chat-<expert>-<hex>` 会话，跑**对话模式**提示词（不开工、不改代码、不建卡、不往看板写评论），transcript 就是普通 DSH 会话；专家团由团长接话，需要成员接手时在回复里 @。面板上「设置 → 专家 / 专家团」每行有「发起会话」。
+- **`/agents/run` 错误分流**：卡不存在 / 目标不存在（或已停用、团里没有成员）/ 这一列没人负责，三种文案分开；`expert` 现在也认专家团 id（派给团长），并支持 `instruction`（以前也没地方传开场白）。
+- 无卡会话不会冒充某张卡：执行播报（`parseStudioSession`）不认它，成本统计把它算进总量与按专家（`adHoc`），不落成一张空卡。
+- `/columns/save`、`/agents/run`、`/agents/chat` 也纳入 HTTP 入参白名单：多传字段直接 400。
+
 ## [0.15.1] — 2026-11-25
 
 ### 卡片抽屉写清「这次派单用哪套权限」
