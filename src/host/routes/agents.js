@@ -20,7 +20,7 @@ if (method === 'GET' && route === '/agents') {
     : { ok: true, ...dispatcher.status() })
   return true
 }
-if (method === 'GET' && route === '/agents/policy') {
+if ((method === 'GET' || method === 'POST') && route === '/agents/policy') {
   const dispatcher = host.getDispatcher()
   if (dispatcher === undefined) {
     host.sendJson(res, 200, { ok: false, error: 'dispatcher not available yet' })

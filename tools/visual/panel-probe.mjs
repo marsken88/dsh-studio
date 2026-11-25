@@ -303,6 +303,19 @@ try {
   const commentBodies = (probeComments.json.comments ?? []).map(item => String(item.body ?? ''))
   check('②a 评审结论自动补成评论（讨论区看得到）', commentBodies.some(body => body.includes('代码评审 · 通过') && body.includes('探针评审：通过')))
 
+  /* ②a1 派单权限要写在抽屉里：同事踩过「设置里选了完全访问，为什么还弹审批」——
+     那个设置只管派单会话，手动新开的会话仍按 DSH 自己的档位。 */
+  await page.evaluate(() => [...document.querySelectorAll('[role="tab"]')]
+    .find(node => String(node.textContent ?? '').trim() === '概览')?.click())
+  await new Promise(resolve => setTimeout(resolve, 600))
+  const dispatchPolicy = await page.evaluate(() => {
+    const node = document.querySelector('[data-dispatch-policy]')
+    return node === null ? null : String(node.textContent ?? '').replace(/\s+/g, ' ').trim()
+  })
+  check('②a1 抽屉写清本次派单的沙箱与提权审批', dispatchPolicy !== null && dispatchPolicy.includes('沙箱 ') && dispatchPolicy.includes('提权审批'), dispatchPolicy ?? '没找到 [data-dispatch-policy]')
+  check('②a1 派单权限注明只对派单会话生效', await page.evaluate(() => String(document.body.innerText ?? '').includes('只对 Studio 派单的会话生效')))
+  await page.screenshot({ path: join(outDir, 'dispatch-policy.png') })
+
   /* ②c 文档改版 → 通过过的用例要复跑（只标不改） */
   await page.evaluate(() => [...document.querySelectorAll('[role="tab"]')]
     .find(node => String(node.textContent ?? '').trim().startsWith('测试'))?.click())

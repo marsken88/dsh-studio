@@ -34,7 +34,7 @@ test('access: 同一工具的动作可以更严——merge 是 admin，publish �
 })
 
 test('access: 只读 POST 不再误判成写操作（只读成员可用）', () => {
-  for (const route of ['/release/get', '/requirement/get', '/requirement/matrix', '/requirement/impact', '/requirement/assist', '/contexts', '/contexts/session', '/access/explain']) {
+  for (const route of ['/release/get', '/requirement/get', '/requirement/matrix', '/requirement/impact', '/requirement/assist', '/agents/policy', '/contexts', '/contexts/session', '/access/explain']) {
     assert.ok(READ_ONLY_POST_ROUTES.has(route), `${route} 应该是只读 POST`)
     assert.ok(!ADMIN_ROUTES.has(route), `${route} 不该同时是 admin`)
   }

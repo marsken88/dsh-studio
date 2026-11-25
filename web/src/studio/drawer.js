@@ -136,6 +136,15 @@ function Drawer({ task, state, onClose, onChanged }) {
   const [comment, setComment] = React.useState('')
   const [notice, setNotice] = React.useState(null)
   const [picked, setPicked] = React.useState('')
+  /* 这次派单实际会用哪套权限（沙箱 + 提权审批）。只对 studio-* 派单会话生效，
+     手动新开的会话仍归 DSH 自己的权限档位——写清楚，免得上一次「设置里选了全权限
+     为什么还弹审批」的误会再发生。 */
+  const [policy, setPolicy] = React.useState(null)
+  React.useEffect(() => {
+    let alive = true
+    void api('/agents/policy').then(out => { if (alive) setPolicy(out ?? null) }).catch(() => {})
+    return () => { alive = false }
+  }, [task.id, task.dispatch?.state])
   const bodyRef = React.useRef(null)
   /* 键盘可达（WCAG 2.1.1 / 2.4.3）：
      - Esc 关抽屉：抽屉占满右侧，没有它只能去点右上角的小 ×
@@ -1506,6 +1515,19 @@ function Drawer({ task, state, onClose, onChanged }) {
                 : task.dispatch?.state === 'stopped'
                   ? '上次派单已被停止'
                   : '这张卡还没有派给 AI'),
+          policy === null ? null : (() => {
+            const cfg = policy.configured ?? {}
+            const expertId = picked || task.dispatch?.expert || task.expert || ''
+            const expert = (state.config?.experts ?? []).find(item => item.id === expertId)
+            const sandbox = String(expert?.sandbox ?? '').trim() || String(cfg.sandbox ?? '').trim() || 'workspace-write'
+            const forced = String(cfg.isolation ?? '') === 'worktree' && sandbox !== 'danger-full-access'
+            const label = value => value === 'read-only' ? '只读' : value === 'danger-full-access' ? '无沙箱' : '只写工作区'
+            const live = (policy.live ?? []).find(item => item.taskId === task.id)
+            return h('div', { className: 'flex min-w-0 flex-col gap-1' },
+              h('div', { className: HINT, 'data-dispatch-policy': '' },
+                `本次派单：沙箱 ${label(forced ? 'danger-full-access' : sandbox)}${forced ? '（worktree 隔离自动提权）' : ''} · 提权审批 ${cfg.escalation === 'deny' ? '自动拒绝' : '自动批准'}${live?.preset ? ` · 本会话实际 ${label(String(live.preset))}` : ''}`),
+              h('div', { className: HINT }, '只对 Studio 派单的会话生效；你在侧栏手动新开的会话仍按 DSH 自己的权限档位。'))
+          })(),
           h('div', { className: FIELD, style: { marginTop: 4 } },
             h('div', { className: LABEL }, '派给谁'),
             h(SelectField, {
