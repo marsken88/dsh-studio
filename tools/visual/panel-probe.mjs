@@ -940,6 +940,27 @@ try {
     await page.screenshot({ path: join(outDir, 'drawer-diff-fulltext.png') })
   }
 
+  /* ⑥c 拖拽换列：真实 dragstart/dragover/drop（HTML5 事件），落库后再从 /state 回读 */
+  await clickExact('关闭')
+  await clickExact('看板')
+  await new Promise(resolve => setTimeout(resolve, 900))
+  const dragged = await page.evaluate(() => {
+    const card = [...document.querySelectorAll('[data-kanban-card]')]
+      .find(node => String(node.textContent ?? '').includes('（探针）看板卡片'))
+    const target = document.querySelector('[data-board-column="review"]')
+    if (card === undefined || target === null) return { ok: false, why: 'card=' + (card !== undefined) + ' target=' + (target !== null) }
+    const data = new DataTransfer()
+    card.dispatchEvent(new DragEvent('dragstart', { bubbles: true, cancelable: true, dataTransfer: data }))
+    target.dispatchEvent(new DragEvent('dragover', { bubbles: true, cancelable: true, dataTransfer: data }))
+    target.dispatchEvent(new DragEvent('drop', { bubbles: true, cancelable: true, dataTransfer: data }))
+    card.dispatchEvent(new DragEvent('dragend', { bubbles: true, cancelable: true, dataTransfer: data }))
+    return { ok: true }
+  })
+  await new Promise(resolve => setTimeout(resolve, 1400))
+  const movedState = await state()
+  const movedCard = (movedState?.tasks ?? []).find(item => item.id === taskId)
+  check('⑥c 拖拽卡片能换列并落库', dragged.ok === true && movedCard?.status === 'review', JSON.stringify({ dragged, status: movedCard?.status }))
+
   check('全程没有 pageerror / console 错误', errors.length === 0, errors.slice(0, 3).join(' | '))
 } finally {
   if (browser !== undefined) await browser.close()
