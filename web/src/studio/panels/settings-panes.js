@@ -1,14 +1,13 @@
-/* 设置页里仍内联在 client.src.js 的三块面板：看板外观 / 角色与模型 / 自动派单。
+/* 设置页里仍内联在 client.src.js 的两块面板：看板外观 / 自动派单。
  *
  * 迁出来只换表现层（BoardUI token + 4px 档位），表单值、保存流程、字段顺序与选项都不变：
  *   · 分区 = 卡片（rounded-xl + border-separator-border + bg-background-primary-default + p-4）；
  *   · 字段 = 标签（caption）+ 控件，控件仍走共享的 TextField / SelectField / CheckField；
  *   · 动作走 BoardUI Button；保存结果用 token 色的小字。
  *
- * 这三块原先挂在旧 panel 的「壳 / 头 / 体」三层类上，是设置页外壳迁完后的最后一批。
+ * 这两块原先挂在旧 panel 的「壳 / 头 / 体」三层类上，是设置页外壳迁完后的最后一批。
  */
 import { Button } from '../../boardui/index'
-import { ROLE_LABEL } from '../labels.js'
 import { client } from '../context.js'
 
 const PANE = 'flex min-w-0 flex-col gap-4'
@@ -19,7 +18,6 @@ const LABEL = 'text-caption-2-medium text-text-secondary'
 const HINT = 'text-caption-1-regular text-text-tertiary'
 const ERR = 'text-caption-1-regular text-text-error-primary'
 const OK = 'text-caption-1-regular text-state-success-text'
-const GRID2 = 'grid grid-cols-1 gap-4 md:grid-cols-2'
 const ROW = 'flex min-w-0 flex-wrap items-center gap-3'
 const CHECK_ROW = 'flex cursor-pointer items-center gap-2 text-body-2-regular text-text-primary'
 const CHECK_GROUP = 'flex flex-wrap items-center gap-4'
@@ -62,29 +60,6 @@ export function BoardAppearancePane({ form, setForm, saveBar }) {
       h('div', { className: SECTION_TITLE }, '看板'),
       h(SettingsField, { form, setForm, fieldKey: 'boardTitle', label: '看板标题', hint: '需求&任务工作空间' }),
     ),
-    saveBar,
-  )
-}
-
-/** 角色与模型：每个角色位一行模型名（两列，窄屏一列）。 */
-export function RoleModelsPane({ form, setForm, saveBar, roleKeys }) {
-  const { h, TextField } = client()
-  return h('div', { className: PANE, 'data-settings-pane': 'models' },
-    h('div', { className: SECTION },
-      h('div', { className: SECTION_TITLE }, '角色与模型'),
-      h('div', { className: GRID2 },
-        roleKeys.map(role => h('div', { className: FIELD, key: role },
-          h('div', { className: LABEL }, `${ROLE_LABEL[role] ?? role}`),
-          h(TextField, {
-            'aria-label': `${ROLE_LABEL[role] ?? role}的模型`,
-            value: form.roles[role].model,
-            placeholder: 'deepseek-v4.1-flash',
-            onChange: e => setForm({ ...form, roles: { ...form.roles, [role]: { ...form.roles[role], model: e.target.value } } }),
-          }),
-        )),
-      ),
-    ),
-    h('div', { className: HINT }, '单个专家可以在「专家」里单独指定模型，优先级：专家模型 → 这里的角色模型 → 宿主默认。'),
     saveBar,
   )
 }

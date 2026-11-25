@@ -718,23 +718,33 @@ try {
   await saveOnce(providerBefore)
   await new Promise(resolve => setTimeout(resolve, 800))
 
-  // ④d 设置 → 角色与模型：面板能从导航进得去。
-  // 0.9.55 之前 paneFor 里有 models 分支，导航数组却没这一项，面板永远打不开。
-  const modelsNav = await page.evaluate(() => {
-    const el = [...document.querySelectorAll('button, [role="button"], a')]
-      .find(node => (node.textContent ?? '').trim().startsWith('角色与模型'))
+  // ④d 设置 → 专家：角色模板已删（专家是模型与提示词的唯一来源）。
+  // 反过来守两条：导航里不该再有「角色与模型」，专家面板里不该再有「角色模板」那张卡。
+  const expertsNav = await page.evaluate(() => {
+    const el = [...document.querySelectorAll('[data-settings-nav-item]')]
+      .find(node => String(node.textContent ?? '').trim().startsWith('专家'))
     if (el === undefined || el === null) return false
     el.click()
     return true
   })
-  if (modelsNav === true) await new Promise(resolve => setTimeout(resolve, 700))
-  const modelsPane = await page.evaluate(() => ({
-    text: document.body.innerText,
-    inputs: document.querySelectorAll('[data-dsh-studio] input[placeholder="deepseek-v4.1-flash"]').length,
-  }))
-  check('④d 设置页有「角色与模型」入口', modelsNav === true, modelsNav ? '' : '导航里没有这一项')
-  check('④d 角色与模型面板真的渲染', modelsPane.text.includes('角色与模型') && modelsPane.inputs >= 4, `inputs=${modelsPane.inputs}`)
-  await page.screenshot({ path: join(outDir, 'role-models.png') })
+  if (expertsNav === true) await new Promise(resolve => setTimeout(resolve, 700))
+  const expertsPane = await page.evaluate(() => {
+    const labels = [...document.querySelectorAll('[data-settings-nav-item], button, [role="button"], a')]
+      .map(node => String(node.textContent ?? '').trim())
+    return {
+      pane: document.querySelector('[data-panel="people-experts"]') !== null,
+      text: document.body.innerText,
+      roleTemplates: document.querySelector('[data-section="role-templates"]') !== null,
+      modelsNav: labels.some(label => label.startsWith('角色与模型')),
+    }
+  })
+  check('④d 导航里不再有「角色与模型」入口', expertsPane.modelsNav === false)
+  check(
+    '④d 专家面板不再有「角色模板」',
+    expertsNav === true && expertsPane.pane === true && expertsPane.roleTemplates === false && expertsPane.text.includes('专家（可在评论里 @ 他们）'),
+    JSON.stringify({ nav: expertsNav, pane: expertsPane.pane, templates: expertsPane.roleTemplates }),
+  )
+  await page.screenshot({ path: join(outDir, 'experts.png') })
 
   // ④e 设置 → 自动派单：会话跑在哪个目录要写清楚（决定它落在侧栏哪个工作区）。
   // 以前这一项叫「工作区目录」，看不出会话会跑在 ~/dsh-workspace 里、落在「未分组」。

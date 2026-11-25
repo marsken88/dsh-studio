@@ -407,7 +407,6 @@ function publicConfig(config) {
         enabled: bot.enabled,
       })),
     },
-    roles: config.roles,
     projects: config.projects,
     templates: config.templates,
     market: config.market,
@@ -1112,16 +1111,6 @@ async function applyConfig(store, patch) {
         username: incoming.username === undefined ? current.username : incoming.username,
       }
       config.localAuth = sanitizeLocalAuth(next)
-    }
-    if (patch.roles !== undefined && typeof patch.roles === 'object') {
-      for (const role of ROLE_IDS) {
-        const incoming = patch.roles[role]
-        if (incoming === undefined || incoming === null || typeof incoming !== 'object') continue
-        const target = config.roles[role]
-        if (typeof incoming.label === 'string' && incoming.label.trim().length > 0) target.label = incoming.label.trim().slice(0, 40)
-        if (typeof incoming.model === 'string') target.model = incoming.model.trim().slice(0, 120)
-        if (typeof incoming.prompt === 'string') target.prompt = incoming.prompt.slice(0, 4000)
-      }
     }
     if (patch.market !== undefined && typeof patch.market === 'object') {
       const m = patch.market

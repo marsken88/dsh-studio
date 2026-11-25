@@ -420,7 +420,6 @@ const PANELS = [
   ['settings-docs', '文档出口'],
   ['settings-health', '集成健康'],
   ['settings-agents', '自动派单'],
-  ['settings-models', '角色与模型'],
   ['settings-testing', '测试执行'],
   ['settings-costs', '成本与预算'],
   ['settings-environments', '部署环境'],
@@ -483,7 +482,7 @@ try {
     await surface(name)
   }
 
-  // ② 设置：18 个分区
+  // ② 设置：17 个分区
   const settingsOk = await clickBy('设置')
   if (settingsOk) {
     for (const [name, label] of PANELS) {

@@ -25,7 +25,7 @@ import { withDestructiveConfirm } from './studio/destructive.js'
 import { applyTitlebarFloor } from './studio/titlebar.js'
 import { createEditor } from './studio/editor.js'
 import { NewTaskDialog } from './studio/dialogs/new-task.js'
-import { AutoDispatchPane, BoardAppearancePane, RoleModelsPane, SettingsField, SettingsSaveBar } from './studio/panels/settings-panes.js'
+import { AutoDispatchPane, BoardAppearancePane, SettingsField, SettingsSaveBar } from './studio/panels/settings-panes.js'
 import { ExpertsPanel, TeamsPanel, TestingPanel, EscalatePanel, EnvironmentsPanel } from './studio/panels/people.js'
 import { LdapPanel, CostsPanel, BusinessPanel } from './studio/panels/platform.js'
 import { AccessPanel, ColumnsPanel, StoragePanel, HealthPanel } from './studio/panels/governance.js'
@@ -1028,7 +1028,6 @@ html[data-dsh-theme="light"] [class*="rightbarCol"] { background: #fafafa !impor
         feishuNotify: config.feishu.notifyOnChange !== false,
         gitlabSyncEnabled: config.gitlab.syncEnabled === true,
         gitlabSyncLabel: config.gitlab.syncLabel ?? '',
-        roles: JSON.parse(JSON.stringify(config.roles)),
         agentsEnabled: config.agents?.enabled === true,
         agentsMaxConcurrent: String(config.agents?.maxConcurrent ?? 2),
         agentsPreset: config.agents?.agentPreset ?? 'standard',
@@ -1044,7 +1043,7 @@ html[data-dsh-theme="light"] [class*="rightbarCol"] { background: #fafafa !impor
       const [status, setStatus] = React.useState(null)
       const [error, setError] = React.useState(null)
       const [busy, setBusy] = React.useState(false)
-      /* 未保存提醒：设置页有 18 个分区，一大半是「改完点保存」。这里只跟踪**文本输入**
+      /* 未保存提醒：设置页有 17 个分区，一大半是「改完点保存」。这里只跟踪**文本输入**
          （下拉/开关在好几块里是即时保存的，不能算脏），保存按钮点过就清掉。
          切分区时如果还脏，先确认再切，别让一页改动静默丢掉。 */
       const [dirty, setDirty] = React.useState(false)
@@ -1052,7 +1051,7 @@ html[data-dsh-theme="light"] [class*="rightbarCol"] { background: #fafafa !impor
         const target = event.target
         const tag = target?.tagName
         /* 下拉在大多数面板是即时保存的（权限、测试开关），不能一概算脏；
-           但「看板外观 / 角色与模型 / 自动派单」这三块是草稿 + 保存条，改了下拉也要提示。 */
+           但「看板外观 / 自动派单」这两块是草稿 + 保存条，改了下拉也要提示。 */
         if (tag === 'SELECT') {
           if (event.currentTarget?.getAttribute?.('data-draft-form') === '1') setDirty(true)
           return
@@ -1075,7 +1074,6 @@ html[data-dsh-theme="light"] [class*="rightbarCol"] { background: #fafafa !impor
         try {
           await api('/config', {
             board: { title: form.boardTitle },
-            roles: form.roles,
             agents: {
               enabled: form.agentsEnabled,
               maxConcurrent: Number(form.agentsMaxConcurrent) || 2,
@@ -1099,7 +1097,6 @@ html[data-dsh-theme="light"] [class*="rightbarCol"] { background: #fafafa !impor
       /* 字段行与保存条都在 panels/settings-panes.js 里（BoardUI），这里只保留同名的调用点。 */
       const field = (key, label, hint, type) => h(SettingsField, { key, form, setForm, fieldKey: key, label, hint, type })
 
-      const roleKeys = Object.keys(form.roles)
       const [section, setSection] = React.useState(initialSection ?? 'experts')
 
       React.useEffect(() => {
@@ -1123,7 +1120,6 @@ html[data-dsh-theme="light"] [class*="rightbarCol"] { background: #fafafa !impor
         gitlab: ['代码仓库', '一个仓库一条记录：地址、路径、令牌各自独立，同步时互不干扰。'],
         feishu: ['飞书机器人', '卡片状态变化时往群里发消息。可以按团队或项目建多个机器人。'],
         agents: ['自动派单', '卡片进入勾选的列时，自动把活派给该列的负责人；这里是全局开关与并发上限。'],
-        models: ['模型', '每个角色位用哪个模型。单个专家还能在「专家」里单独覆盖。'],
         testing: ['测试执行', '接口用例跑在哪、能访问哪些域名、超时多少。执行器就跑在这台机器上（.218），不依赖外部 CI。'],
         costs: ['成本与预算', '一个月允许派多少次活、跑多少小时，超了在效能页亮黄亮红。'],
         environments: ['部署环境', '版本可以登记「上过哪个环境」，只留痕：平台不接 CD，不会触发任何部署。'],
@@ -1150,9 +1146,6 @@ html[data-dsh-theme="light"] [class*="rightbarCol"] { background: #fafafa !impor
         { id: 'health', label: '集成健康', count: state.integrations?.broken ?? 0 },
         { group: '运行' },
         { id: 'agents', label: '自动派单' },
-        /* 面板一直都在（paneFor 里有 models 分支），但导航数组漏了它，页面上永远进不去：
-           全局角色模型只能改 JSON 或调工具。补上入口，计数 = 已单独指定模型的角色数。 */
-        { id: 'models', label: '角色与模型', count: Object.values(config.roles ?? {}).filter(role => String(role?.model ?? '').trim() !== '').length },
         { id: 'testing', label: '测试执行', count: (config.testing?.envs ?? []).length },
         { id: 'costs', label: '成本与预算' },
         { id: 'environments', label: '部署环境', count: (config.environments ?? []).length },
@@ -1180,7 +1173,6 @@ html[data-dsh-theme="light"] [class*="rightbarCol"] { background: #fafafa !impor
         if (id === 'docs') return h(DocsSinkPanel, { config, onChanged })
       if (id === 'health') return h(HealthPanel, { state, config, onChanged })
         if (id === 'board') return h(BoardAppearancePane, { form, setForm, saveBar })
-        if (id === 'models') return h(RoleModelsPane, { form, setForm, saveBar, roleKeys })
         // agents（自动派单）是兜底面板
         return h(AutoDispatchPane, { form, setForm, saveBar })
       }
@@ -1216,7 +1208,7 @@ html[data-dsh-theme="light"] [class*="rightbarCol"] { background: #fafafa !impor
           'data-settings-pane': section,
           'data-settings-dirty': dirty ? '1' : '0',
           // 草稿 + 保存条的面板：下拉改动也算未保存（其余面板的下拉多数是即时保存）
-          'data-draft-form': ['board', 'models', 'agents'].includes(section) ? '1' : '0',
+          'data-draft-form': ['board', 'agents'].includes(section) ? '1' : '0',
           onChange: markDirty,
           onInput: markDirty,
           onClick: clearDirtyOnSave,

@@ -152,7 +152,7 @@ export function registerTools(ctx, store) {
 
   register(defineStudioTool({
     name: 'studio_config_get',
-    description: 'Read the Studio settings (GitLab / Feishu endpoints and the role→model mapping). Secrets are returned as presence flags, never values.',
+    description: 'Read the Studio settings (GitLab / Feishu endpoints, gates and the expert roster). Secrets are returned as presence flags, never values.',
     parameters: {},
     async execute() {
       await store.ready
@@ -171,14 +171,9 @@ export function registerTools(ctx, store) {
       feishuAppId: { type: 'string', description: 'Feishu self-built app App ID.' },
       feishuAppSecret: { type: 'string', description: 'Feishu app secret (written once, never returned).' },
       feishuChatId: { type: 'string', description: 'Default Feishu chat id for notifications.' },
-      roleModels: {
-        type: 'object',
-        additionalProperties: true,
-        description: 'Role → model overrides, e.g. {"dev":"deepseek-v4.1-flash","qa":"deepseek-v4.1-flash"}',
-      },
     },
     async execute(args) {
-      const patch = { gitlab: {}, feishu: {}, roles: {} }
+      const patch = { gitlab: {}, feishu: {} }
       if (args.gitlabUrl !== undefined) patch.gitlab.url = args.gitlabUrl
       if (args.gitlabToken !== undefined) patch.gitlab.token = args.gitlabToken
       if (args.gitlabGroup !== undefined) patch.gitlab.group = args.gitlabGroup
@@ -186,11 +181,6 @@ export function registerTools(ctx, store) {
       if (args.feishuAppId !== undefined) patch.feishu.appId = args.feishuAppId
       if (args.feishuAppSecret !== undefined) patch.feishu.appSecret = args.feishuAppSecret
       if (args.feishuChatId !== undefined) patch.feishu.chatId = args.feishuChatId
-      if (args.roleModels !== undefined && typeof args.roleModels === 'object') {
-        for (const [role, model] of Object.entries(args.roleModels)) {
-          if (ROLE_IDS.includes(role) && typeof model === 'string') patch.roles[role] = { model }
-        }
-      }
       await host.applyConfig(store, patch)
       return { ok: true, config: host.publicConfig(store.snapshot().config) }
     },

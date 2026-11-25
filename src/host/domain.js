@@ -133,22 +133,22 @@ export function defaultColumns() {
   }
 }
 
-/** The four shipped experts, used until the company edits them. */
-export function seedExperts(roles) {
+/** The four shipped experts, used until the company edits them.
+ *  只从代码里的 DEFAULT_ROLES 播种：设置里的「角色模板」已删（它从来没影响过播种，
+ *  也没影响过新建专家），专家自己的 prompt / model 是唯一来源。 */
+export function seedExperts() {
   return ROLE_IDS.map(role => {
     const seed = DEFAULT_ROLES[role]
     return {
       id: role,
-      name: roles?.[role]?.label !== undefined && roles[role].label !== DEFAULT_ROLES[role].label
-        ? String(roles[role].label)
-        : seed.name,
+      name: seed.name,
       emoji: seed.emoji,
       role,
       domain: '',
       skills: [],
       description: seed.brief,
-      prompt: String(roles?.[role]?.prompt ?? '') || String(seed.prompt ?? ''),
-      model: String(roles?.[role]?.model ?? seed.model),
+      prompt: String(seed.prompt ?? ''),
+      model: String(seed.model ?? ''),
       preset: '',
       enabled: true,
     }
@@ -158,9 +158,9 @@ export function seedExperts(roles) {
 /** Fresh default settings. */
 export function defaultConfig() {
   return {
-    schema: 6,
+    schema: 7,
     board: { title: '需求&任务工作空间' },
-    experts: seedExperts(DEFAULT_ROLES),
+    experts: seedExperts(),
     teams: [],
     columns: defaultColumns(),
     /** 业务项目：一个项目可以盯多个 GitLab 仓库，里面按迭代分组卡片。 */
@@ -194,12 +194,6 @@ export function defaultConfig() {
     requirementGate: { requireAcceptance: true },
     /** 成本闸门：只统计「跑了多少次、花了多少机上时间」，宿主没把 token 用量回传给插件。 */
     costs: { budgetRuns: 500, budgetHours: 80, warnAt: 80 },
-    roles: {
-      product: { label: '产品', model: 'deepseek-v4.1-flash', prompt: '' },
-      architect: { label: '架构', model: 'deepseek-v4.1-flash', prompt: '' },
-      dev: { label: '研发', model: 'deepseek-v4.1-flash', prompt: '' },
-      qa: { label: '测试', model: 'deepseek-v4.1-flash', prompt: '' },
-    },
     /** The company catalogue: entries are npm specs or local bundle paths. */
     market: { title: '公司内部市场', items: [] },
     /** Automatic hand-off of a card to its role agent when it enters a column. */
@@ -386,7 +380,6 @@ export function mergeConfig(saved) {
     gitlab,
     feishu,
     docs: sanitizeDocsConfig(saved.docs, base.docs),
-    roles: mergeSection(base.roles, saved.roles),
     market: mergeSection(base.market, saved.market),
     agents: mergeSection(base.agents, saved.agents),
     testing: sanitizeTesting(saved.testing),

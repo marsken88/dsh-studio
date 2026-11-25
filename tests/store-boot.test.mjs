@@ -2,7 +2,7 @@
 // runtime ReferenceErrors (a moved helper, a forgotten import) that `node --check`
 // cannot see and that only show up when a live process loads the layer.
 import assert from 'node:assert/strict'
-import { mkdtemp, readFile, rm } from 'node:fs/promises'
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
@@ -247,6 +247,49 @@ test('store: side values survive a restart without bumping the revision', async 
   } finally {
     try { store?.db?.close?.() } catch { /* already closed */ }
     try { again?.db?.close?.() } catch { /* already closed */ }
+    await rm(dir, { recursive: true, force: true, maxRetries: 3, retryDelay: 50 }).catch(() => {})
+  }
+})
+
+test('store: schema 7 drops the retired role templates and keeps their models on the experts', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'dsh-studio-roles-'))
+  let store
+  try {
+    const file = join(dir, 'dsh-studio.json')
+    /* 老库：schema 6 + 角色模板，专家里一个有模型、一个没有。 */
+    await writeFile(file, JSON.stringify({
+      revision: 5,
+      updatedAt: Date.now(),
+      config: {
+        schema: 6,
+        experts: [
+          { id: 'product', name: '产品经理', role: 'product', model: '', prompt: '你是产品经理' },
+          { id: 'expert-a1', name: '支付架构', role: 'architect', model: 'deepseek-v4.1-flash', prompt: '你是架构师' },
+          { id: 'expert-b2', name: '测试工程师', role: 'qa', model: '', prompt: '你是测试工程师' },
+        ],
+        roles: {
+          product: { label: '产品', model: 'deepseek-v4-pro', prompt: '旧的模板提示词' },
+          architect: { label: '架构', model: 'deepseek-v4-pro', prompt: '' },
+          qa: { label: '测试', model: 'deepseek-v4.1-flash', prompt: '' },
+        },
+      },
+      tasks: [],
+      requirements: [],
+      releases: [],
+      audit: [],
+    }), 'utf8')
+    store = new StudioStore(file, { dbFile: join(dir, 'dsh-studio.db'), secrets: new SecretStore(join(dir, '.secrets.json')) })
+    await store.ready
+    const config = store.snapshot().config
+    assert.equal(config.schema, 7, 'schema bumps to 7')
+    assert.equal(config.roles, undefined, 'retired role templates are not loaded into the state')
+    const byId = id => config.experts.find(expert => expert.id === id)
+    assert.equal(byId('product').model, 'deepseek-v4-pro', 'an expert with no model inherits the role template model')
+    assert.equal(byId('expert-b2').model, 'deepseek-v4.1-flash', '匹配按角色位（role），不是按专家 id')
+    assert.equal(byId('expert-a1').model, 'deepseek-v4.1-flash', '专家自己的模型不被模板覆盖')
+    assert.equal(byId('product').prompt, '你是产品经理', '模板提示词从来不进专家——迁移也不补')
+  } finally {
+    try { store?.db?.close?.() } catch { /* already closed */ }
     await rm(dir, { recursive: true, force: true, maxRetries: 3, retryDelay: 50 }).catch(() => {})
   }
 })

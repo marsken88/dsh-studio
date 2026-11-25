@@ -98,7 +98,7 @@ const imports = [
   "import { applyTitlebarFloor } from './studio/titlebar.js'",
   "import { createEditor } from './studio/editor.js'",
   "import { NewTaskDialog } from './studio/dialogs/new-task.js'",
-  "import { AutoDispatchPane, BoardAppearancePane, RoleModelsPane, SettingsField, SettingsSaveBar } from './studio/panels/settings-panes.js'",
+  "import { AutoDispatchPane, BoardAppearancePane, SettingsField, SettingsSaveBar } from './studio/panels/settings-panes.js'",
   "import { ExpertsPanel, TeamsPanel, TestingPanel, EscalatePanel, EnvironmentsPanel } from './studio/panels/people.js'",
   "import { LdapPanel, CostsPanel, BusinessPanel } from './studio/panels/platform.js'",
   "import { AccessPanel, ColumnsPanel, StoragePanel, HealthPanel } from './studio/panels/governance.js'",

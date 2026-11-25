@@ -27,7 +27,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 
 const PAGES = ['工作台', '看板', '需求', '用例', '版本', '项目', '效能', '设置']
 const PANELS = ['项目与迭代', '专家', '专家团', '技能库', '列的负责人', '代码仓库', '飞书机器人', '文档出口', '集成健康',
-  '自动派单', '角色与模型', '测试执行', '成本与预算', '部署环境', '看板外观', '统一登录（LDAP）', '权限与审计', '数据与备份']
+  '自动派单', '测试执行', '成本与预算', '部署环境', '看板外观', '统一登录（LDAP）', '权限与审计', '数据与备份']
 
 const COUNT = () => {
   const roots = [...document.querySelectorAll('[data-dsh-studio], [data-dsh-studio-portal]')]
