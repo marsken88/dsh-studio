@@ -3,7 +3,6 @@ import { chmod, mkdir, readFile, rename, writeFile } from 'node:fs/promises'
 import { dirname } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 import {
-  CODE_PREFIX,
   canonicalAuthor,
   DEFAULT_ROLES,
   LEGACY_BLOCKED_STATUS,
@@ -12,7 +11,6 @@ import {
   defaultConfig,
   mergeConfig,
   nextRequirementCode,
-  nextTaskCode,
   sanitizeArtifacts,
   sanitizeAudit,
   sanitizeBugSource,
@@ -26,6 +24,7 @@ import {
   text,
 } from './domain.js'
 import { sanitizeQuality } from './card-quality.js'
+import { migrateRequirementTaskCodes, nextCodeForTask } from './task-code.js'
 import { sanitizeMergeGate } from './merge-gate.js'
 import { sanitizeDesign } from './design.js'
 import { sanitizeTestPlan } from './test-plan.js'
@@ -333,13 +332,15 @@ export class StudioStore {
         if (next !== item.author) item.author = next
       }
     }
-    // 先给需求补编号，再给挂在需求下的老卡补编号：DEV-001 / TEST-001 各自递增。
+    /* 先给需求补编号，再给挂在需求下的老卡补编号：DEV-001 / TEST-001 各自递增，
+       需求卡用「需求编号-NN」（REQ-2026-003-01）。 */
     for (const req of this.state.requirements) {
       if (req.code.length === 0) req.code = nextRequirementCode(this.state.requirements)
     }
     for (const task of this.state.tasks) {
       if (task.code.length > 0 || task.requirementId.length === 0) continue
-      task.code = nextTaskCode(this.state.tasks, task.requirementId, CODE_PREFIX[task.type] ?? 'TASK')
+      const requirementCode = String(this.state.requirements.find(req => req.id === task.requirementId)?.code ?? '')
+      task.code = nextCodeForTask(this.state.tasks, { requirementId: task.requirementId, requirementCode, type: task.type })
     }
     // v1 的「待澄清」硬塞给产品经理；待澄清交谁由人定，清空的配置一次就好。
     if (Number(this.state.config.schema ?? 1) < 2) {
@@ -438,6 +439,13 @@ export class StudioStore {
           && legacy.every(id => agents.autoStatuses.includes(id)))
       if (untouched) this.state.config.agents = { ...agents, autoStatuses: STATUS_IDS.filter(id => id !== 'done') }
       this.state.config.schema = 8
+    }
+    if (Number(this.state.config.schema ?? 1) < 9) {
+      /* 需求卡以前直接蹭需求编号（同一需求下每张卡都叫 REQ-2026-003，更早的老数据还有 REQ-001 这种）：
+         改成「需求编号-NN」。卡与需求一眼分得开，云盘交付物文件名（`<卡编号>-…`）也不再互相覆盖。
+         幂等：已经符合格式的不动；顺序按 createdAt + id，重启多少次结果都一样。 */
+      migrateRequirementTaskCodes(this.state.tasks, this.state.requirements)
+      this.state.config.schema = 9
     }
   }
 

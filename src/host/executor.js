@@ -8,11 +8,12 @@ import { pointAcceptanceGap } from './acceptance.js'
 import { BLOCK_UNTIL, blockUntilMet } from './block-until.js'
 import { reviewGate } from './quality.js'
 import { overrideSummary } from './override.js'
-import { CASE_HTTP_METHODS, CODE_PREFIX, ROLE_IDS, STATUS_IDS, STATUSES, nextRequirementCode, nextTaskCode, normalizePatch, roleIdsOf, sanitizeBaseline, sanitizeCase, sanitizeReqDoc, sanitizeRequirement, sanitizeTestRun, sanitizeUrl, text,
+import { CASE_HTTP_METHODS, ROLE_IDS, STATUS_IDS, STATUSES, nextRequirementCode, normalizePatch, roleIdsOf, sanitizeBaseline, sanitizeCase, sanitizeReqDoc, sanitizeRequirement, sanitizeTestRun, sanitizeUrl, text,
   canonicalAuthor,
   sanitizeCoding,
 } from './domain.js'
 import { qualityTargetFor, sanitizeQuality } from './card-quality.js'
+import { nextCodeForTask } from './task-code.js'
 import { requirementGate, requirementMatrix, requirementProgress } from './requirement-gate.js'
 export { requirementGate, requirementMatrix, requirementProgress }
 import { casesOfTasks, impactSummary } from './impact.js'
@@ -1492,11 +1493,12 @@ export async function updateTask(store, id, patch) {
       const owner = (state.config.projects ?? []).find(entry => entry.id === task.project)
       if (owner === undefined || !(owner.services ?? []).some(entry => entry.id === task.service)) task.service = ''
     }
-    // 换需求就要换编号：同一需求下 DEV-001 只出现一次。
+    /* 换需求就要换编号：同一需求下 DEV-001 只出现一次；
+       需求卡走「需求编号-NN」（REQ-2026-003-01），换到哪条需求就带上哪条的编号。 */
     if (normalized.requirementId !== undefined && normalized.requirementId !== previousRequirement) {
-      task.code = normalized.requirementId === ''
-        ? ''
-        : nextTaskCode(state.tasks, normalized.requirementId, CODE_PREFIX[task.type] ?? 'TASK')
+      const others = state.tasks.filter(entry => entry.id !== task.id)
+      const requirementCode = String(state.requirements.find(entry => entry.id === normalized.requirementId)?.code ?? '')
+      task.code = nextCodeForTask(others, { requirementId: normalized.requirementId, requirementCode, type: task.type })
     }
     /* 「已完成」的卡不用标阻塞：它会一直挂在需求准出里（「N 张卡还卡在阻塞」），
        而实际上什么也拦不住（真机 2026-11-26：REQ-2026-001-5 已完成后被 agent 标了阻塞，

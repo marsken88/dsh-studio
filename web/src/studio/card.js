@@ -103,7 +103,7 @@ function Card({ task, onOpen, config, requirements, onPickRequirement, onPickPro
         'data-priority': task.priority,
         title: PRIORITY_LABEL[task.priority],
       }),
-      task.code ? h(ChipField, { variant: 'soft', title: '需求下的编号' }, task.code) : null,
+      task.code ? h(ChipField, { variant: 'soft', title: '卡编号：需求编号 + 需求内序号（如 REQ-2026-003-01）' }, task.code) : null,
       requirement !== undefined
         ? h(ChipField, {
             variant: 'purple',

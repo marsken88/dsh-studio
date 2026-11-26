@@ -281,7 +281,7 @@ test('store: schema 7 drops the retired role templates and keeps their models on
     store = new StudioStore(file, { dbFile: join(dir, 'dsh-studio.db'), secrets: new SecretStore(join(dir, '.secrets.json')) })
     await store.ready
     const config = store.snapshot().config
-    assert.equal(config.schema, 8, 'schema bumps to 8（schema 7 搬角色模板，schema 8 扩自动派单默认列）')
+    assert.equal(config.schema, 9, 'schema bumps to 9（schema 7 搬角色模板，8 扩自动派单默认列，9 改需求卡编号）')
     /* schema 7 起 `config.roles` 换了个意思：从「角色模板对象」变成「角色位白名单数组」。
        旧库里的模板对象不许漏进 state（模板的模型已经抄到专家上了，见下面几条），
        而新的白名单要按默认值补上 —— 旧库读进来不会缺这个键。 */
@@ -320,7 +320,7 @@ test('store: schema 8 把「旧默认自动派单列」扩成除已完成外全�
   }
   const legacy = await bootstrap(['design', 'dev_ready', 'test'])
   try {
-    assert.equal(legacy.config.schema, 8)
+    assert.equal(legacy.config.schema, 9)
     assert.deepEqual(
       legacy.config.agents.autoStatuses,
       ['clarify', 'design', 'dev_ready', 'dev', 'review', 'test', 'accept'],
