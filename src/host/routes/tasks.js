@@ -734,6 +734,9 @@ export async function handleTaskRoute({ method, route, req, res, store, url }) {
             merged.browser = sanitizeCaseBrowser(body.browser)
           }
           if (body.pointId !== undefined) merged.pointId = String(body.pointId).trim().slice(0, 24)
+          /* 工具侧一直能改 acceptanceId（studio_task_case 的 update 分支），路由漏了这一段：
+             面板与脚本想给用例补「验的是哪条验收条件」只能删了重建。 */
+          if (body.acceptanceId !== undefined) merged.acceptanceId = String(body.acceptanceId).trim().slice(0, 24)
           if (body.tier !== undefined) merged.tier = sanitizeTier(body.tier)
           if (body.flaky !== undefined) merged.flaky = body.flaky === true
           if (body.type !== undefined && CASE_TYPES.includes(String(body.type))) merged.type = String(body.type)
