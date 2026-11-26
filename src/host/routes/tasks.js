@@ -1,4 +1,5 @@
 import { randomBytes } from 'node:crypto'
+import { appendPointAcceptance } from '../acceptance.js'
 import { readArtifactImage } from '../artifact-image.js'
 import { artifactInputFromBody, clearDeletedReferences } from '../domain.js'
 import { designPatchFrom } from '../design.js'
@@ -642,6 +643,8 @@ export async function handleTaskRoute({ method, route, req, res, store, url }) {
           .filter(item => item.length > 0)
         for (const text of items) {
           task.checklist.push({ id: `c${task.checklist.length + 1}-${randomBytes(2).toString('hex')}`, text, done: false, by: '', at: 0, note: '' })
+          /* 卡和功能点各写各的会脱节：卡上补的清单项顺手回写到需求的功能点（重复不写）。 */
+          appendPointAcceptance(state, task, text)
         }
         task.checklist = task.checklist.slice(0, 30)
       } else if (action === 'remove') {

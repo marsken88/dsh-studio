@@ -3,7 +3,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import { checklistFromAcceptance } from '../src/host/acceptance.js'
+import { checklistFromAcceptance, appendPointAcceptance, pointAcceptanceGap } from '../src/host/acceptance.js'
 import { requirementMatrix } from '../src/host/executor.js'
 import { sanitizeCase } from '../src/host/domain.js'
 import { caseNeedsRerun, requirementDocUpdatedAt } from '../src/host/impact.js'
@@ -107,4 +107,26 @@ test('矩阵：staleCases 按用例算，summary 汇总', () => {
   const matrix = requirementMatrix(state, withDocs)
   assert.equal(matrix.points[0].cases.stale, 1, '只有 c1 需要复跑')
   assert.equal(matrix.summary.staleCases, 1)
+})
+
+// 2026-11-26 真机：产品在卡上补了 8 条清单，需求里 p2 仍是 0 条验收，协作链标黄、需求级准出被拦。
+// 卡与功能点是两处数据，得有回写与提醒。
+
+test('回写功能点：卡上补的清单项也会进需求的 acceptance（重复不写）', () => {
+  const state = { requirements: [{ id: 'req-1', points: [{ id: 'p2', acceptance: [] }] }] }
+  const task = { id: 't-1', requirementId: 'req-1', pointId: 'p2' }
+  assert.equal(appendPointAcceptance(state, task, '审批人要记录'), true)
+  assert.equal(appendPointAcceptance(state, task, ' 审批人要记录 '), false, '去重（忽略空白）')
+  assert.equal(appendPointAcceptance(state, task, '审批时间要记录'), true)
+  assert.deepEqual(state.requirements[0].points[0].acceptance.map(item => item.text), ['审批人要记录', '审批时间要记录'])
+  // 没挂功能点 / 没挂需求：静默不写
+  assert.equal(appendPointAcceptance(state, { id: 't-2', requirementId: 'req-1' }, 'x'), false)
+  assert.equal(appendPointAcceptance(state, { id: 't-3' }, 'x'), false)
+})
+
+test('功能点没验收条件时给一句提醒（准出 warning，不是 blocker）', () => {
+  const state = { requirements: [{ id: 'req-1', points: [{ id: 'p2', acceptance: [] }, { id: 'p3', acceptance: [{ text: 'A1' }] }] }] }
+  assert.match(pointAcceptanceGap(state, { requirementId: 'req-1', pointId: 'p2' }), /功能点 p2 在需求里还没有验收条件/)
+  assert.equal(pointAcceptanceGap(state, { requirementId: 'req-1', pointId: 'p3' }), '')
+  assert.equal(pointAcceptanceGap(state, { requirementId: 'req-1' }), '')
 })
