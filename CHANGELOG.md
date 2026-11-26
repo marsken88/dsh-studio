@@ -2,6 +2,16 @@
 
 ## [未发布] — 2026-11-26
 
+### 文档出口密钥面收紧：400 不再回显 apiKey，快照/磁盘不再存明文（BUG-002）
+
+`apiKey` 只允许出现在一个地方：0600 权限的密钥文件。这一版把两个输出面同时收紧（**数据需一次迁移**）：
+
+- **400 响应不再回显密钥**：`POST /config` 的 `invalid[].value` 改为**路径白名单**——只有 `provider` / `perProject.<id>` 的枚举写错（`unknown-provider`）才回显原值（面板要靠它定位手误）；`docs`/`weknora` 整块形状错、`weknora.*` **任何**字段（含 baseUrl/tenantId/knowledgeBaseId 与拼写变体 `api_key`/`apikey`）、`docs` 下的未知字段、非标量值，一律只给类型标签 `（对象）/（数组）/（字符串）/（null）`，不带内容也不带长度。实测 8 种误写形态从「6 条泄露」到「0 条」，`provider:'nope'` 仍回显 `nope`。
+- **快照与磁盘不再有明文**：`config.docs.weknora.apiKey` 与 GitLab token 走同一套——落盘前写进密钥文件（`docs.weknora.apiKey` 段）、`state`/`snapshots.blob` 里置空（内存保留给运行期上传）、启动时从密钥文件补回。升级后第一次启动会把老库/老快照里的明文搬进密钥文件、并擦掉历史快照里的明文；重复启动不重复搬、不覆盖新 key。密钥文件写失败时明文留在 state 里（宁可这次落盘多带一份，也不能让重启后上传变成「没配全」）。
+- **回滚代价**：回退到旧版本后，旧代码不会从密钥文件取 apiKey，**需要重新填一次 API Key**（或在回滚前保留旧快照）。`/state` 形状不变（`apiKey` 恒空 + `apiKeySet` 表示是否已配置）。
+
+验证：`tests/docs-config.test.mjs`（8 形态单测 + 真 HTTP 响应原文 + 红绿）、`tests/secrets-migration.test.mjs`（state/快照无明文、重开后真打一次上传、老库与历史快照迁移幂等、单文件模式、密钥写失败不丢 key）；`npm run check` 全绿。
+
 ### 文档出口：设置面板能按项目覆盖，保存时挡住半配置
 
 `docs.provider` 支持 feishu / weknora / both，作用域按「需求级 > 项目级 > 全局 > 缺省 feishu」生效。这一版补齐的是**写入口**（数据形状不变、无迁移）：

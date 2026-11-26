@@ -53,10 +53,13 @@ export class SecretStore {
         ldap: typeof parsed.ldap === 'object' && parsed.ldap !== null ? parsed.ldap : {},
         legacy: typeof parsed.legacy === 'object' && parsed.legacy !== null ? parsed.legacy : {},
         localAuth: typeof parsed.localAuth === 'object' && parsed.localAuth !== null ? parsed.localAuth : null,
+        /* 文档出口的 WeKnora apiKey（BUG-002 B 段）：历史版本把它明文写进 state/快照，
+           升级后只允许留在这个 0600 文件里。 */
+        docs: typeof parsed.docs === 'object' && parsed.docs !== null ? parsed.docs : {},
       }
     } catch (error) {
       if (error?.code !== 'ENOENT') console.warn('[dsh-studio] could not read secrets file:', error?.message ?? error)
-      this.cache = { gitlab: {}, feishu: {}, ldap: {}, legacy: {}, localAuth: null }
+      this.cache = { gitlab: {}, feishu: {}, ldap: {}, legacy: {}, localAuth: null, docs: {} }
     }
     return this.cache
   }
@@ -68,6 +71,7 @@ export class SecretStore {
       ldap: next?.ldap ?? {},
       legacy: next?.legacy ?? {},
       localAuth: next?.localAuth ?? null,
+      docs: next?.docs ?? {},
     }
     const run = this.chain.then(async () => {
       await mkdir(dirname(this.file), { recursive: true })
@@ -95,6 +99,8 @@ export class StudioStore {
     this.baseRevision = 0
     /** 口令哈希是否已经安全落在密钥文件里：是才允许从 state/快照里摘掉。 */
     this.secretsHaveLocalAuth = false
+    /** WeKnora apiKey 是否已经安全落在密钥文件里：是才允许从 state/快照里摘掉（同上，防丢 key）。 */
+    this.secretsHaveDocsKey = false
     this.ready = this.#boot()
   }
 
@@ -255,6 +261,10 @@ export class StudioStore {
        没这一步第一次写就会误判成"被其它进程改过"。 */
     this.baseRevision = this.state.revision
     await this.#hydrateSecrets()
+    /* BUG-002 B 段的一次性迁移：老库/老快照里的明文 apiKey 先进密钥文件，再擦掉历史快照里的明文。
+       顺序不能反 —— 万一擦完就崩，密钥文件里已经有值，重启还能补回；反过来则可能把唯一副本擦掉。 */
+    const docsKeySafe = await this.#migrateDocsKey()
+    this.#scrubLegacySnapshots(docsKeySafe)
     if (imported) {
       await this.#persist()
       console.log(`[dsh-studio] imported ${this.file} into ${this.dbFile}`)
@@ -465,7 +475,7 @@ export class StudioStore {
   }
 
   /** 落盘前把密钥摘掉：库里只留「有没有配」，密钥在 600 权限的单独文件里。 */
-  #serialize(dropPassword = false) {
+  #serialize(dropPassword = false, dropDocsKey = false) {
     const plain = {
       ...this.state,
       config: structuredClone(this.state.config ?? {}),
@@ -482,6 +492,13 @@ export class StudioStore {
     }
     const ldap = plain.config.ldap ?? {}
     if (typeof ldap.bindPassword === 'string') ldap.bindPassword = ''
+    /* WeKnora apiKey（BUG-002 B 段）：与 GitLab token 同一套路。只在确认密钥文件里已经写成功
+       （dropDocsKey）才摘掉 —— 写失败时宁可这次落盘多带一份明文，也不能让重启后的上传变成「没配全」。
+       内存里的值不动，运行期上传还要用它（hydrate 负责重启后补回）。 */
+    const weknora = plain.config.docs?.weknora
+    if (dropDocsKey && weknora !== null && typeof weknora === 'object' && typeof weknora.apiKey === 'string') {
+      weknora.apiKey = ''
+    }
     /* 口令哈希也不该进 state / 快照：只有确认密钥文件里已经写成功（dropPassword）
        才摘掉。摘掉时 mustChange 写 false —— 这个 null 表示「哈希在密钥文件里」，
        不是「还是默认口令」；加载时 #hydrateSecrets 会把哈希补回来。 */
@@ -512,6 +529,8 @@ export class StudioStore {
     const localAuth = password !== null && typeof password === 'object' && typeof password.hash === 'string'
       ? { salt: String(password.salt ?? ''), hash: String(password.hash), at: Number(password.at) || 0 }
       : null
+    /* BUG-002 B 段：文档出口的 apiKey 也进密钥文件，值非空才写（空 = 没配，别覆盖已有的）。 */
+    const docsKey = String(this.state.config.docs?.weknora?.apiKey ?? '').trim()
     await this.secrets.replace({
       gitlab,
       feishu,
@@ -524,8 +543,10 @@ export class StudioStore {
         feishuWebhook: String(feishuConfig.webhook ?? '').trim(),
       },
       localAuth,
+      docs: docsKey === '' ? {} : { weknora: { apiKey: docsKey } },
     })
     this.secretsHaveLocalAuth = localAuth !== null
+    this.secretsHaveDocsKey = docsKey !== ''
   }
 
   /** 从密钥文件把密钥补回内存（库里存的是空串）。 */
@@ -552,6 +573,17 @@ export class StudioStore {
     if (String(feishuConfig.webhook ?? '').trim() === '' && typeof vault.legacy?.feishuWebhook === 'string') {
       feishuConfig.webhook = vault.legacy.feishuWebhook
     }
+    /* WeKnora apiKey（BUG-002 B 段）：state/快照里是空串，真值在密钥文件里，启动时补回给运行期上传用。
+       老库第一次启动时 state 里还是明文 —— 这里不动它（内存要用），下一次 #persist 会把它写进密钥文件
+       再剥离；剥离之后再次启动才走「空 → 从 vault 补回」。所以迁移天然幂等：
+       不会在每次启动时重复搬，也不会用自己的空值把密钥文件里的新 key 覆盖掉。 */
+    const weknora = this.state.config.docs?.weknora
+    if (weknora !== null && typeof weknora === 'object'
+      && String(weknora.apiKey ?? '').trim() === ''
+      && typeof vault.docs?.weknora?.apiKey === 'string'
+      && vault.docs.weknora.apiKey !== '') {
+      weknora.apiKey = vault.docs.weknora.apiKey
+    }
     /* 口令哈希：state 里被摘成 null（mustChange 也只是加载时 sanitize 的默认值），
        真正的哈希在密钥文件里。这里补回来，并把 mustChange 还原成「已设过口令」。 */
     const localAuth = this.state.config.localAuth ?? (this.state.config.localAuth = { enabled: true, username: 'admin', password: null, mustChange: true, updatedAt: 0 })
@@ -566,22 +598,74 @@ export class StudioStore {
     }
   }
 
+  /**
+   * 老库迁移（BUG-002 B 段）：升级前 state/快照里存的是明文 apiKey。这里把内存里的明文写进密钥文件，
+   * 之后 #persist 就会把它从 state 里剥离。返回「密钥是否已安全落在密钥文件里」，
+   * 供 #scrubLegacySnapshots 判断能不能擦历史快照。
+   * 幂等：内存里已经是空串（已剥离）或密钥文件里已经是同一个值 → 直接返回，不重复搬、不覆盖新 key。
+   */
+  async #migrateDocsKey() {
+    if (this.secrets === null) return false
+    const plaintext = String(this.state.config.docs?.weknora?.apiKey ?? '').trim()
+    if (plaintext === '') return true
+    const vault = await this.secrets.load()
+    if (String(vault.docs?.weknora?.apiKey ?? '').trim() === plaintext) return true
+    try {
+      await this.#syncSecrets()
+      return this.secretsHaveDocsKey
+    } catch (error) {
+      this.secretsHaveDocsKey = false
+      console.warn('[dsh-studio] could not move docs apiKey into the secrets file:', error?.message ?? error)
+      return false
+    }
+  }
+
+  /**
+   * 擦掉历史快照里的明文 apiKey（升级前写进去的行，不擦就会一直留在 snapshots.blob 里）。
+   * 只在密钥确实已进密钥文件时擦（keySafe），否则宁可暂时留着。按行重写、已擦过的行直接跳过 → 幂等。
+   * 回滚快照时 apiKey 是空串，restoreSnapshot 会用 #hydrateSecrets 从密钥文件补回，不会丢 key。
+   */
+  #scrubLegacySnapshots(keySafe = false) {
+    if (this.db === null || this.secrets === null || keySafe !== true) return
+    try {
+      const rows = this.db.prepare('SELECT id, blob FROM snapshots').all()
+      let scrubbed = 0
+      for (const row of rows) {
+        let saved
+        try { saved = JSON.parse(String(row.blob ?? '')) } catch { continue }
+        const weknora = saved?.config?.docs?.weknora
+        if (weknora === null || typeof weknora !== 'object' || typeof weknora.apiKey !== 'string' || weknora.apiKey === '') continue
+        weknora.apiKey = ''
+        const text = JSON.stringify(saved)
+        this.db.prepare('UPDATE snapshots SET blob = ?, bytes = ? WHERE id = ?').run(text, text.length, row.id)
+        scrubbed += 1
+      }
+      if (scrubbed > 0) console.log(`[dsh-studio] scrubbed plaintext docs apiKey from ${scrubbed} legacy snapshot(s)`)
+    } catch (error) {
+      console.warn('[dsh-studio] could not scrub legacy snapshots:', error?.message ?? error)
+    }
+  }
+
   async #persist() {
     await mkdir(dirname(this.file), { recursive: true })
     /* 口令哈希必须先写进密钥文件，才允许从 state 里摘掉；密钥写失败就保留在 state 里，
        宁可这次落盘多带一份哈希，也不能让重启后登录不进。 */
     let dropPassword = false
+    let dropDocsKey = false
     if (this.secrets !== null) {
       try {
         await this.#syncSecrets()
         dropPassword = this.secretsHaveLocalAuth
+        dropDocsKey = this.secretsHaveDocsKey
       } catch (error) {
-        /* 密钥没写成功：这一轮绝不能把哈希从 state 里摘掉，否则重启后新口令就丢了。 */
+        /* 密钥没写成功：这一轮绝不能把哈希从 state 里摘掉，否则重启后新口令就丢了。
+           WeKnora apiKey 同理（摘掉就再也拿不回来）。 */
         this.secretsHaveLocalAuth = false
+        this.secretsHaveDocsKey = false
         console.warn('[dsh-studio] secrets write failed; keeping password hash in state for this write:', error?.message ?? error)
       }
     }
-    const plain = this.#serialize(dropPassword)
+    const plain = this.#serialize(dropPassword, dropDocsKey)
     if (this.db === null) {
       const tmp = `${this.file}.${process.pid}.tmp`
       await writeFile(tmp, JSON.stringify(plain, null, 2), 'utf8')
