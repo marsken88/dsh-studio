@@ -8,8 +8,8 @@ import { parseSteps } from './cases.js'
 import { Button, TreeView, TreeViewItem } from '../boardui/index'
 import { EmptyState } from '../boardui/empty-state'
 import { ProgressTrack } from '../components/base/progress/progress'
-import { productChainRow } from './collab-chain.js'
 import { archiveFailureNotice, archiveNotice, archivePendingNotice } from './archive-copy.js'
+import { productChainRow } from './collab-chain.js'
 
 /* 抽屉版面：token + Tailwind（4px 档）。这一版起不再用手写类：
    小节是圆角卡片，说明文字是 caption-1，字段是「标签 + 控件」两行。
