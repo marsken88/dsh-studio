@@ -444,6 +444,21 @@ test('docs-readback: provider 不符 / perProject 少一项 / apiKeySet 不对�
   assert.match(leak.join('\n'), /apiKey：回读不应带明文/)
 })
 
+test('docs-panel: overridesFromDocs 保留未知项目键（R9 行为级断言）', async () => {
+  const { overridesFromDocs } = await import('../web/src/studio/docs-readback.js')
+  /* 关键：pjGone 不在 /state.projects 里（未知项目），初始化必须原样保留，不能过滤掉。 */
+  assert.deepEqual(
+    overridesFromDocs({ pjA: 'both', pjGone: 'weknora' }),
+    [{ id: 'pjA', provider: 'both' }, { id: 'pjGone', provider: 'weknora' }],
+    '未知项目键必须保留',
+  )
+  assert.deepEqual(overridesFromDocs({}), [])
+  assert.deepEqual(overridesFromDocs(null), [])
+  assert.deepEqual(overridesFromDocs(undefined), [])
+  /* 顺序按 Object.entries：面板原样渲染，保存时整表顺序不漂移。 */
+  assert.deepEqual(overridesFromDocs({ b: 'feishu', a: 'both' }).map(row => row.id), ['b', 'a'])
+})
+
 test('archive-copy: 按实际出口说话（weknora 不许出现「飞书」）', async () => {
   const { archiveNotice, archiveFailureNotice, archivePendingNotice } = await import('../web/src/studio/archive-copy.js')
   const pending = archivePendingNotice()
@@ -463,6 +478,13 @@ test('archive-copy: both 成功同时点名（飞书为主）；副出口失败�
   const both = archiveNotice({ provider: 'both', primary: 'feishu', url: 'https://x/docx/1', sinks: { weknora: { ok: true, url: 'http://kb/k/1' } } })
   assert.match(both, /飞书云盘（主）/)
   assert.match(both, /WeKnora/)
+  /* URL 归属：飞书链接跟在飞书名后、知识库链接跟在 WeKnora 名后，不许串位。 */
+  assert.match(both, /飞书云盘（主）：https:\/\/x\/docx\/1/)
+  assert.match(both, /；WeKnora 知识库：http:\/\/kb\/k\/1$/)
+  assert.ok(!both.includes('WeKnora 知识库：https://x/docx/1'), '飞书 URL 不许挂在 WeKnora 名字后面：' + both)
+  /* 知识库没回链接时只点名，不编造 URL。 */
+  const noKbUrl = archiveNotice({ provider: 'both', url: 'https://x/docx/1', sinks: { weknora: { ok: true, url: '' } } })
+  assert.match(noKbUrl, /飞书云盘（主）：https:\/\/x\/docx\/1；WeKnora 知识库$/)
   const partial = archiveNotice({ provider: 'both', url: 'https://x/docx/1', sinks: { weknora: { ok: false, error: '建文档失败（HTTP 500）：boom' } } })
   assert.match(partial, /飞书云盘（主）/)
   assert.match(partial, /WeKnora 知识库未写入：建文档失败/)
@@ -488,8 +510,10 @@ test('docs-panel: 提交完整 perProject 表，且只在回读一致时显示�
   assert.ok(source.includes('diffDocsReadback(payload, readback'), '保存后必须用回读值核对')
   assert.match(source, /if \(diffs\.length > 0\)[\s\S]{0,160}status: 'mismatch'/, '回读不一致必须走 mismatch')
   assert.match(source, /if \(diffs\.length > 0\)[\s\S]{0,400}status: 'saved'/, '回读一致才显示已保存')
-  /* 未知项目行默认保留（R9）：初值直接来自 docs.perProject 的 entries，不做过滤。 */
-  assert.ok(source.includes('Object.entries(docs.perProject ?? {})'), '初值必须完整保留既有覆盖（含未知项目）')
+  /* 未知项目行默认保留（R9）：初值走纯函数 overridesFromDocs，行为级断言在下面一条。 */
+  assert.ok(source.includes('overridesFromDocs(docs.perProject'), '初值必须走 overridesFromDocs（不许内联过滤）')
+  assert.ok(source.includes('overridesFromDocs(next.perProject'), '保存后按回读刷新也必须走同一个纯函数')
+  assert.ok(!/overrides\.filter\(/.test(source), '不许对 overrides 做过滤：未知项目行必须原样保留')
   assert.ok(source.includes("'data-perproject-known'"), '未知项目行要有可判定钩子')
   assert.ok(source.includes('删除项目 ${item.id} 的覆盖？'), '显式删除要写明 key 与后果（二次确认）')
 })

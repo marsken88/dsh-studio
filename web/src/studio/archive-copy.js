@@ -33,15 +33,16 @@ export function archiveNotice(doc, { verb = '已归档' } = {}) {
   const target = url === '' ? '' : `：${url}`
   if (provider === 'weknora') return `${verb}到 ${WEKNORA_LABEL}${target}`
   if (provider === 'feishu') return `${verb}到${FEISHU_LABEL}${target}`
-  /* both：飞书是主出口，它成功了就算归档成功；WeKnora 那份单独说，别让人以为两边都有。 */
+  /* both：飞书是主出口，它成功了就算归档成功；WeKnora 那份单独说，别让人以为两边都有。
+     两个链接各自紧跟自己的出口名（以前飞书 URL 挂在 WeKnora 名字后面，复制走就是错的链接）。 */
+  const feishuPart = `${verb}到${FEISHU_LABEL}（主）${target}`
   const weknora = doc?.sinks?.weknora ?? {}
   if (weknora.ok === true) {
     const weknoraUrl = typeof weknora.url === 'string' ? weknora.url.trim() : ''
-    const extra = weknoraUrl === '' || weknoraUrl === url ? '' : `；${WEKNORA_LABEL}：${weknoraUrl}`
-    return `${verb}到${FEISHU_LABEL}（主）与 ${WEKNORA_LABEL}${target}${extra}`
+    return `${feishuPart}；${WEKNORA_LABEL}${weknoraUrl === '' ? '' : `：${weknoraUrl}`}`
   }
   const reason = clip(weknora.error === '' || weknora.error === undefined ? '未知原因' : weknora.error)
-  return `${verb}到${FEISHU_LABEL}（主）${target}；${WEKNORA_LABEL}未写入：${reason}`
+  return `${feishuPart}；${WEKNORA_LABEL}未写入：${reason}`
 }
 
 /** 失败提示：both 的主出口（飞书）失败时也要点名，并给出原因（≤120 字）。 */

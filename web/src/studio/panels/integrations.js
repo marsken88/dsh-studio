@@ -15,7 +15,7 @@
 import { client } from '../context.js'
 import { Button } from '../../boardui/index'
 import { EmptyState } from '../../boardui/empty-state'
-import { diffDocsReadback } from '../docs-readback.js'
+import { diffDocsReadback, overridesFromDocs } from '../docs-readback.js'
 
 /* 设置页容器：纯 Tailwind（设置页外壳已迁 BoardUI）。 */
 const PANE = 'flex min-w-0 flex-col gap-3'
@@ -516,7 +516,8 @@ export function DocsSinkPanel({ config, onChanged }) {
   const [kb, setKb] = React.useState(weknora.knowledgeBaseId ?? '')
   /* 项目级覆盖用一个数组表示（初值 docs.perProject）。服务端是「整表替换」，
      所以保存时永远提交完整表：删掉一行 = 该项目回落到全局默认。 */
-  const [overrides, setOverrides] = React.useState(() => Object.entries(docs.perProject ?? {}).map(([id, value]) => ({ id, provider: value })))
+  /* 初值走纯函数 overridesFromDocs：它不做项目存在性过滤（未知行默认保留，R9 有单测钉住）。 */
+  const [overrides, setOverrides] = React.useState(() => overridesFromDocs(docs.perProject))
   const [addProject, setAddProject] = React.useState('')
   const [addProvider, setAddProvider] = React.useState('feishu')
   const [busy, setBusy] = React.useState(false)
@@ -526,7 +527,7 @@ export function DocsSinkPanel({ config, onChanged }) {
   const applyReadback = next => {
     if (next === null || typeof next !== 'object') return
     setProvider(next.provider ?? 'feishu')
-    setOverrides(Object.entries(next.perProject ?? {}).map(([id, value]) => ({ id, provider: value })))
+    setOverrides(overridesFromDocs(next.perProject))
     setBaseUrl(next.weknora?.baseUrl ?? '')
     setTenantId(next.weknora?.tenantId ?? '')
     setKb(next.weknora?.knowledgeBaseId ?? '')

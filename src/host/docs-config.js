@@ -22,6 +22,11 @@ const DOC_FIELDS = ['provider', 'perProject', 'weknora']
 
 const isPlainObject = value => value !== null && typeof value === 'object' && !Array.isArray(value)
 
+/* 密钥永不回显：apiKey 的非法值（原值、前缀、长度）一律不进 400 响应体 —— 它会被客户端日志、
+   代理日志、错误上报落盘。用固定遮蔽符；其它字段不是密钥，照旧带值才好定位是哪个值错了。 */
+const MASKED_SECRET = '（已隐藏）'
+const invalidValue = (key, value) => (key === 'apiKey' ? MASKED_SECRET : value)
+
 /** 归一：只认字符串（数组/对象/boxed string 都不算），trim + lower 后必须落在枚举里。 */
 const pickProvider = value => {
   if (typeof value !== 'string') return ''
@@ -86,10 +91,10 @@ function readWeKnora(input, invalid) {
     /* apiKeySet 是 /state 回读的形状（只读回声）：面板会把整块 weknora 原样带回，
        这里忽略而不是判 unknown-field，否则「打开面板点保存」直接 400。 */
     if (key === 'apiKeySet') continue
-    if (SINK_LIMITS[key] === undefined) { invalid.push({ key: 'weknora.' + key, value, reason: 'unknown-field' }); continue }
-    if (typeof value !== 'string') { invalid.push({ key: 'weknora.' + key, value, reason: 'not-string' }); continue }
+    if (SINK_LIMITS[key] === undefined) { invalid.push({ key: 'weknora.' + key, value: invalidValue(key, value), reason: 'unknown-field' }); continue }
+    if (typeof value !== 'string') { invalid.push({ key: 'weknora.' + key, value: invalidValue(key, value), reason: 'not-string' }); continue }
     if (value.trim().length > SINK_LIMITS[key]) {
-      invalid.push({ key: 'weknora.' + key, value: value.slice(0, 12) + '…', reason: 'too-long' })
+      invalid.push({ key: 'weknora.' + key, value: invalidValue(key, value.slice(0, 12) + '…'), reason: 'too-long' })
       continue
     }
     sink[key] = value.trim()

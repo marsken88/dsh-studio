@@ -77,6 +77,32 @@ test('buildDocsConfig：非法输入一次列清（400 docs_config_invalid）', 
   )
 })
 
+test('buildDocsConfig：apiKey 永不回显（400 invalid[] 只给遮蔽符）', () => {
+  const longKey = 'sk-' + 'x'.repeat(250)
+  const cases = [
+    [{ weknora: { apiKey: longKey } }, 'too-long'],
+    [{ weknora: { apiKey: 12345 } }, 'not-string'],
+    [{ weknora: { apiKey: { value: longKey } } }, 'not-string'],
+  ]
+  for (const [patch, reason] of cases) {
+    let caught
+    try { buildDocsConfig(BASE, patch) } catch (error) { caught = error }
+    assert.ok(caught instanceof DocsConfigError, '必须抛 DocsConfigError')
+    assert.equal(caught.invalid[0].key, 'weknora.apiKey')
+    assert.equal(caught.invalid[0].reason, reason)
+    assert.equal(caught.invalid[0].value, '（已隐藏）', 'apiKey 的非法值只能给遮蔽符')
+    const payload = JSON.stringify({ error: caught.message, invalid: caught.invalid, missing: caught.missing, scopes: caught.scopes })
+    assert.ok(!payload.includes('sk-'), '400 响应体不许出现密钥前缀：' + payload)
+    assert.ok(!payload.includes('xxxx'), '连片段都不许出现：' + payload)
+  }
+  /* 遮蔽只针对 apiKey：其它字段不是密钥，保留前缀才好定位是哪个值错了。 */
+  let baseUrlError
+  try { buildDocsConfig(BASE, { weknora: { baseUrl: 'x'.repeat(301) } }) } catch (error) { baseUrlError = error }
+  assert.ok(baseUrlError instanceof DocsConfigError)
+  assert.notEqual(baseUrlError.invalid[0].value, '（已隐藏）', '非密钥字段不该被一起抹掉')
+  assert.ok(String(baseUrlError.invalid[0].value).startsWith('xxxxxxxxxxxx'), '非密钥字段保留前缀便于定位')
+})
+
 test('buildDocsConfig：保存后全部 weknora-ish 生效范围都要配齐（Q6 裁定 A）', () => {
   const emptySink = { baseUrl: 'http://x/api/v1', apiKey: '', tenantId: '', knowledgeBaseId: 'kb' }
   throwsDocs(
@@ -241,6 +267,23 @@ test('真 HTTP AC1-5：非法项 400 + invalid 指名，回读深等不变', asy
   assert.deepEqual(res.body.missing, [])
   assert.deepEqual(res.body.scopes, [])
   assert.deepEqual(await readDocs(), before, '非法保存必须 0 项落库')
+})
+
+test('真 HTTP AC1-5b：400 响应体不回显 apiKey（连前缀都不许）', async () => {
+  const secret = 'sk-' + 'x'.repeat(250)
+  const response = await fetch(base + '/config', {
+    method: 'POST',
+    headers: { 'x-studio-user': 'docs-config-test', 'content-type': 'application/json' },
+    body: JSON.stringify({ docs: { weknora: { apiKey: secret } } }),
+  })
+  const text = await response.text()
+  assert.equal(response.status, 400)
+  const body = JSON.parse(text)
+  assert.equal(body.code, 'docs_config_invalid')
+  assert.equal(body.invalid[0].key, 'weknora.apiKey')
+  assert.equal(body.invalid[0].value, '（已隐藏）', '响应体里 apiKey 只能给遮蔽符')
+  assert.ok(!text.includes('sk-'), '400 响应原文不许出现密钥前缀：' + text.slice(0, 300))
+  assert.ok(!text.includes('xxxx'), '连密钥片段都不许出现：' + text.slice(0, 300))
 })
 
 test('真 HTTP AC2-3：项目级 both 缺 knowledgeBaseId → 保存即被拒，指名影响范围', async () => {

@@ -15,6 +15,12 @@
 const asText = value => (value === undefined || value === null ? '' : String(value))
 const asTable = value => (value !== null && typeof value === 'object' && !Array.isArray(value) ? value : {})
 
+/** 面板「项目级覆盖」区的初值：docs.perProject → overrides 数组。
+    这里不做任何「项目还在不在列表里」的过滤 —— 不在 /state.projects 里的历史键默认保留（R9 禁止静默剔除）。 */
+export function overridesFromDocs(perProject) {
+  return Object.entries(asTable(perProject)).map(([id, provider]) => ({ id, provider }))
+}
+
 /** 返回空数组 = 回读一致；否则每项一行「字段：提交 X / 回读 Y」。 */
 export function diffDocsReadback(sent, readback, { apiKeySetBefore = false } = {}) {
   const diffs = []

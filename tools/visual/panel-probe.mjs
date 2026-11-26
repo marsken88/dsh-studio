@@ -746,7 +746,12 @@ try {
      否则换一台没配 WeKnora 的机器，这里会报一个和产品行为不符的假红。 */
   const sinkBefore = (await state()).config?.docs?.weknora ?? {}
   const sinkReady = sinkBefore.apiKeySet === true && String(sinkBefore.baseUrl ?? '').trim() !== '' && String(sinkBefore.knowledgeBaseId ?? '').trim() !== ''
-  const providerTarget = sinkReady ? (providerBefore === 'weknora' ? 'feishu' : 'weknora') : (providerBefore === 'feishu' ? 'both' : 'feishu')
+  /* 没配全时目标必须留在一个 weknora-ish 出口，才会触发保存期闸门。旧半配置实例上
+     provider 已经是 weknora/both 但 sink 没配全——这时改选 feishu 会保存成功，下面的「被拒」断言就假红。 */
+  const weknoraishBefore = providerBefore === 'weknora' || providerBefore === 'both'
+  const providerTarget = sinkReady
+    ? (providerBefore === 'weknora' ? 'feishu' : 'weknora')
+    : (weknoraishBefore ? providerBefore : 'both')
   const writeAttempt = await saveOnce(providerTarget)
   await clickExact('集成健康')
   const backOk = await page.evaluate(() => {
