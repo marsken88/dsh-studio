@@ -1143,11 +1143,12 @@ export function registerTools(ctx, store) {
     parameters: {
       id: { type: 'string', required: true, description: 'Task id.' },
       reason: { type: 'string', required: true, description: 'What exactly is blocking this (missing info, permission, dependency, failing test...).' },
+      until: { type: 'string', description: '可选：在等什么可自动判断的条件——human-signoff（人工验收签字）/ sub-cards-done（子卡全部完成）。填了之后条件满足时系统自动解除，人不用再点一次；不填就是纯人工判断。' },
     },
     async execute(args) {
       const reason = text(args.reason, 500) ?? ''
       if (reason === '') throw new Error('reason is required')
-      const task = await updateTask(store, args.id, { blocked: true, blockedReason: reason, by: 'agent' })
+      const task = await updateTask(store, args.id, { blocked: true, blockedReason: reason, blockedUntil: args.until, by: 'agent' })
       host.getActiveDispatcher()?.abortTask?.(task.id)
       return `已标记阻塞 ${task.id}（停在「${STATUSES.find(s => s.id === task.status)?.label ?? task.status}」）：${reason}`
     },

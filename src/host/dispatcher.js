@@ -2,6 +2,7 @@
 import { DEFAULT_ROLES, FALLBACK_AGENT_MODEL, ROLE_IDS, SANDBOX_MODES, STATUSES, codingSummary, normalizeStrategy, worktreeRoot } from './domain.js'
 import { effectiveConcurrency } from './parallel-guard.js'
 import { abandonedRetry, dispatchPhase, handoffRetry, restartResume } from './dispatch-state.js'
+import { autoUnblockNote, shouldAutoUnblock } from './block-until.js'
 import { effectiveSandbox, sanitizeEscalation } from './escalation.js'
 import { driftNote, isModelDrift, sessionDirOf } from './model-drift.js'
 import { stripQuotedCode } from './mention-note.js'
@@ -850,7 +851,13 @@ export class Dispatcher {
       // 「已完成」永远不派：就算有人把 done 勾进 autoStatuses，也不该再叫 AI 跑一遍。
       if (task.status === 'done') continue
       // 阻塞的卡停在原地等人处理，不自动往下派。
-      if (task.blocked !== null && task.blocked !== undefined) continue
+      if (task.blocked !== null && task.blocked !== undefined) {
+        /* 条件型阻塞：等人工签字 / 等子卡收口 这类可机器判断的等待，条件满足了自动解除，
+           人不用再点一次「解除」（人亲手挂的阻塞不在此列，见 block-until.js）。 */
+        if (await this.clearSatisfiedBlock(task)) {
+          // 已解除：这一轮继续按正常流程判断是否要派
+        } else continue
+      }
       // 上次失败还在退避窗口里：到点再试，别每 5 秒硬撞。
       if ((Number(task.retryAt) || 0) > Date.now()) continue
       const dispatch = task.dispatch ?? null
@@ -1485,6 +1492,23 @@ export class Dispatcher {
    * 刚 create 出来的会话，头部可能还没落进持久化快照（attach 会读它校验 cwd），
    * 所以给几次重试；仍然失败只记一行日志，不影响派单本身。
    */
+  /** 条件已满足的阻塞：清标记并写一条「系统自动解除」历史。返回是否解除了。 */
+  async clearSatisfiedBlock(task) {
+    const state = this.store.snapshot()
+    if (!shouldAutoUnblock(task, state.tasks)) return false
+    const note = autoUnblockNote(task)
+    await this.store.mutate(current => {
+      const found = current.tasks.find(item => item.id === task.id)
+      if (found === undefined || found.blocked === null || found.blocked === undefined) return
+      found.blocked = null
+      found.blockedReason = ''
+      found.updatedAt = Date.now()
+      found.history = [...(found.history ?? []), { at: found.updatedAt, by: '系统', status: found.status, note }].slice(-100)
+    })
+    this.note(`自动解除阻塞：${task.id}（${note}）`)
+    return true
+  }
+
   /** 把会话从其它工作区的名单里摘掉（只留它真正归的那个）。宿主启动校验靠这条不重复。 */
   async detachFromOtherWorkspaces(keepId, sessionId) {
     const registry = this.ctx?.workspaceRegistry

@@ -4,6 +4,7 @@
 import { COVERAGE_TARGET, coverageStrength, draftCasesFromCriteria, isExecutable, normalizeCaseTitle, stripExecutableMarker } from './case-strength.js'
 import { gapMessage, needsTierPlan, sanitizeTier, testPlanSummary } from './test-plan.js'
 import { isAiSignoff } from './intervention.js'
+import { BLOCK_UNTIL, blockUntilMet } from './block-until.js'
 import { reviewGate } from './quality.js'
 import { overrideSummary } from './override.js'
 import { CASE_HTTP_METHODS, CODE_PREFIX, ROLE_IDS, STATUS_IDS, STATUSES, nextRequirementCode, nextTaskCode, normalizePatch, roleIdsOf, sanitizeBaseline, sanitizeCase, sanitizeReqDoc, sanitizeRequirement, sanitizeTestRun, sanitizeUrl, text,
@@ -808,7 +809,7 @@ export function taskExitGate(state, task) {
   if (failed.length > 0) blockers.push(`${failed.length} 条用例不通过：${failed.slice(0, 3).map(item => item.title).join('、')}`)
   // CI 门禁：真跑过流水线且失败，不允许收口（没接 GitLab 时这个字段是空的，不会误伤）。
   if (task.gitlabMR?.pipeline?.status === 'failed') blockers.push(`CI 流水线没通过：${task.gitlabMR.pipeline.id ? `#${task.gitlabMR.pipeline.id}` : '最近一次运行'}`)
-  if (task.blocked !== undefined && task.blocked !== null) blockers.push('这张卡还挂着阻塞标记')
+  if (task.blocked !== undefined && task.blocked !== null && !blockUntilMet(task, state?.tasks ?? [])) blockers.push('这张卡还挂着阻塞标记')
   /* 子卡没完成 / 没签字时，主卡连「要人签字」都不该提——先收口子卡。 */
   blockers.push(...childSignoffBlockers(state, task))
   if (task.signoff === undefined || task.signoff === null) blockers.push('还没有验收签字')
@@ -1492,10 +1493,12 @@ export async function updateTask(store, id, patch) {
         : nextTaskCode(state.tasks, normalized.requirementId, CODE_PREFIX[task.type] ?? 'TASK')
     }
     if (blockFlag === true && (task.blocked === null || task.blocked === undefined)) {
+      const until = String(patch.blockedUntil ?? '')
       task.blocked = {
         at: task.updatedAt,
         by,
         reason: blockReason ?? text(task.blockedReason, 500) ?? '',
+        ...(BLOCK_UNTIL.includes(until) ? { until } : {}),
       }
       task.blockedReason = task.blocked.reason
       task.history.push({ at: task.updatedAt, by, status: task.status, note: 'blocked' })
