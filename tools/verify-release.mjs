@@ -7,7 +7,7 @@ import { execFileSync } from 'node:child_process'
 import { readFileSync } from 'node:fs'
 import { cmpSemver } from './lib/semver.mjs'
 import { releaseBodyIssue } from './lib/release-notes.mjs'
-import { readDistTags, versionExists } from './lib/registry.mjs'
+import { readDistTags, tarballOk, versionExists } from './lib/registry.mjs'
 
 const PKG = '@marsken/dsh-studio'
 const pkg = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'))
@@ -77,6 +77,18 @@ try {
     published = await versionExists(PKG, pkg.version)
   }
   add('npm 上已发布 ' + pkg.version, published, published ? pkg.version : pkg.version + '（刚发布的话可以用 --wait 120 等一等）')
+
+  /* 元数据在 ≠ 包能下载：0.18.2 那次元数据立刻可见、tarball 却 404 了约 20 分钟才出现
+     （npm 的传播延迟，不是坏版本）。所以这里**带重试**：默认再等到 `--wait` 给的窗口，
+     真缺包才判红；同时提示「传播慢」与「包缺失」的区别。 */
+  let tarball = await tarballOk(PKG, pkg.version)
+  const tarballDeadline = Date.now() + waitSeconds * 1000
+  while (tarball.ok !== true && Date.now() < tarballDeadline) {
+    console.log('… tarball 还没就绪（HTTP ' + tarball.status + '），15 秒后再查')
+    await new Promise(r => setTimeout(r, 15000))
+    tarball = await tarballOk(PKG, pkg.version)
+  }
+  add('npm 上这个版本的 tarball 能下载', tarball.ok, tarball.ok ? 'HTTP 200' : `HTTP ${tarball.status} ${tarball.url}（发布后 npm 传播可能慢十几分钟，用 --wait 240 再试；真的 404 说明包没上传成功）`)
 
   const tags = await readDistTags(PKG)
   const latest = tags.latest ?? '(无)'

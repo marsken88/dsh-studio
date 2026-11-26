@@ -33,6 +33,23 @@ export async function versionExists(name, version, { timeoutMs = 15000 } = {}) {
 }
 
 /** 轮询直到 predicate 为真或超时；返回最后一次的值（不抛超时）。 */
+/**
+ * 这个版本的 .tgz 真的能下载吗（HEAD 期望 200）。
+ *
+ * 为什么必须单独查：2026-11-26 的 0.18.2 **元数据发布成功**（version / shasum / integrity 都有），
+ * 但 tarball 持续 404 —— `registry-has` 与 `verify-release` 当时都判「已发布」，
+ * 而 `latest` 已经指向它，用户装 @latest 直接 404。publish 成功 ≠ 包能下载。
+ */
+export async function tarballOk(name, version, { timeoutMs = 20000 } = {}) {
+  const url = `https://registry.npmjs.org/${String(name).startsWith('@') ? packageSlug(name) : name}/-/${String(name).split('/').pop()}-${version}.tgz`
+  try {
+    const res = await fetch(url, { method: 'HEAD', signal: AbortSignal.timeout(timeoutMs) })
+    return { ok: res.status === 200, status: res.status, url }
+  } catch (error) {
+    return { ok: false, status: 0, url, error: String(error?.message ?? error).slice(0, 120) }
+  }
+}
+
 export async function pollUntil(read, predicate, { waitMs = 60_000, intervalMs = 3000 } = {}) {
   const deadline = Date.now() + Math.max(0, waitMs)
   let value

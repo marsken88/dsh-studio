@@ -1453,3 +1453,18 @@ header id ... and cwd identify ".../studio-t-5d1d2ad4-architect/..."` —— 宿
 真机验证：派一个「只回收到」的会话 → `feedCount=1`、`commentCount=0`（播报没进评论）。
 历史数据清理：29 张卡上的 **1552 条**播报评论逐条删除（每条在 history 留「删了评论 <id>」），
 剩 1169 条人的/专家的评论一条没丢；删前备份 `.218:/tmp/dsh-studio.before-feed-clean.db`。
+
+### 发版插曲：0.18.2 的 tarball 传播慢约 20 分钟（更正：不是坏版本）
+
+- 0.18.2 的 CI publish 成功（元数据 0.18.2 可见、dist.shasum/integrity 都有），但 tarball
+  `registry.npmjs.org/@marsken/dsh-studio/-/dsh-studio-0.18.2.tgz` 持续 404（本地与 .218 两侧、四轮重试都复现），
+  而 `dist-tags.latest` 已经指向它 —— 也就是说「装 @latest 会 404」。
+- 本地没有 npm 凭据（`npm whoami` → need auth），收拾只能走 CI；于是**同内容重发 0.18.3**：
+  即刻 tarball 200、`latest=0.18.3`、`verify-release` 全项一致、`.218` 真装 0.18.3 并 `--dump-config` 认到。
+- **后续更正**：约 20 分钟后 0.18.2 的 tarball 变成 200（元数据 shasum 一直没变）——
+  说明是 npm 的**传播延迟**，不是发布失败。0.18.3 与 0.18.2 内容完全相同，两版都可用，latest=0.18.3。
+- 顺手把校验补严：`tools/lib/registry.mjs` 新增 `tarballOk()`，`verify-release` 现在会 HEAD 该版本
+  的 .tgz 并**带重试**（默认等到 `--wait` 窗口），真缺包才判红。
+- 教训：**publish 成功 ≠ tarball 可下载**。发完必须验一次 tarball（HEAD 该版本 .tgz 期望 200），
+  只跑 `registry-has` 查元数据会漏掉这种「有元数据没包」的坏版本。
+
