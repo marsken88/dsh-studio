@@ -8,7 +8,7 @@ export function sanitizeCaseShell(raw) {
   return {
     command,
     cwd: String(raw.cwd ?? '').trim().slice(0, 300),
-    timeoutMs: Math.max(1000, Math.min(120000, Number(raw.timeoutMs) || 30000)),
+    timeoutMs: Math.max(1000, Math.min(600000, Number(raw.timeoutMs) || 30000)),
     expectExit: Number.isInteger(Number(raw.expectExit)) ? Number(raw.expectExit) : 0,
     expectContains: String(raw.expectContains ?? '').slice(0, 500),
     expectNotContains: String(raw.expectNotContains ?? '').slice(0, 500),

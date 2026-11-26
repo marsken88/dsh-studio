@@ -710,11 +710,21 @@ export async function handleTaskRoute({ method, route, req, res, store, url }) {
           list.push({ ...item, id: `c${list.length + 1}-${randomBytes(2).toString('hex')}` })
         }
       } else if (action === 'remove') {
+        /* 找不到就报错（issue #164）：以前 filter 对不存在的 id 是恒等操作，返回 200 但什么都没写。 */
+        if (list.some(item => item.id === String(body.caseId ?? '')) === false) {
+          throw new Error(`no case ${String(body.caseId ?? '')} on task ${task.id}${list.length === 0 && String(task.parent ?? '') !== '' ? `；这张卡自己没有用例，来源用例可能挂在父卡 ${task.parent} 上` : ''}`)
+        }
         task.cases = list.filter(item => item.id !== String(body.caseId ?? ''))
         task.updatedAt = Date.now()
         return task
       } else {
         const caseId = String(body.caseId ?? '')
+        if (list.some(item => item.id === caseId) === false) {
+          throw new Error(`no case ${caseId} on task ${task.id}${list.length === 0 && String(task.parent ?? '') !== '' ? `；这张卡自己没有用例，来源用例可能挂在父卡 ${task.parent} 上` : ''}`)
+        }
+        if (body.result !== undefined && CASE_RESULTS.includes(String(body.result)) === false) {
+          throw new Error(`result 只认 ${CASE_RESULTS.join(' / ')}，收到「${String(body.result)}」（issue #164）`)
+        }
         task.cases = list.map(item => {
           if (item.id !== caseId) return item
           const merged = { ...item }

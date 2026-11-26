@@ -79,7 +79,7 @@ export function trustRejectionOutcome(rejection, route) {
   return {
     status: 401,
     code: 'login_required',
-    error: '需要已登录的 DSH 浏览器会话：从 dsh web 启动时打印的那个 URL 打开面板（脚本用 tools/lib/studio-auth.mjs 换 cookie）。',
+    error: '需要已登录的 DSH 浏览器会话：用 dsh web 启动时打印的那个 URL 打开一次面板，浏览器里就有了 dsh-auth cookie；脚本批量调用请先登录再带上 cookie（安装包里不带 tools/，仓库里的 tools/lib/studio-auth.mjs 只在 git 检出时有）。',
   }
 }
 

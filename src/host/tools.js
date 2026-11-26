@@ -1668,7 +1668,7 @@ export function registerTools(ctx, store) {
             body: { type: 'string', description: 'Optional request body (JSON string) for POST/PUT/PATCH.' },
             expectStatus: { type: 'number', description: 'Optional expected HTTP status; 0 or omitted means any 2xx/3xx passes.' },
             expectContains: { type: 'string', description: 'Optional substring the response body must contain.' },
-            shell: { type: 'object', description: 'Optional shell case: {command, expectExit, expectContains?, cwd?, timeoutMs?}. timeoutMs 1000-120000（默认 30000）；超时会明确报「超时」而不是「退出码 1」。Needs allowShell.' },
+            shell: { type: 'object', description: 'Optional shell case: {command, expectExit, expectContains?, cwd?, timeoutMs?}. timeoutMs 1000-600000（默认 30000，上限给编译类门禁留空间）；超时会明确报「超时」而不是「退出码 1」。Needs allowShell.' },
             browser: {
               type: 'object',
               description: 'Optional browser case: {url | path, expectText?, expectSelector?, expectUrl?, expectStatus?, steps?: [{click}|{fill,text}|{wait}|{waitFor}]}. Really opens Chrome/Edge; needs allowBrowser.',
@@ -1696,6 +1696,22 @@ export function registerTools(ctx, store) {
         const target = state.tasks.find(t => t.id === args.id)
         if (target === undefined) throw new Error(`no task ${args.id}`)
         const list = Array.isArray(target.cases) ? target.cases : []
+        /* 找不到就报错：以前 filter/map 对不存在的 id 是恒等操作，随后照常返回「用例 N 条」，
+           调用方以为写进去了（issue #164：把 pass 记到了没有用例的缺陷卡上）。 */
+        const missingCase = (caseId) => {
+          const parent = String(target.parent ?? '')
+          const hint = list.length === 0 && parent !== ''
+            ? `；这张卡自己没有用例，来源用例可能挂在父卡 ${parent} 上`
+            : ''
+          return new Error(`no case ${caseId} on task ${target.id}${hint}`)
+        }
+        if (action === 'remove' || action === 'update') {
+          const caseId = String(args.caseId ?? '')
+          if (list.some(item => item.id === caseId) === false) throw missingCase(caseId)
+          if (action === 'update' && args.result !== undefined && CASE_RESULTS.includes(String(args.result)) === false) {
+            throw new Error(`result 只认 ${CASE_RESULTS.join(' / ')}，收到「${String(args.result)}」：拼错会被静默忽略，所以这里直接拒（issue #164）`)
+          }
+        }
         if (action === 'remove') {
           target.cases = list.filter(item => item.id !== String(args.caseId ?? ''))
         } else if (action === 'update') {
@@ -1738,7 +1754,13 @@ export function registerTools(ctx, store) {
       const passed = task.cases.filter(item => item.result === 'pass').length
       const failed = task.cases.filter(item => item.result === 'fail').length
       const plan = testPlanSummary(task.cases, task.testPlan)
+      const changed = ['update', 'remove'].includes(action)
+        ? task.cases.find(item => item.id === String(args.caseId ?? ''))
+        : undefined
       return [
+        (action === 'update' || action === 'remove')
+          ? `${action === 'update' ? '已更新' : '已删除'}用例 ${String(args.caseId ?? '')}${changed === undefined ? '' : `（${changed.title}）`}`
+          : '',
         `${task.id} 测试用例 ${total} 条（通过 ${passed} / 不通过 ${failed} / 未跑 ${total - passed - failed}）：`,
         ...task.cases.map(item => {
           const mark = item.result === 'pass' ? '✅' : item.result === 'fail' ? '❌' : item.result === 'skip' ? '⏭️' : '⬜'
@@ -1746,7 +1768,7 @@ export function registerTools(ctx, store) {
           return `${mark} ${item.id} ${item.title}${tier ? `［${tier}］` : ''}${item.expected ? `（期望：${item.expected}）` : ''}${item.note ? ` — ${item.note}` : ''}`
         }),
         `三层测试进度：${planLine(plan)}。`,
-      ].join('\n')
+      ].filter(line => line !== '').join('\n')
     },
   }))
 

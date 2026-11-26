@@ -426,10 +426,16 @@ export class StudioStore {
          卡停在「开发中 / 待评审 / 待验收」就再也不动（真机 22 张开着的卡里 20 张在白名单外）。
          只在用户**没动过默认值**时才换（值恰好等于旧默认），自己收窄过的保持原样。 */
       const agents = this.state.config.agents ?? {}
-      const legacy = ['design', 'dev_ready', 'test']
+      /* 历史默认值有两版：3 值（design/dev_ready/test）与 4 值（clarify/design/dev_ready/test）。
+         只认 3 值会把 4 值老配置当成「用户自己收窄过」，于是 dev/review/accept 永远不自动派
+         （真机 issue #166：16 张卡里只有 3 张在流）。这里按「等于任一历史默认值」判。 */
+      const legacyDefaults = [
+        ['design', 'dev_ready', 'test'],
+        ['clarify', 'design', 'dev_ready', 'test'],
+      ]
       const untouched = Array.isArray(agents.autoStatuses)
-        && agents.autoStatuses.length === legacy.length
-        && legacy.every(id => agents.autoStatuses.includes(id))
+        && legacyDefaults.some(legacy => agents.autoStatuses.length === legacy.length
+          && legacy.every(id => agents.autoStatuses.includes(id)))
       if (untouched) this.state.config.agents = { ...agents, autoStatuses: STATUS_IDS.filter(id => id !== 'done') }
       this.state.config.schema = 8
     }
