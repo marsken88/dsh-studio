@@ -1,6 +1,7 @@
 // WeKnora 出口：把一份交付物的 Markdown 写进知识库。
 //
-// 只做两步：POST manual 建文档 → POST reparse 触发解析分块。
+// 做三段：DELETE 旧文档（台账里有锚点时）→ POST manual 建文档 → POST reparse 触发解析分块。
+// 删旧未受理即中止本轮：不建新的一份。两份并存时台账只能记一个，另一份永久孤儿（BUG-001）。
 // 真源永远是 Studio 里的 artifact：这里失败只回一个 error，由调用方决定要不要抛
 // （both 时 WeKnora 是「从」，失败不许阻塞交付物登记）。
 
@@ -53,14 +54,16 @@ export async function uploadToWeknora({ sink, title, markdown, previousKnowledge
   if (tenantId !== '') headers['X-Tenant-ID'] = tenantId
 
   /* 幂等：WeKnora 没有「覆盖同名文档」的语义，重复同步只会堆出多份切片污染检索。
-     所以拿台账里的 knowledgeId 先删旧再建新；旧文档已经不在了（404）也算删成功。
-     注意：WeKnora 的删除是**异步任务**（202 + `Delete task submitted`），刚删完立刻 GET 仍可能 200，别拿它判成败。 */
+     所以拿台账里的 knowledgeId 先提交删除并确认受理，再入库建新的一份；旧文档已经不在了（404）也算受理。
+     注意：WeKnora 的删除是**异步任务**（202 + `Delete task submitted`），刚删完立刻 GET 仍可能 200。
+     客户端在同一请求里无法证明文档已消失，所以 2xx 的真实语义只是「删除已被受理」，
+     不是「文档已失效」——判据按「最终收敛到 1 份」，别拿刚删完的 GET 判成败。 */
   const previous = trim(previousKnowledgeId, 80)
   let replaced = false
   if (previous !== '') {
     const removed = await callJson(doFetch, `${base}/knowledge/${encodeURIComponent(previous)}`, { method: 'DELETE', headers }, timeoutMs)
     replaced = removed.ok === true || removed.status === 404
-    /* 先失效再入库：旧文档没被确认失效，就绝不能建新的一份。
+    /* 先确认删除已受理，再入库：删除没被受理，就绝不能建新的一份。
        两份并存时台账只能记一个，另一份永久孤儿 —— 而且每次重试再漏一份（BUG-001）。
        这里中止本轮，回 replaced=false，让调用方保住台账里的旧锚点，下一轮还能接着删它。 */
     if (replaced !== true) {
