@@ -56,7 +56,7 @@ import { updateTaskComment, removeTaskComment } from './src/host/comments.js'
 import { deleteProjectFolder, deleteRequirementFolder } from './src/host/drive-sync.js'
 import { publicDocsConfig } from './src/host/doc-sink.js'
 import { writeDocsConfig } from './src/host/docs-config.js'
-import { addAssertedCases, addDraftCases, buildDashboard, codingVerifyLine, commentTask, configureExecutor, larkJson, ensureReqFolder, larkCliReady, invalidateLarkProbe, larkProbeCache, mutateReqDoc, probeEnv, pullFeishuDoc, requirementGate, requirementMatrix, requirementProgress, requirementRollup, runCommand, runSuite, runTaskCases, saveRequirement, syncArtifact, syncRequirementArtifacts, taskExitGate, updateTask, verifyCodingRecord } from './src/host/executor.js'
+import { addAssertedCases, addDraftCases, autoVerifyCoding, buildDashboard, codingVerifyLine, commentTask, configureExecutor, larkJson, ensureReqFolder, larkCliReady, invalidateLarkProbe, larkProbeCache, mutateReqDoc, probeEnv, pullFeishuDoc, requirementGate, requirementMatrix, requirementProgress, requirementRollup, runCommand, runSuite, runTaskCases, saveRequirement, syncArtifact, syncRequirementArtifacts, taskExitGate, updateTask, verifyCodingRecord } from './src/host/executor.js'
 import { configureAuthRoutes, handleAuthRoute } from './src/host/routes/auth.js'
 import { configureExportRoutes, handleExportRoute } from './src/host/routes/exports.js'
 import { integrateFeaturedPlugins, FEATURED_SOURCE } from './src/host/featured-source.js'
@@ -2529,7 +2529,7 @@ export function apply(ctx) {
   ctx.effect(() => disposeSection, 'dsh-studio: protocol section')
 
   configureToolHost({
-    addAssertedCases, addDraftCases, applyConfig, auditSummary, buildAnalytics, buildMetrics, burndownReport, checkToolAccess, createTask, markDuplicate, recordAudit,
+    addAssertedCases, addDraftCases, applyConfig, auditSummary, autoVerifyCoding, buildAnalytics, buildMetrics, burndownReport, checkToolAccess, createTask, markDuplicate, recordAudit,
     mergeMergeRequest,
     publicConfig,
     publishMergeGate,

@@ -98,13 +98,31 @@ export async function verifyCodingRecord(state, task) {
   const branch = String(head.stdout ?? '').trim()
   const log = await git('log', '--format=%H', '-n', '200')
   const actualCommits = String(log.stdout ?? '').trim().split('\n').filter(item => item !== '')
-  const base = String(info.base ?? 'main').trim() || 'main'
-  const diff = await git('diff', '--name-only', `${base}...HEAD`)
-  let actualFiles = String(diff.stdout ?? '').trim().split('\n').filter(item => item !== '')
-  if (diff.ok !== true || actualFiles.length === 0) {
-    // 基线分支名对不上时退回到「最近 20 次提交涉及的文件」，免得误报「一个文件都没改」。
-    const fallback = await git('diff', '--name-only', 'HEAD~20', 'HEAD')
-    if (fallback.ok === true) actualFiles = String(fallback.stdout ?? '').trim().split('\n').filter(item => item !== '')
+  /* 基线怎么取：worktree.base 常常是空的（卡从项目兜底目录切出来的），
+     以前只试 `${base}...HEAD`、失败再退 `HEAD~20` —— 分支不足 20 个提交时两个都失败，
+     actualFiles 变成 []，于是「4 个文件没实际改动」这种**误报**（真机 2026-11-26，
+     REQ-001 因此被挂上「准出剩两件只能由人做的事」）。
+     现在按 merge-base 逐个试候选基线，全都解析不到时明确说「读不到」而不是断言没改。 */
+  const base = String(info.base ?? '').trim()
+  const candidates = [...new Set([base, base === '' ? '' : `origin/${base}`, 'origin/main', 'main', 'master', 'origin/master'].filter(item => item !== ''))]
+  let actualFiles = []
+  let baseUsed = ''
+  for (const candidate of candidates) {
+    const mergeBase = await git('merge-base', 'HEAD', candidate)
+    if (mergeBase.ok !== true) continue
+    const sha = String(mergeBase.stdout ?? '').trim()
+    if (sha === '') continue
+    const diff = await git('diff', '--name-only', sha, 'HEAD')
+    if (diff.ok !== true) continue
+    actualFiles = String(diff.stdout ?? '').trim().split('\n').filter(item => item !== '')
+    baseUsed = candidate
+    break
+  }
+  if (baseUsed === '') {
+    return {
+      ok: false,
+      skipped: `基线分支解析不到（试过 ${candidates.join(' / ')}）：worktree.base 可能为空，或这条分支不包含任何已知基线——读不到「相对基线的改动」，不做判断`.slice(0, 300),
+    }
   }
   const status = await git('status', '--porcelain')
   const dirty = String(status.stdout ?? '').trim().split('\n').filter(item => item !== '')
@@ -121,6 +139,7 @@ export async function verifyCodingRecord(state, task) {
     branch,
     declaredBranch,
     branchOk,
+    baseUsed,
     commitCount: { declared: declaredCommits.length, actual: actualCommits.length },
     fileCount: { declared: declaredFiles.length, actual: actualFiles.length },
     missingCommits: missingCommits.slice(0, 10),

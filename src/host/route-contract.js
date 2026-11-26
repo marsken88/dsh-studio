@@ -33,6 +33,7 @@ declareRoute('/task/comment', ['id', 'body', 'author', 'kind', 'action', 'commen
 declareRoute('/task/checklist', ['id', 'action', 'text', 'itemId', 'done', 'note', 'by'])
 declareRoute('/requirement/review', ['id', 'decision', 'note', 'by', 'operator'])
 declareRoute('/requirement/signoff', ['id', 'action', 'note', 'by', 'override', 'operator'])
+declareRoute('/task/verify-coding', ['id', 'by'])
 declareRoute('/task/merge-gate', ['id', 'by', 'publish', 'action'])
 declareRoute('/task/merge', ['id', 'by'])
 declareRoute('/requirement/split', ['id', 'pointIds', 'status'])

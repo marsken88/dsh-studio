@@ -58,6 +58,20 @@ if (method === 'POST' && route === '/coding/gitlab') {
   host.sendJson(res, 200, { ok: true, facts, state: host.publicState(store) })
   return true
 }
+/* 重新核对代码事实：进「待评审」时会自动跑一次，但基线/执行记录被人修好之后需要能重跑。
+   真机 2026-11-26：REQ-001 的 worktree.base 为空导致误报「4 个文件没改」，
+   以前只能把卡退回「待评审」再推一次才触发核对。 */
+if (method === 'POST' && route === '/task/verify-coding') {
+  const body = await host.readJsonBody(req)
+  rejectUnknownFields('/task/verify-coding', body)
+  const id = String(body.id ?? '')
+  const task = store.snapshot().tasks.find(item => item.id === id)
+  if (task === undefined) throw new Error(`no task ${id}`)
+  const report = await host.autoVerifyCoding(store, id)
+  const after = store.snapshot().tasks.find(item => item.id === id)
+  host.sendJson(res, 200, { ok: true, report, verified: after?.coding?.verified ?? null, state: host.publicState(store) })
+  return true
+}
 if (method === 'POST' && route === '/task/coding') {
   const body = await host.readJsonBody(req)
   const id = String(body.id ?? '')
