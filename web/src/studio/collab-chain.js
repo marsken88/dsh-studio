@@ -20,7 +20,7 @@ export const DISCOVERY_FIELDS = [
 const acceptanceCount = point => (Array.isArray(point?.acceptance) ? point.acceptance : [])
   .filter(item => String(item?.text ?? '').trim() !== '').length
 
-export function productChainRow({ task, requirement }) {
+export function productChainRow({ task, requirement, parent = null }) {
   if (requirement === null || requirement === undefined) {
     return { tone: 'missing', chip: '未挂需求', detail: '先建需求并把卡挂上' }
   }
@@ -32,7 +32,9 @@ export function productChainRow({ task, requirement }) {
   const missingDiscovery = DISCOVERY_FIELDS
     .filter(([key]) => String(discovery[key] ?? '').trim() === '')
     .map(([, label]) => label)
-  const ownId = String(task?.pointId ?? '')
+  /* bug 卡是从用例失败派生的，自己没有 pointId —— 继承父卡挂的功能点，
+     否则会退回需求级判断，把「同需求别的功能点缺验收」算到这张卡头上。 */
+  const ownId = String(task?.pointId ?? '') || String(parent?.pointId ?? '')
   const own = ownId === ''
     ? null
     : acceptance.find(item => String(item.point?.id ?? '') === ownId) ?? null

@@ -566,3 +566,14 @@ test('协作链产品行：没挂需求 → 未挂需求', () => {
   assert.equal(row.tone, 'missing')
   assert.equal(row.chip, '未挂需求')
 })
+
+test('协作链产品行：bug 卡没 pointId 时继承父卡的功能点（别把同需求别的点算到它头上）', () => {
+  const row = productChainRow({
+    task: { pointId: '', parent: 't-parent' },
+    parent: { pointId: 'p3' },
+    requirement: { code: 'REQ-1', points: [{ id: 'p1', acceptance: [] }, { id: 'p3', acceptance: [{ text: 'A1' }] }] },
+  })
+  assert.equal(row.tone, 'ok')
+  assert.equal(row.chip, '本卡可验收')
+  assert.match(row.detail, /本卡功能点 p3 有 1 条验收/)
+})
