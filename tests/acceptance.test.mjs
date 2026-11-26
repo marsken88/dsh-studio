@@ -39,6 +39,25 @@ test('矩阵：证据型条件（声明 evidence.kind）按该功能点已交付
   const a2Before = withCase.points[0].acceptance.find(item => item.id === 'a2')
   assert.equal(a2Before.covered, false, '没有交付物时证据型条件不算覆盖')
 
+  /* match 约束：同一功能点上有好几份报告时，只认标题里带这个词的那份 */
+  const strictReq = {
+    id: 'r1', code: 'REQ-1', title: '登录', status: 'active',
+    points: [{
+      id: 'p1', title: '登录失败锁定',
+      acceptance: [{ id: 'a1', text: 'QA 测试报告：三层收口结论', evidence: { kind: 'report', match: '测试报告' } }],
+    }],
+  }
+  const wrongReport = requirementMatrix({
+    config: {}, requirements: [strictReq],
+    tasks: [{ ...card, artifacts: [{ id: 'x2', kind: 'report', title: '产品验收报告', status: 'delivered' }] }],
+  }, strictReq)
+  assert.equal(wrongReport.points[0].acceptance[0].covered, false, '标题不带 match 词的报告不算')
+  const rightReport = requirementMatrix({
+    config: {}, requirements: [strictReq],
+    tasks: [{ ...card, artifacts: [{ id: 'x3', kind: 'report', title: 'QA 测试报告：三层收口', status: 'delivered' }] }],
+  }, strictReq)
+  assert.equal(rightReport.points[0].acceptance[0].covered, true, '标题带 match 词才算')
+
   const withReport = requirementMatrix({
     config: {},
     requirements: [req],

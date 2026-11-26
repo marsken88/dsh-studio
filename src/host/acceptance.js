@@ -23,7 +23,16 @@ export function sanitizeAcceptanceItem(raw, index) {
     text,
     done: source.done === true,
   }
-  if (evidenceKind !== '') item.evidence = { kind: evidenceKind, ...(evidenceNote !== '' ? { note: evidenceNote } : {}) }
+  const evidenceMatch = String(source.evidence?.match ?? source.evidenceMatch ?? '').trim().slice(0, 60)
+  if (evidenceKind !== '') {
+    item.evidence = {
+      kind: evidenceKind,
+      /* match：交付物标题里必须出现的词（「架构评审」「测试报告」「产品验收」…）。
+         不给 match 就只按 kind 判——同一功能点上报告有好几份时会一网打尽，所以能用就给。 */
+      ...(evidenceMatch !== '' ? { match: evidenceMatch } : {}),
+      ...(evidenceNote !== '' ? { note: evidenceNote } : {}),
+    }
+  }
   return item
 }
 

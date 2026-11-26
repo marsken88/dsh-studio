@@ -44,8 +44,10 @@ export function requirementMatrix(state, requirement) {
          这类条件天生写不出可执行用例，以前永远算不覆盖，需求画像长期偏低（REQ-2026-003 p1 的 8 条）。 */
       const evidenceKind = String(item.evidence?.kind ?? '').trim()
       if (evidenceKind !== '') {
+        const evidenceMatch = String(item.evidence?.match ?? '').trim()
         const hit = artifacts.find(entry => String(entry.kind ?? '') === evidenceKind
-          && ['delivered', 'accepted'].includes(String(entry.status ?? '')))
+          && ['delivered', 'accepted'].includes(String(entry.status ?? ''))
+          && (evidenceMatch === '' || String(entry.title ?? '').includes(evidenceMatch)))
         return { ...item, covered: hit !== undefined, evidenceHit: hit === undefined ? '' : (hit.title || hit.taskCode || '') }
       }
       const matched = cases.filter(entry => entry.result === 'pass' && String(entry.acceptanceId ?? '') === item.id)
