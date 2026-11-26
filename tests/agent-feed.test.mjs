@@ -33,7 +33,7 @@ test('readAssistantMessage：抽出思考 / 回复 / 工具 / 实际模型', () 
 
 test('feedBody：把实际模型写进正文（这是排查 Flash/Pro 的唯一实证）', () => {
   const body = feedBody({ reasonings: ['想了想'], texts: ['做完了'], tools: ['ops_bash', 'ops_bash'], model: 'deepseek-v4.1-flash', provider: 'deepseek-official' })
-  assert.match(body, /思考：想了想/)
+  assert.equal(/思考：/.test(body), false, '播报不再贴思考推理')
   assert.match(body, /做完了/)
   assert.match(body, /工具：ops_bash/, '工具要去重')
   assert.match(body, /模型：deepseek-official\/deepseek-v4\.1-flash/)

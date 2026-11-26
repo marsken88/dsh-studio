@@ -59,17 +59,15 @@ const clip = (text, max) => {
 
 /** 攒够的内容拼成一条评论正文；没有实质内容返回空串（调用方据此跳过）。 */
 export function feedBody(buffer, options = {}) {
-  const reasoningMax = Number(options.reasoningMax ?? 240)
   const textMax = Number(options.textMax ?? 600)
   const toolsMax = Number(options.toolsMax ?? 10)
   /* 只有模型名不算内容：否则「上一次播报留下的 model」会让 take() 每次都吐一条空播报。 */
+  /* 播报只发「回复正文 + 工具 + 模型」：思考是模型的推理草稿，最啰嗦的那部分，
+     以前每轮都贴上去把讨论区刷满（真机 64 / 93 条），现在不进了。 */
   const hasSubstance = (buffer?.texts ?? []).filter(Boolean).length > 0
-    || (buffer?.reasonings ?? []).filter(Boolean).length > 0
     || (buffer?.tools ?? []).filter(Boolean).length > 0
   if (hasSubstance === false) return ''
   const parts = []
-  const reasoning = (buffer?.reasonings ?? []).filter(Boolean)
-  if (reasoning.length > 0) parts.push(`> 思考：${clip(reasoning[reasoning.length - 1], reasoningMax)}`)
   const texts = (buffer?.texts ?? []).filter(Boolean)
   if (texts.length > 0) parts.push(clip(texts[texts.length - 1], textMax))
   const tools = [...new Set((buffer?.tools ?? []).filter(Boolean))]
@@ -85,8 +83,8 @@ export function feedBody(buffer, options = {}) {
 /** 节流：距离上次播报不足 minMs 就先攒着；除非是本轮结束（强制发）。 */
 export function shouldFlush(buffer, now, options = {}) {
   const minMs = Number(options.minMs ?? 15000)
-  const hasContent = (buffer?.texts ?? []).length > 0 || (buffer?.reasonings ?? []).length > 0
-    || (buffer?.tools ?? []).length > 0 || String(buffer?.model ?? '') !== ''
+  const hasContent = (buffer?.texts ?? []).length > 0 || (buffer?.tools ?? []).length > 0
+    || String(buffer?.model ?? '') !== ''
   if (hasContent === false) return false
   if (options.final === true) return true
   const last = Number(buffer?.lastFlush ?? 0)
@@ -138,7 +136,6 @@ export function createFeedBuffer(patch = () => {}) {
       if (type === 'assistant/message') {
         const read = readAssistantMessage(event.data?.message)
         bucket.texts.push(...read.texts)
-        bucket.reasonings.push(...read.reasonings)
         bucket.tools.push(...read.tools)
         if (read.model !== '') { bucket.model = read.model; bucket.provider = read.provider }
         bucket.seen += 1
