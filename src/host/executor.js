@@ -1498,6 +1498,12 @@ export async function updateTask(store, id, patch) {
         ? ''
         : nextTaskCode(state.tasks, normalized.requirementId, CODE_PREFIX[task.type] ?? 'TASK')
     }
+    /* 「已完成」的卡不用标阻塞：它会一直挂在需求准出里（「N 张卡还卡在阻塞」），
+       而实际上什么也拦不住（真机 2026-11-26：REQ-2026-001-5 已完成后被 agent 标了阻塞，
+       REQ-2026-001 因此卡在「1 张卡还卡在阻塞」）。 */
+    if (blockFlag === true && task.status === 'done') {
+      throw new Error('这张卡已经「已完成」了：不用再标阻塞；要重开就先把它推回上一列')
+    }
     if (blockFlag === true && (task.blocked === null || task.blocked === undefined)) {
       const until = String(patch.blockedUntil ?? '')
       task.blocked = {

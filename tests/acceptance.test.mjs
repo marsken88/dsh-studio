@@ -179,3 +179,15 @@ test('功能点没验收条件时给一句提醒（准出 warning，不是 block
   assert.equal(pointAcceptanceGap(state, { requirementId: 'req-1', pointId: 'p3' }), '')
   assert.equal(pointAcceptanceGap(state, { requirementId: 'req-1' }), '')
 })
+
+test('需求准出：已完成的卡即使残留阻塞标记，也不算「卡在阻塞」', async () => {
+  const { requirementGate } = await import('../src/host/requirement-gate.js')
+  const req = { id: 'r2', code: 'REQ-2', title: '退款', points: [], status: 'active', signoff: { by: '人', at: Date.now(), note: 'ok', actorKind: 'human' } }
+  const doneBlocked = {
+    id: 't2', code: 'DEV-002', title: '已完成但残留阻塞', requirementId: 'r2', status: 'done',
+    blocked: { by: 'agent', reason: '看板没有可推进的下一列' }, cases: [], artifacts: [], checklist: [],
+  }
+  const gate = requirementGate({ config: {}, requirements: [req], tasks: [doneBlocked] }, req)
+  const blockNote = (gate.blockers || []).map(String).find(text => text.includes('阻塞'))
+  assert.equal(blockNote, undefined, '已完成 的卡不该再算阻塞：' + JSON.stringify(gate.blockers))
+})

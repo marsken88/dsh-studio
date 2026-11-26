@@ -142,7 +142,8 @@ export function requirementGate(state, requirement) {
     const names = open.slice(0, 5).map(task => task.code || task.id).join('、')
     blockers.push(`${open.length} 张卡还没完成：${names}${open.length > 5 ? ' 等' : ''}`)
   }
-  const blocked = tasks.filter(task => task.blocked !== null && task.blocked !== undefined)
+  /* 已完成的卡即使残留 blocked 标记也不算准出阻塞（老数据里 agent 会在完成后再标阻塞）。 */
+  const blocked = tasks.filter(task => task.blocked !== null && task.blocked !== undefined && task.status !== 'done')
   if (blocked.length > 0) blockers.push(`${blocked.length} 张卡还卡在阻塞：${blocked.slice(0, 3).map(task => task.code || task.id).join('、')}`)
   // 绕过门禁完成的卡：不拦（override 本来就是有意开的逃生舱），但交付时必须被看见。
   // 协作：光有「测试跑完了」这种自动汇总不算协作过——必须有产品或架构专家在卡上说话。
