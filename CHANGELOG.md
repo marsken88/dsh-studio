@@ -8,7 +8,7 @@
 - 开关：`config.agents.broadcast` = `feed`（默认）/ `comment`（旧行为）/ `off`，改完立刻生效。
 # 更新日志
 
-## [Unreleased]
+## [0.18.4] — 2026-11-27
 
 ### 拆出的卡有了自己的编号：`REQ-2026-003-01`
 
