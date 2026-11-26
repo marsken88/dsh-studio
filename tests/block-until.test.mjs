@@ -26,6 +26,8 @@ test('AI 代签不算（与准出门禁同一口径）', () => {
 test('老数据没写 until：按 reason 认出条件；认不出就不自动解除', () => {
   assert.equal(blockUntilOf(blocked({ reason: '准出只差人工签字：AI 签字 actorKind=agent 不计入' })), 'human-signoff')
   assert.equal(blockUntilOf(blocked({ reason: '先收口子卡再签主卡：还有 1 张子卡没完成' })), 'sub-cards-done')
+  assert.equal(blockUntilOf(blocked({ reason: '准出只差**人工两签**：①先关子卡 BUG-001…②再签本卡' })), 'sub-cards-done', '先关子卡优先：子卡关了就先解这个条件')
+  assert.equal(blockUntilOf(blocked({ reason: '①先关子卡 BUG-001 ②再签本卡' })), 'sub-cards-done')
   assert.equal(blockUntilOf(blocked({ reason: '等上游接口对接' })), '')
   const unknown = { ...blocked({ reason: '等上游接口对接' }), signoff: { by: '张三', actorKind: 'human' } }
   assert.equal(blockUntilMet(unknown, []), false)
