@@ -1194,7 +1194,17 @@ export     function RequirementsPage({ state, onOpenTask, onChanged, createSigna
                       placeholder: '验收结论：交付了什么、遗留什么',
                       value: reqSign, onChange: e => setReqSign(e.target.value),
                     }),
-                    h(Button, { variant: 'primary', size: 'sm', onClick: () => void signRequirement('sign') }, '需求验收签字'),
+                    h(Button, {
+                      variant: 'primary',
+                      size: 'sm',
+                      /* 空结论点下去只会弹一句提示（服务端也会 400），人容易以为“点了没反应”。 */
+                      disabled: String(reqSign ?? '').trim() === '',
+                      title: String(reqSign ?? '').trim() === '' ? '先写一句验收结论（交付了什么、遗留什么）' : '签完字这条需求就算交付',
+                      onClick: () => void signRequirement('sign'),
+                    }, '需求验收签字'),
+                    String(reqSign ?? '').trim() === ''
+                      ? h('span', { className: HINT, style: { flexBasis: '100%' } }, '先写一句验收结论（交付了什么、遗留什么），按钮才会亮。')
+                      : null,
                   )
                   : h('div', { className: 'flex flex-wrap items-center gap-3 rounded-lg bg-background-secondary-default px-3 py-2' },
                     h('div', { className: HINT, style: { flex: 1 } }, `${signoff.by} 于 ${fmtTime(signoff.at)} 签字：${signoff.note}`),
