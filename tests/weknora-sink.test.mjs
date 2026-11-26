@@ -131,13 +131,62 @@ test('幂等：旧文档已经不在了（404）也算删成功，继续建新�
   }
 })
 
-test('幂等：旧文档删不掉（500）时仍继续建新，但把原因写进 warning', async () => {
+test('幂等：建文档失败时也要回报 replaced（台账靠它判「旧文档是否已失效」）', async () => {
+  // 删旧成功（200）+ 建新失败（500）：replaced 必须是 true。
+  // 少了这个字段，doc-sync 分不清「旧文档真没了」和「删旧根本没跑成」，
+  // 只能一律保锚 —— 或者更糟，像 BUG-001 那样一律抹掉。
+  const server = createServer((req, res) => {
+    req.resume()
+    req.on('end', () => {
+      res.setHeader('Content-Type', 'application/json')
+      if (req.method === 'DELETE') return res.end('{}')
+      if (req.url.endsWith('/knowledge/manual')) { res.statusCode = 500; return res.end(JSON.stringify({ message: 'create boom' })) }
+      res.end('{}')
+    })
+  })
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve))
+  const { port } = server.address()
+  try {
+    const result = await uploadToWeknora({ sink: { ...sink, baseUrl: `http://127.0.0.1:${port}` }, title: 't', markdown: 'm', previousKnowledgeId: 'k-old' })
+    assert.equal(result.ok, false)
+    assert.equal(result.replaced, true, '旧文档删成功了，失败返回里也要如实带出来')
+    assert.match(result.error, /建文档失败/)
+  } finally {
+    await new Promise(resolve => server.close(resolve))
+  }
+})
+
+test('超时：建文档到点没回包就当场失败，不当作写进去了（裁定②的超时面）', async () => {
+  /* 真机上「POST manual 超时」最坏的情况是：远端其实建成功了，但 id 没回来，本地拿不到锚点，
+     下一轮再建 → 库里多一份没有台账可追踪的孤儿。这个残余窗口是**已接受**的（方案裁定②），
+     但「超时必须算失败」不能被悄悄改成「超时也当成功」——否则观感更好、账更烂。
+     timeoutMs 必须传 1000：callJson 里有 Math.max(1000, timeoutMs) 夹紧，写 300 会被抬到 1000。 */
+  const server = createServer((req, res) => { req.resume(); res.on('error', () => {}) /* 故意永不回包 */ })
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve))
+  const { port } = server.address()
+  try {
+    const result = await uploadToWeknora({
+      sink: { ...sink, baseUrl: `http://127.0.0.1:${port}` },
+      title: 't', markdown: 'm', timeoutMs: 1000,
+    })
+    assert.equal(result.ok, false, '超时不能算写进去了')
+    assert.match(result.error, /建文档失败/, '要说清是哪一步超的')
+    assert.match(result.error, /请求超时/, '文案要能让人看出是超时，不是鉴权/参数错')
+    assert.equal(result.replaced, false, '首次写入没有旧锚点，不许带 replaced=true')
+  } finally {
+    server.closeAllConnections?.()
+    await new Promise(resolve => server.close(resolve))
+  }
+})
+
+test('幂等：旧文档删不掉（500）时中止本轮入库，不建第二份（先失效再入库）', async () => {
+  let posts = 0
   const server = createServer((req, res) => {
     req.resume()
     req.on('end', () => {
       res.setHeader('Content-Type', 'application/json')
       if (req.method === 'DELETE') { res.statusCode = 500; return res.end(JSON.stringify({ message: 'nope' })) }
-      if (req.url.endsWith('/knowledge/manual')) return res.end(JSON.stringify({ data: { id: 'k-3' } }))
+      if (req.url.endsWith('/knowledge/manual')) { posts += 1; return res.end(JSON.stringify({ data: { id: 'k-3' } })) }
       res.end('{}')
     })
   })
@@ -145,9 +194,12 @@ test('幂等：旧文档删不掉（500）时仍继续建新，但把原因写�
   const { port } = server.address()
   try {
     const result = await uploadToWeknora({ sink: { ...sink, baseUrl: `http://127.0.0.1:${port}` }, title: 't', markdown: 'm', previousKnowledgeId: 'stuck' })
-    assert.equal(result.ok, true)
+    // 旧文档没被确认失效就入库 = 两份并存，台账只能记一个，另一份永远删不掉（BUG-001）。
+    assert.equal(result.ok, false, '删旧失败要当场失败，不能「建成功就假装没事」')
     assert.equal(result.replaced, false)
-    assert.match(result.warning, /旧文档没删掉/)
+    assert.match(result.error, /旧文档没删掉/)
+    assert.match(result.error, /本轮未入库/, '要让人看出这轮根本没写进去')
+    assert.equal(posts, 0, '删旧失败时不该再 POST 建新文档')
   } finally {
     await new Promise(resolve => server.close(resolve))
   }

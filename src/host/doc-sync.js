@@ -43,11 +43,20 @@ async function runSync(store, taskId, artifactId, io = {}) {
     if (typeof buildMarkdown !== 'function') throw new Error('WeKnora 出口需要 buildMarkdown')
     const markdown = await buildMarkdown(task, artifact, state.config, requirement)
     const title = `${task.code || task.id} ${artifact.title}`.trim()
-    const previousKnowledgeId = String(artifact.docs?.weknora?.knowledgeId ?? '')
+    const previous = artifact.docs?.weknora ?? {}
+    const previousKnowledgeId = String(previous.knowledgeId ?? '')
     const result = await uploadToWeknora({ sink: state.config?.docs?.weknora, title, markdown, previousKnowledgeId })
+    /* 锚点只在「确认旧文档已失效」时才允许清空（BUG-001）：
+       - replaced=true（DELETE 成功或 404，旧文档确实没了）且本轮没建成新文档 → 清空，别留假地址；
+       - replaced=false（删旧失败 / 压根没删 / 没跑起来）→ 旧文档可能还活着，锚点必须保住，
+         只更新 error 与 at。抹掉它下一轮就认为「没有旧文档」直接新建 → 旧的那份永久孤儿；
+       - 建文档成功 → 用新 id（旧文档已按上面确认失效，否则 sink 不会走到建文档）。
+       旧实现是无条件整块覆盖，knowledgeId 在失败时被写成空串 —— 那就是缺陷本体。 */
+    const ok = result.ok === true
+    const keepAnchor = ok !== true && result.replaced !== true && previousKnowledgeId !== ''
     const record = {
-      knowledgeId: String(result.knowledgeId ?? ''),
-      url: String(result.url ?? ''),
+      knowledgeId: ok ? String(result.knowledgeId ?? '') : keepAnchor ? previousKnowledgeId : '',
+      url: ok ? String(result.url ?? '') : keepAnchor ? String(previous.url ?? '') : '',
       at: Date.now(),
       replaced: result.replaced === true,
       // 入库成功但 reparse 失败：文档在库里，可检索不到——把 warning 留在 error 位，别让人以为已经好了。
