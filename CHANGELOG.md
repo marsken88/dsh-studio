@@ -8,6 +8,13 @@
 - 开关：`config.agents.broadcast` = `feed`（默认）/ `comment`（旧行为）/ `off`，改完立刻生效。
 # 更新日志
 
+## [0.18.3] — 2026-11-26
+
+### 重发 0.18.2 的内容（0.18.2 在 npm 上 tarball 缺失）
+
+- 0.18.2 的元数据发布成功、但 tarball 404（`registry.npmjs.org/@marsken/dsh-studio/-/dsh-studio-0.18.2.tgz` 持续 404，本地 CI 两侧都复现），`latest` 一度指向装不下来的版本；
+- 内容与 0.18.2 完全相同，本版只是重新发布以恢复可安装的 `latest`；0.18.2 视为**不可用版本**（若有需要，可用 npm token 执行 `npm unpublish @marsken/dsh-studio@0.18.2` 清掉）。
+
 ## [0.18.2] — 2026-11-26
 
 ### 清理会随 npm 包发出去的内网地址与个人路径
