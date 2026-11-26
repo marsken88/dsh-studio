@@ -1254,6 +1254,8 @@ function Drawer({ task, state, onClose, onChanged }) {
       ),
     ),
   )
+  /* 子卡没到「已完成」时主卡签不了（服务端会拒）——按钮上先说清楚，别等人点了才发现没反应。 */
+  const pendingChildren = (state.tasks ?? []).filter(item => String(item.parent ?? '') === String(task.id ?? '') && item.status !== 'done')
   const collabRequirement = (state.requirements ?? []).find(item => item.id === task.requirementId) ?? null
   const collabDesign = task.design ?? null
   const collabDrafts = Array.isArray(collabDesign?.drafts) ? collabDesign.drafts : []
@@ -1451,14 +1453,25 @@ function Drawer({ task, state, onClose, onChanged }) {
                 (gate.blockers ?? []).length === 0 && (gate.warnings ?? []).length === 0
                   ? h('div', { className: HINT }, '没有遗留项。') : null),
           task.signoff === null || task.signoff === undefined
-            ? h('div', { className: ROW, style: { gap: 8, alignItems: 'center', flexWrap: 'wrap' } },
-                h(TextField, {
-                  style: { flex: '1 1 260px' },
-                  value: gateNote,
-                  placeholder: '验收签字：验了什么、遗留什么',
-                  onChange: event => setGateNote(event.target.value),
-                }),
-                h(Button, { variant: 'primary', size: 'sm', disabled: busy, onClick: () => void signOff('sign') }, '签字确认'))
+            ? h('div', { className: 'flex min-w-0 flex-col gap-2' },
+                h('div', { className: ROW, style: { gap: 8, alignItems: 'center', flexWrap: 'wrap' } },
+                  h(TextField, {
+                    style: { flex: '1 1 260px' },
+                    value: gateNote,
+                    placeholder: '验收签字：验了什么、遗留什么',
+                    onChange: event => setGateNote(event.target.value),
+                  }),
+                  h(Button, {
+                    variant: 'primary',
+                    size: 'sm',
+                    disabled: busy || pendingChildren.length > 0,
+                    title: pendingChildren.length > 0 ? '先收口子卡' : '以你本人的身份签字（AI 代签不计入）',
+                    onClick: () => void signOff('sign'),
+                  }, '签字确认')),
+                pendingChildren.length > 0
+                  ? h('div', { className: 'text-caption-1-regular text-text-warning-primary', 'data-pending-children': '' }, `先收口子卡：${pendingChildren.map(item => item.code || item.id).join('、')} 还没到「已完成」，子卡没完成前主卡签不了`)
+                  : null,
+                error !== null ? h('div', { className: ERR_TEXT, 'data-signoff-error': '' }, error) : null)
             : h('div', { className: 'flex min-w-0 flex-col gap-2 rounded-xl bg-background-secondary-default p-3 text-caption-1-regular text-text-primary', 'data-drawer-signoff': '', 'data-signoff-actor': String(task.signoff.actorKind ?? '') },
                 h('div', { className: 'flex min-w-0 flex-wrap items-center justify-between gap-2' },
                   h('span', { className: 'min-w-0 break-words' }, `${task.signoff.by} 于 ${fmtTime(task.signoff.at)} 签字：${task.signoff.note}`),
