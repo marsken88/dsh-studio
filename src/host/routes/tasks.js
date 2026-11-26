@@ -169,9 +169,16 @@ export async function handleTaskRoute({ method, route, req, res, store, url }) {
   if (method === 'POST' && route === '/task/block') {
     const body = await host.readJsonBody(req)
     const id = String(body.id ?? '')
+    /* 想「解除」却打到 /task/block 的（写 blocked:false 或干脆不带 reason）：按解除处理，
+       别回一句「请写清楚卡在哪了」让人以为接口坏了（真机 2026-11-26）。 */
+    if (body.blocked === false) {
+      const task = await host.updateTask(store, id, { blocked: false, by: text(body.by, 60) ?? '人' })
+      host.sendJson(res, 200, { ok: true, task, state: host.publicState(store) })
+      return true
+    }
     const reason = text(body.reason, 500) ?? ''
     if (reason === '') {
-      host.sendJson(res, 400, { ok: false, error: '请写清楚卡在哪了，方便之后判断怎么继续' })
+      host.sendJson(res, 400, { ok: false, error: '请写清楚卡在哪了，方便之后判断怎么继续（要解除阻塞请传 blocked:false 或打 /task/unblock）' })
       return true
     }
     const task = await host.updateTask(store, id, {

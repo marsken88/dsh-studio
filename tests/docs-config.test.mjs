@@ -401,6 +401,23 @@ test('真 HTTP：分组形状照旧生效，请求元信息 by 不拦', async ()
   await api('/config', { agents: { maxConcurrent: 2 } })
 })
 
+/* ── 二·c、/task/block 的解除别名（顺带：真机撞过的「想解除却被要求写原因」） ── */
+
+test('真 HTTP：/task/block 传 blocked:false 按解除处理，缺原因时指路怎么解除', async () => {
+  const created = await api('/task/create', { title: '（测试）阻塞别名', type: 'bug', role: 'dev' })
+  const id = String(created.body.task?.id ?? '')
+  assert.notEqual(id, '', '先造一张卡')
+  const blocked = await api('/task/block', { id, reason: '测试阻塞' })
+  assert.equal(blocked.body.task?.blocked !== null && blocked.body.task?.blocked !== undefined, true, '先挂上阻塞')
+  const undone = await api('/task/block', { id, blocked: false, by: '测试' })
+  assert.equal(undone.status, 200, 'blocked:false 要按解除处理，不能回「请写清楚卡在哪了」')
+  assert.equal(undone.body.task?.blocked ?? null, null)
+  const bad = await api('/task/block', { id })
+  assert.equal(bad.status, 400)
+  assert.match(bad.body.error, /blocked:false|unblock/, '报错要指路：怎么解除')
+  await api('/task/delete', { id, confirm: 'DELETE' })
+})
+
 /* ── 三、源码守卫：行为对了但接线被改回去，也要在这里响 ───────────────── */
 
 test('源码守卫：index.js 走 writeDocsConfig、admin.js 映射两个 400 码', () => {

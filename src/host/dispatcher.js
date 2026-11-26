@@ -761,14 +761,25 @@ export class Dispatcher {
    * 停掉一个无卡会话（`/agents/stop {sessionId}` 的分支）。
    * 它会 abort 驱动器并清掉运行态；会话本身留在 DSH 侧栏（transcript 不删）。
    */
-  abortSession(sessionId) {
+  abortSession(sessionId, by = '人') {
     const id = String(sessionId ?? '').trim()
     if (id === '') return false
     const info = this.chats.get(id)
-    this.chats.delete(id)
+    if (info !== undefined) {
+      this.chats.delete(id)
+      try { this.ctx.agents.get(id)?.abort?.() } catch { /* best effort */ }
+      this.note(`chat ${id} aborted`)
+      return true
+    }
+    /* 卡派单的会话也认 sessionId：以前只查 chats，于是 /agents/stop {sessionId} 对卡会话
+       一律 stopped:false（真机 2026-11-26 停重复会话时撞到）。 */
+    const entry = [...this.running.entries()].find(([, run]) => String(run?.sessionId ?? '') === id)
+    if (entry !== undefined) {
+      this.abortTask(entry[1].taskId, entry[1].expert, by)
+      return true
+    }
     try { this.ctx.agents.get(id)?.abort?.() } catch { /* best effort */ }
-    if (info !== undefined) this.note(`chat ${id} aborted`)
-    return info !== undefined
+    return false
   }
 
   /** 缺陷卡超过 SLA 还没关：记一次升级并推飞书，避免一直躺着没人管。 */

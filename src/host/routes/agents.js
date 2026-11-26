@@ -93,7 +93,7 @@ if (method === 'POST' && route === '/agents/stop') {
   // 无卡会话按 sessionId 停；卡派单按卡 id（+ 可选专家）停。
   const sessionId = String(body.sessionId ?? '').trim()
   if (sessionId !== '') {
-    const stopped = dispatcher.abortSession(sessionId)
+    const stopped = dispatcher.abortSession(sessionId, String(body.by ?? '').trim().slice(0, 60) || '人')
     host.sendJson(res, 200, { ok: true, stopped, sessionId })
     return true
   }

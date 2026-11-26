@@ -355,6 +355,18 @@ test('同一张卡已经在跑：手动派单不会再起第二个会话（手�
   assert.equal(dispatcher.running.size, 1, '被拒时不能留下第二个槽位')
 })
 
+test('/agents/stop 按 sessionId 也能停卡派单的会话（不再 stopped:false）', async t => {
+  const { dispatcher, state } = await harness(t, { tasks: [{ id: 't-1' }], autoStatuses: ['test'] })
+  await dispatcher.tick()
+  const sessionId = String([...dispatcher.running.values()][0]?.sessionId ?? '')
+  assert.notEqual(sessionId, '', 'tick 之后应当有一个会话')
+  const stopped = dispatcher.abortSession(sessionId, '超级管理员')
+  assert.equal(stopped, true, '按 sessionId 必须停得掉')
+  assert.equal(dispatcher.running.size, 0, '槽位要释放')
+  assert.equal(state.tasks[0].dispatch?.state, 'stopped')
+  assert.equal(state.tasks[0].dispatch?.by, '超级管理员', '要记下是谁停的')
+})
+
 test('条件型阻塞：人工签字一到，tick 自动解除并正常派单', async t => {
   const { dispatcher, store, state } = await harness(t, {
     tasks: [{
