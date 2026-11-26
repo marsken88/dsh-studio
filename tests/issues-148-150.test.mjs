@@ -572,6 +572,26 @@ test('#156 评论里的 @ 认全角 ＠；@dev 不会被 @developer 命中', () 
   assert.deepEqual(parseMentions('@developer 看一下', config).map(hit => hit.id), ['developer-2'])
   assert.deepEqual(parseMentions('@架构师助理 看一下', config).map(hit => hit.name), ['架构师助理'], '长名字优先，短的不要重复命中')
   assert.equal(parseMentions('`@架构师` 只是引用', config).length, 0, '行内代码里的不算')
+
+  /* 真机：专家叫「支付产品经理」，人写「@产品经理」静默没派。唯一包含才算，多个就视为歧义。 */
+  const partial = {
+    experts: [
+      { id: 'pm-pay', name: '支付产品经理', enabled: true },
+      { id: 'dev', name: '开发工程师', enabled: true },
+    ],
+    teams: [],
+  }
+  assert.deepEqual(parseMentions('@产品经理 请收口', partial).map(hit => hit.id), ['pm-pay'], '名字写不全：唯一包含就算命中')
+  assert.deepEqual(parseMentions('@支付产品经理 请收口', partial).map(hit => hit.id), ['pm-pay'], '写全仍然命中')
+  const ambiguous = {
+    experts: [
+      { id: 'pm-pay', name: '支付产品经理', enabled: true },
+      { id: 'pm-aide', name: '产品经理助理', enabled: true },
+    ],
+    teams: [],
+  }
+  assert.deepEqual(parseMentions('@产品经理 请收口', ambiguous).map(hit => hit.id), [], '命中多个就当歧义，不派')
+  assert.equal(parseMentions('`@产品经理` 只是引用', partial).length, 0, '行内代码里的仍不算')
 })
 
 test('#157 tick 收回「state=running 但会话早没了」的派单印记，下一轮重派', async () => {

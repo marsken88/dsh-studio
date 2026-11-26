@@ -27,14 +27,17 @@ test('parseMentions：引用代码块里的 @ 不再触发派单（开发工程�
   assert.deepEqual(parseMentions('@开发工程师 这里要改', config).map(m => m.name), ['开发工程师'])
 })
 
-test('parseMentions：四位专家的名字都能命中，短写不命中，全角 @ 也命中', () => {
+test('parseMentions：四位专家的名字都能命中，短写唯一命中、歧义不命中，全角 @ 也命中', () => {
   for (const expert of config.experts) {
     assert.equal(parseMentions(`@${expert.name} 看一下`, config).length, 1, expert.name)
   }
-  assert.equal(parseMentions('@架构 看一下', config).length, 0, '短写不命中（要写全名）')
+  /* 2026-11-26 放宽：短写只要**唯一**能对上某位专家的名字就算命中（真机 @产品经理 对 支付产品经理）。 */
+  assert.deepEqual(parseMentions('@架构 看一下', config).map(m => m.name), ['架构师'], '短写唯一命中')
   /* issue #156：中文输入法默认打出来的就是全角 ＠，以前静默失效（只认半角）。 */
   assert.equal(parseMentions('＠架构师', config).length, 1, '全角 ＠ 也要命中')
   assert.equal(parseMentions('＠开发工程师 看下', config).length, 1, '全角 ＠ 也要命中')
+  const ambiguous = { experts: [...config.experts, { id: 'arch2', name: '架构师助理', enabled: true }], teams: [] }
+  assert.equal(parseMentions('@架构 看一下', ambiguous).length, 0, '命中多个就当歧义，不派')
 })
 
 const makeStore = () => ({ snapshot: () => ({ config }) })

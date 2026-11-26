@@ -344,6 +344,23 @@ export function parseMentions(body, config) {
     seen.add(key)
     hits.push({ ...candidate, label: candidate.kind === 'team' ? `专家团 · ${candidate.name}` : candidate.name })
   }
+  /* 名字写不全时给一次机会：真机上专家叫「支付产品经理」，人写「@产品经理」就静默没派。
+     规则：只剩一个候选人的名字**包含**这个 @token 才算命中；命中多个视为歧义，宁可不派也不派错。 */
+  const loose = /@([^\s@，。、；：！？…（）【】「」《》,.;:!?()[\]]+)/gu
+  for (const match of text.matchAll(loose)) {
+    const at = match.index
+    const end = at + match[0].length
+    if (used.some(([start, stop]) => at < stop && end > start)) continue
+    const token = match[1]
+    if (token.length < 2) continue
+    const matched = candidates.filter(candidate => candidate.name !== '' && candidate.name.includes(token))
+    if (matched.length !== 1) continue
+    const key = `${matched[0].kind}:${matched[0].id}`
+    used.push([at, end])
+    if (seen.has(key)) continue
+    seen.add(key)
+    hits.push({ ...matched[0], label: matched[0].kind === 'team' ? `专家团 · ${matched[0].name}` : matched[0].name })
+  }
   return hits
 }
 
