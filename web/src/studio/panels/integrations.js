@@ -15,6 +15,7 @@
 import { client } from '../context.js'
 import { Button } from '../../boardui/index'
 import { EmptyState } from '../../boardui/empty-state'
+import { diffDocsReadback, overridesFromDocs } from '../docs-readback.js'
 
 /* 设置页容器：纯 Tailwind（设置页外壳已迁 BoardUI）。 */
 const PANE = 'flex min-w-0 flex-col gap-3'
@@ -504,28 +505,109 @@ export function SkillsPanel({ config, onChanged }) {
 }
 /** 文档出口：artifact 永远是真源，飞书 / WeKnora 只是投影（判据见 src/host/doc-sink.js）。 */
 export function DocsSinkPanel({ config, onChanged }) {
-  const { h, api, TextField, SelectField, React } = client()
+  const { h, api, TextField, SelectField, React, confirmDialog } = client()
   const docs = config.docs ?? {}
   const weknora = docs.weknora ?? {}
+  const projects = Array.isArray(config.projects) ? config.projects : []
   const [provider, setProvider] = React.useState(docs.provider ?? 'feishu')
   const [baseUrl, setBaseUrl] = React.useState(weknora.baseUrl ?? '')
   const [apiKey, setApiKey] = React.useState('')
   const [tenantId, setTenantId] = React.useState(weknora.tenantId ?? '')
   const [kb, setKb] = React.useState(weknora.knowledgeBaseId ?? '')
+  /* 项目级覆盖用一个数组表示（初值 docs.perProject）。服务端是「整表替换」，
+     所以保存时永远提交完整表：删掉一行 = 该项目回落到全局默认。 */
+  /* 初值走纯函数 overridesFromDocs：它不做项目存在性过滤（未知行默认保留，R9 有单测钉住）。 */
+  const [overrides, setOverrides] = React.useState(() => overridesFromDocs(docs.perProject))
+  const [addProject, setAddProject] = React.useState('')
+  const [addProvider, setAddProvider] = React.useState('feishu')
   const [busy, setBusy] = React.useState(false)
   const [note, setNote] = React.useState(null)
+  const projectOf = id => projects.find(item => String(item.id ?? '') === id)
+  /* 保存后用回读值刷新本地状态（R7）：apiKey 回读恒空，控件回到「留空保持不变」的占位。 */
+  const applyReadback = next => {
+    if (next === null || typeof next !== 'object') return
+    setProvider(next.provider ?? 'feishu')
+    setOverrides(overridesFromDocs(next.perProject))
+    setBaseUrl(next.weknora?.baseUrl ?? '')
+    setTenantId(next.weknora?.tenantId ?? '')
+    setKb(next.weknora?.knowledgeBaseId ?? '')
+    setApiKey('')
+  }
+  const removeUnknown = async item => {
+    /* 未知项目（/state.projects 里没有，多半是已删/归档的项目）默认保留：R9 禁止静默删。
+       只有人明确点「删除覆盖」才从本地表移除，而且必须再点「保存」才落库；确认文案写明 key 与后果。 */
+    const ok = await confirmDialog(`删除项目 ${item.id} 的覆盖？该项目将回落到全局默认（当前 ${provider}）。`, { title: '删除项目覆盖', danger: true, okText: '删除' })
+    if (!ok) return
+    setOverrides(rows => rows.filter(row => row.id !== item.id))
+    setNote({ status: 'dirty', text: `已从本地移除项目 ${item.id} 的覆盖，点「保存」后生效。` })
+  }
   const save = async () => {
     setBusy(true); setNote(null)
+    /* 永远发四字段 WeKnora + 完整 perProject 表：
+       只发改动字段会踩「apiKey 留空 = 不修改」与「整表替换静默清掉别的项目」两个坑。 */
+    const payload = {
+      provider,
+      weknora: { baseUrl: baseUrl.trim(), apiKey: apiKey.trim(), tenantId: tenantId.trim(), knowledgeBaseId: kb.trim() },
+      perProject: Object.fromEntries(overrides.map(item => [item.id, item.provider])),
+    }
     try {
-      await api('/config', {
-        docs: {
-          provider,
-          weknora: { baseUrl: baseUrl.trim(), apiKey: apiKey.trim(), tenantId: tenantId.trim(), knowledgeBaseId: kb.trim() },
-        },
-      })
-      setNote('已保存')
+      const out = await api('/config', { docs: payload })
+      let readback = out?.state?.config?.docs
+      if (readback === undefined || readback === null) readback = (await api('/state'))?.state?.config?.docs
+      const diffs = diffDocsReadback(payload, readback, { apiKeySetBefore: weknora.apiKeySet === true })
+      applyReadback(readback)
       await onChanged()
-    } catch (cause) { setNote(cause instanceof Error ? cause.message : String(cause)) } finally { setBusy(false) }
+      if (diffs.length > 0) {
+        setNote({ status: 'mismatch', text: `保存后回读不一致：${diffs.join('；')}` })
+        return
+      }
+      setNote({ status: 'saved', text: '已保存' })
+    } catch (cause) {
+      /* 400 的结构化错误（哪个键错 / 缺什么 / 影响哪些范围）直接给原文，控件保留用户输入便于就地改。 */
+      setNote({ status: 'error', text: cause instanceof Error ? cause.message : String(cause) })
+    } finally { setBusy(false) }
+  }
+  const addableProjects = projects.filter(item => !overrides.some(row => row.id === String(item.id ?? '')))
+  const renderOverrideRow = item => {
+    const known = projectOf(item.id)
+    const archived = known?.status === 'archived'
+    const name = known === undefined ? `未知项目（${item.id}）` : String(known.name ?? known.id ?? item.id)
+    return h('div', {
+      key: item.id, className: LISTROW,
+      'data-perproject-row': true, 'data-perproject-id': item.id, 'data-perproject-value': item.provider,
+      'data-perproject-known': known === undefined ? 'false' : 'true',
+      'data-perproject-archived': archived ? 'true' : 'false',
+    },
+      h('div', { className: LISTROW_MAIN },
+        h('div', { className: LISTROW_TITLE },
+          h('span', { className: 'min-w-0 truncate' }, name),
+          archived ? h('span', { className: HINT }, '已归档') : null,
+          known === undefined ? h('span', { className: HINT, title: '这个项目已不在项目列表里，覆盖默认保留，不会被静默删掉' }, '项目列表里没有它') : null,
+        ),
+        h('div', { className: HINT }, item.id),
+      ),
+      h('div', { className: LISTROW_ACTIONS },
+        h(SelectField, {
+          size: 'sm',
+          value: item.provider,
+          'aria-label': `项目 ${name} 的出口`,
+          onChange: event => {
+            const next = event.target.value
+            setOverrides(rows => (next === ''
+              ? rows.filter(row => row.id !== item.id)
+              : rows.map(row => (row.id === item.id ? { ...row, provider: next } : row))))
+          },
+        },
+          h('option', { value: '' }, '跟随全局'),
+          h('option', { value: 'feishu' }, '只写飞书云盘'),
+          h('option', { value: 'weknora' }, '只写 WeKnora'),
+          h('option', { value: 'both' }, '两个都写（飞书为主）'),
+        ),
+        known === undefined
+          ? h(Button, { variant: 'ghost', size: 'sm', disabled: busy, onClick: () => void removeUnknown(item) }, '删除覆盖')
+          : null,
+      ),
+    )
   }
   /* 出口选择：以前是原生 <select>，现在走 SelectField（BoardUI 的
      react-aria Select）。探针靠面板根上的 data-docs-sink 读出口，不依赖控件长相。 */
@@ -546,7 +628,7 @@ export function DocsSinkPanel({ config, onChanged }) {
         )),
       fieldOf(h, 'WeKnora 地址',
         h(TextField, { value: baseUrl, placeholder: 'http://192.168.120.200:8080/api/v1', onChange: event => setBaseUrl(event.target.value) }),
-        '带不带 /api/v1 都行'),
+        '带不带 /api/v1 都行；所有项目共用这一组 WeKnora 连接'),
       fieldOf(h, 'API Key',
         h(TextField, { value: apiKey, placeholder: weknora.apiKeySet ? '已配置（留空保持不变）' : 'sk-…', onChange: event => setApiKey(event.target.value) }),
         weknora.apiKeySet ? '已保存；留空保持不变，输入新值会覆盖' : '只需要 retrieve 能力；要跑问答再加 chat'),
@@ -555,10 +637,52 @@ export function DocsSinkPanel({ config, onChanged }) {
       fieldOf(h, '知识库 ID',
         h(TextField, { value: kb, placeholder: 'deba6be0-…', onChange: event => setKb(event.target.value) }),
         '交付物会以 manual 文档写进这个库，并自动触发 reparse'),
-      h('div', { className: ROW },
-        h(Button, { variant: 'primary', size: 'sm', disabled: busy, onClick: save }, busy ? '保存中…' : '保存'),
-      ),
-      note === null ? null : h('div', { className: HINT, role: 'status' }, note),
     ),
+    h('div', { className: SECTION, 'data-section': 'per-project' },
+      h('div', { className: SECTION_TITLE }, '项目级覆盖'),
+      h('div', { className: DESC }, '默认所有项目跟随全局出口。保存时提交完整表：删掉一行 = 该项目回落到全局默认；不在项目列表里的历史覆盖默认保留，不会被静默删掉。'),
+      overrides.length === 0
+        ? h(EmptyState, { title: '所有项目跟随全局默认。' })
+        : h('div', { className: 'flex min-w-0 flex-col' }, overrides.map(renderOverrideRow)),
+      h('div', { className: ROW },
+        h(SelectField, {
+          size: 'sm',
+          value: addProject,
+          'aria-label': '要覆盖的项目',
+          onChange: event => setAddProject(event.target.value),
+        },
+          h('option', { value: '' }, addableProjects.length === 0 ? '所有项目都已覆盖' : '选择项目…'),
+          addableProjects.map(item => h('option', { key: item.id, value: String(item.id) }, `${item.key ? `${item.key} · ` : ''}${item.name ?? item.id}${item.status === 'archived' ? '（已归档）' : ''}`)),
+        ),
+        h(SelectField, {
+          size: 'sm',
+          value: addProvider,
+          'aria-label': '新覆盖的出口',
+          onChange: event => setAddProvider(event.target.value),
+        },
+          h('option', { value: 'feishu' }, '只写飞书云盘'),
+          h('option', { value: 'weknora' }, '只写 WeKnora'),
+          h('option', { value: 'both' }, '两个都写（飞书为主）'),
+        ),
+        h(Button, {
+          variant: 'secondary', size: 'sm', disabled: busy || addProject === '',
+          onClick: () => {
+            if (addProject === '') return
+            setOverrides(rows => [...rows, { id: addProject, provider: addProvider }])
+            setAddProject('')
+          },
+        }, '＋ 添加项目覆盖'),
+      ),
+    ),
+    h('div', { className: ROW },
+      h(Button, { variant: 'primary', size: 'sm', disabled: busy, onClick: save, 'data-docs-save': true }, busy ? '保存中…' : '保存'),
+      h('span', { className: HINT }, '保存后会用服务端回读的 config.docs 核对一遍，不一致不会显示「已保存」。'),
+    ),
+    note === null
+      ? null
+      : h('div', {
+        className: note.status === 'saved' ? OK : note.status === 'error' || note.status === 'mismatch' ? ERR : HINT,
+        role: 'status', 'data-docs-note': true, 'data-docs-status': note.status,
+      }, note.text),
   )
 }

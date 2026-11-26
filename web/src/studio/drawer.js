@@ -9,6 +9,7 @@ import { Button, TreeView, TreeViewItem } from '../boardui/index'
 import { EmptyState } from '../boardui/empty-state'
 import { ProgressTrack } from '../components/base/progress/progress'
 import { productChainRow } from './collab-chain.js'
+import { archiveFailureNotice, archiveNotice, archivePendingNotice } from './archive-copy.js'
 
 /* 抽屉版面：token + Tailwind（4px 档）。这一版起不再用手写类：
    小节是圆角卡片，说明文字是 caption-1，字段是「标签 + 控件」两行。
@@ -860,12 +861,12 @@ function Drawer({ task, state, onClose, onChanged, onOpenTask = null }) {
     try {
       const json = await api('/task/artifact', { id: task.id, action: 'add', artifact: { kind: artifact.kind, title, ref: artifact.ref.trim(), content: artifact.content, status: 'delivered' } })
       setArtifact({ kind: artifact.kind, title: '', ref: '', content: '' })
-      setNotice('已登记，正在归档到飞书云盘…')
+      setNotice(archivePendingNotice())
       await onChanged()
       try {
         const synced = await api('/task/artifact/sync', { id: task.id })
         const first = (synced?.written ?? [])[0]
-        setNotice(first?.doc?.url ? `已归档到飞书云盘：${first.doc.url}` : '归档失败，稍后可点「同步到云盘」重试。')
+        setNotice(first?.doc?.url ? archiveNotice(first.doc) : '归档失败，稍后可点「同步到云盘」重试。')
         await onChanged()
       } catch { setNotice('登记成功，但归档失败：可点「同步到云盘」重试。') }
     } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)) } finally { setBusy(false) }
@@ -882,7 +883,7 @@ function Drawer({ task, state, onClose, onChanged, onOpenTask = null }) {
       try {
         const synced = await api('/task/artifact/sync', { id: task.id, artifactId: item.id })
         const doc = (synced?.written ?? [])[0]?.doc
-        setNotice(doc?.url ? `正文已更新并同步：${doc.url}` : '正文已保存，归档失败可再点「更新」。')
+        setNotice(doc?.url ? archiveNotice(doc, { verb: '正文已更新并同步' }) : '正文已保存，归档失败可再点「更新」。')
         await onChanged()
       } catch { setNotice('正文已保存，归档失败可再点「更新」。') }
     } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)) } finally { setBusy(false) }
@@ -893,7 +894,7 @@ function Drawer({ task, state, onClose, onChanged, onOpenTask = null }) {
       const json = await api('/task/artifact/sync', { id: task.id, artifactId: item.id })
       const doc = (json?.written ?? [])[0]?.doc
       const failed = (json?.errors ?? [])[0]
-      setNotice(doc?.url ? `已归档：${doc.url}` : `归档失败：${failed?.error ?? '未知原因'}`)
+      setNotice(doc?.url ? archiveNotice(doc) : archiveFailureNotice(doc?.provider, failed?.error))
       await onChanged()
     } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)) } finally { setBusy(false) }
   }
@@ -2230,7 +2231,7 @@ function Drawer({ task, state, onClose, onChanged, onOpenTask = null }) {
       ),
       h(Section, { pane: 'deliver', current: pane, id: 'artifacts' },
         h(SectionHead, null, '交付物',
-          h('span', { className: HINT }, '文档、MR、用例、报告——交付要有东西，不只是一句「做完了」；登记后会写成飞书云盘需求文件夹里的一份文档'),
+          h('span', { className: HINT }, '文档、MR、用例、报告——交付要有东西，不只是一句「做完了」；登记后按设置的文档出口归档（飞书云盘 / WeKnora）'),
           artifactsWithoutBody(task).length > 0
             ? h('span', { className: WARN_TEXT, title: '这些交付物还没写正文，点「正文」补上再同步' }, statusDot(h, 'warn'), ` ${artifactsWithoutBody(task).length} 件缺正文`)
             : null,

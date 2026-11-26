@@ -108,14 +108,15 @@ const stubWeknoraFaulty = ({ deleteStatus = 200, manualStatus = 200, liveIds = [
 }
 
 /** 造一个带「需求 + 卡 + 一件交付物」的临时库，三个分发用例共用（省得每个都抄 20 行）。 */
-const makeStore = async (docs, prefix = 'dsh-docsink-f-', artifactDocs = undefined) => {
+const makeStore = async (docs, prefix = 'dsh-docsink-f-', artifactDocs = undefined, requirement = {}) => {
   const { SecretStore, StudioStore } = await import('../src/host/store.js')
   const dir = mkdtempSync(join(tmpdir(), prefix))
   const store = new StudioStore(join(dir, 'state.json'), { dbFile: join(dir, 'state.db'), secrets: new SecretStore(join(dir, '.secrets.json')) })
   await store.ready
   await store.mutate(state => {
     state.config.docs = sanitizeDocsConfig(docs)
-    state.requirements.push({ id: 'r1', code: 'REQ-1', title: '需求一' })
+    /* requirement.project 决定项目级覆盖走哪一条（p3 a2 要按项目驱动出口）。 */
+    state.requirements.push({ id: 'r1', code: 'REQ-1', title: '需求一', ...requirement })
     state.tasks.push({
       id: 't1', code: 'DEV-001', title: '交付物卡', type: 'dev', status: 'dev', role: 'dev', requirementId: 'r1',
       checklist: [], comments: [], history: [], cases: [],
@@ -306,6 +307,64 @@ test('both + 飞书抛：主出口失败要抛，但知识库台账已经落库�
     const card = store.snapshot().tasks.find(item => item.id === 't1')
     // Q2 认的「孤儿可自愈」就靠这一条：knowledgeId 已落，下次重试会先删旧再建新，而不是再堆一份。
     assert.equal(card.artifacts[0].docs.weknora.knowledgeId, 'k-9', '台账要先落，重试才能替换而不是新增')
+    assert.equal(card.artifacts[0].doc, undefined, '飞书失败不该留下半个 doc')
+  } finally {
+    await new Promise(resolve => server.close(resolve))
+    dropDir(dir)
+  }
+})
+
+/* a2（REQ-2026-003 p3）：both 由「项目级覆盖」驱动，而不是全局默认。
+   本卡只加「项目级配置真的驱动了出口」这一路；both 主从语义本身由上面两条钉住。 */
+test('项目级 both + WeKnora 500：不抛，url 取飞书链接，失败只记在 docs.weknora.error', async () => {
+  const { server } = stubWeknora({ manualStatus: 500 })
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve))
+  const { port } = server.address()
+  const { store, dir } = await makeStore({
+    provider: 'feishu',
+    perProject: { pjAlpha: 'both' },
+    weknora: { baseUrl: `http://127.0.0.1:${port}`, apiKey: 'k', tenantId: '10000', knowledgeBaseId: 'kb1' },
+  }, 'dsh-docsink-project-both-', undefined, { project: 'pjAlpha' })
+  try {
+    const out = await syncArtifactWith(store, 't1', 'a1', {
+      buildMarkdown: async () => '# 方案\n正文',
+      writeFeishu: async () => ({ ...FEISHU_DOC }),
+    })
+    assert.equal(out.provider, 'both', '项目级覆盖必须把出口解析成 both')
+    assert.equal(out.primary, 'feishu', 'both 时飞书是主，项目级覆盖不许反转主从')
+    assert.equal(out.token, FEISHU_DOC.token)
+    assert.equal(out.url, FEISHU_DOC.url, '副出口失败不能污染主出口的链接')
+    assert.equal(out.sinks.weknora.ok, false)
+    assert.match(out.sinks.weknora.error, /建文档失败（HTTP 500/, '失败原因要能被看见')
+    const card = store.snapshot().tasks.find(item => item.id === 't1')
+    assert.match(card.artifacts[0].docs.weknora.error, /建文档失败/, '台账上留下失败原因')
+    assert.equal(card.artifacts[0].doc, undefined, '飞书成功时由路由回填 doc；这里只断言没抛')
+  } finally {
+    await new Promise(resolve => server.close(resolve))
+    dropDir(dir)
+  }
+})
+
+test('项目级 both + 飞书抛：主出口失败要抛，知识库台账已落（孤儿可见、重试可替换）', async () => {
+  const { server } = stubWeknora()
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve))
+  const { port } = server.address()
+  const { store, dir } = await makeStore({
+    provider: 'feishu',
+    perProject: { pjAlpha: 'both' },
+    weknora: { baseUrl: `http://127.0.0.1:${port}`, apiKey: 'k', tenantId: '10000', knowledgeBaseId: 'kb1' },
+  }, 'dsh-docsink-project-bothfail-', undefined, { project: 'pjAlpha' })
+  try {
+    await assert.rejects(
+      () => syncArtifactWith(store, 't1', 'a1', {
+        buildMarkdown: async () => '# 方案\n正文',
+        writeFeishu: async () => { throw new Error('飞书 403 缺 scope') },
+      }),
+      /飞书 403 缺 scope/,
+      '项目级 both 时飞书仍是主出口，失败必须让人看到',
+    )
+    const card = store.snapshot().tasks.find(item => item.id === 't1')
+    assert.equal(card.artifacts[0].docs.weknora.knowledgeId, 'k-9', '台账先落，重试才能替换而不是新增')
     assert.equal(card.artifacts[0].doc, undefined, '飞书失败不该留下半个 doc')
   } finally {
     await new Promise(resolve => server.close(resolve))

@@ -405,6 +405,7 @@ test('roster: artifactsWithoutBody reads contentLength when the body is not ship
   assert.deepEqual(artifactsWithoutBody(task).map(item => item.id), ['a2', 'a3'])
 })
 
+<<<<<<< HEAD
 // 2026-11-26 真机：卡片到「待验收」了，协作链还显示「缺验收：p1/p2 · 缺三问」——
 // 那是按整条需求聚合的旧口径，被误读成阻塞。现在只认本卡挂的功能点。
 
@@ -462,4 +463,118 @@ test('协作链产品行：bug 卡没 pointId 时继承父卡的功能点（别�
   assert.equal(row.tone, 'ok')
   assert.equal(row.chip, '本卡可验收')
   assert.match(row.detail, /本卡功能点 p3 有 1 条验收/)
+=======
+
+test('docs-readback: 回读一致返回空数组，perProject 键序无关', async () => {
+  const { diffDocsReadback } = await import('../web/src/studio/docs-readback.js')
+  const sent = {
+    provider: 'both',
+    perProject: { pjB: 'weknora', pjA: 'both' },
+    weknora: { baseUrl: 'http://kb/api/v1', apiKey: '', tenantId: '10000', knowledgeBaseId: 'kb1' },
+  }
+  const readback = {
+    provider: 'both',
+    perProject: { pjA: 'both', pjB: 'weknora' },
+    weknora: { ...sent.weknora, apiKeySet: true },
+  }
+  /* apiKey 不参与比对：回读恒空，判据是 apiKeySet = 保存前已配置 || 本次输入了 key。 */
+  assert.deepEqual(diffDocsReadback(sent, readback, { apiKeySetBefore: true }), [])
+  assert.deepEqual(diffDocsReadback({ ...sent, weknora: { ...sent.weknora, apiKey: 'sk-new' } }, readback, { apiKeySetBefore: false }), [])
+})
+
+test('docs-readback: provider 不符 / perProject 少一项 / apiKeySet 不对都要报', async () => {
+  const { diffDocsReadback } = await import('../web/src/studio/docs-readback.js')
+  const sent = {
+    provider: 'both',
+    perProject: { pjA: 'both', pjB: 'weknora' },
+    weknora: { baseUrl: 'http://kb/api/v1', apiKey: '', tenantId: '10000', knowledgeBaseId: 'kb1' },
+  }
+  const readback = {
+    provider: 'feishu',
+    perProject: { pjA: 'both' },
+    weknora: { ...sent.weknora, apiKeySet: false },
+  }
+  const diffs = diffDocsReadback(sent, readback, { apiKeySetBefore: true })
+  assert.equal(diffs.length, 3, diffs.join(' | '))
+  assert.match(diffs.join('\n'), /provider：提交 both \/ 回读 feishu/)
+  assert.match(diffs.join('\n'), /perProject：.*pjB/)
+  assert.match(diffs.join('\n'), /apiKeySet：期望 true \/ 回读 false/)
+  /* 回读带明文 key 也要报（服务端契约：apiKey 恒空）。 */
+  const leak = diffDocsReadback(sent, { ...readback, weknora: { ...readback.weknora, apiKey: 'sk-1' } }, { apiKeySetBefore: true })
+  assert.match(leak.join('\n'), /apiKey：回读不应带明文/)
+})
+
+test('docs-panel: overridesFromDocs 保留未知项目键（R9 行为级断言）', async () => {
+  const { overridesFromDocs } = await import('../web/src/studio/docs-readback.js')
+  /* 关键：pjGone 不在 /state.projects 里（未知项目），初始化必须原样保留，不能过滤掉。 */
+  assert.deepEqual(
+    overridesFromDocs({ pjA: 'both', pjGone: 'weknora' }),
+    [{ id: 'pjA', provider: 'both' }, { id: 'pjGone', provider: 'weknora' }],
+    '未知项目键必须保留',
+  )
+  assert.deepEqual(overridesFromDocs({}), [])
+  assert.deepEqual(overridesFromDocs(null), [])
+  assert.deepEqual(overridesFromDocs(undefined), [])
+  /* 顺序按 Object.entries：面板原样渲染，保存时整表顺序不漂移。 */
+  assert.deepEqual(overridesFromDocs({ b: 'feishu', a: 'both' }).map(row => row.id), ['b', 'a'])
+})
+
+test('archive-copy: 按实际出口说话（weknora 不许出现「飞书」）', async () => {
+  const { archiveNotice, archiveFailureNotice, archivePendingNotice } = await import('../web/src/studio/archive-copy.js')
+  const pending = archivePendingNotice()
+  assert.ok(!pending.includes('飞书') && !pending.includes('WeKnora'), '还不知道生效出口时不许先喊某一方：' + pending)
+  const feishu = archiveNotice({ provider: 'feishu', url: 'https://x/docx/1' })
+  assert.match(feishu, /已归档到飞书云盘/)
+  const weknora = archiveNotice({ provider: 'weknora', url: 'http://kb/knowledge/k-1' })
+  assert.match(weknora, /WeKnora/)
+  assert.ok(!weknora.includes('飞书'), 'weknora 出口不许提飞书：' + weknora)
+  const weknoraFail = archiveFailureNotice('weknora', '建文档失败（HTTP 500）')
+  assert.ok(!weknoraFail.includes('飞书'), 'weknora 失败文案也不许提飞书：' + weknoraFail)
+  assert.match(weknoraFail, /WeKnora.*建文档失败/)
+})
+
+test('archive-copy: both 成功同时点名（飞书为主）；副出口失败带原因', async () => {
+  const { archiveNotice, archiveFailureNotice } = await import('../web/src/studio/archive-copy.js')
+  const both = archiveNotice({ provider: 'both', primary: 'feishu', url: 'https://x/docx/1', sinks: { weknora: { ok: true, url: 'http://kb/k/1' } } })
+  assert.match(both, /飞书云盘（主）/)
+  assert.match(both, /WeKnora/)
+  /* URL 归属：飞书链接跟在飞书名后、知识库链接跟在 WeKnora 名后，不许串位。 */
+  assert.match(both, /飞书云盘（主）：https:\/\/x\/docx\/1/)
+  assert.match(both, /；WeKnora 知识库：http:\/\/kb\/k\/1$/)
+  assert.ok(!both.includes('WeKnora 知识库：https://x/docx/1'), '飞书 URL 不许挂在 WeKnora 名字后面：' + both)
+  /* 知识库没回链接时只点名，不编造 URL。 */
+  const noKbUrl = archiveNotice({ provider: 'both', url: 'https://x/docx/1', sinks: { weknora: { ok: true, url: '' } } })
+  assert.match(noKbUrl, /飞书云盘（主）：https:\/\/x\/docx\/1；WeKnora 知识库$/)
+  const partial = archiveNotice({ provider: 'both', url: 'https://x/docx/1', sinks: { weknora: { ok: false, error: '建文档失败（HTTP 500）：boom' } } })
+  assert.match(partial, /飞书云盘（主）/)
+  assert.match(partial, /WeKnora 知识库未写入：建文档失败/)
+  const failed = archiveFailureNotice('both', '飞书 403 缺 scope')
+  assert.match(failed, /飞书云盘为主出口/)
+  assert.match(failed, /飞书 403 缺 scope/)
+  const clipped = archiveFailureNotice('feishu', 'x'.repeat(300))
+  assert.ok(clipped.length < 160, '失败原因要截断，别把 300 字塞进提示：' + clipped.length)
+})
+
+test('archive-copy: 老数据没有 provider 时按飞书（token/url 语义不变）', async () => {
+  const { archiveNotice } = await import('../web/src/studio/archive-copy.js')
+  assert.match(archiveNotice({ token: 't', url: 'https://x/docx/1' }), /已归档到飞书云盘：https:\/\/x\/docx\/1/)
+  assert.match(archiveNotice({}, { verb: '正文已更新并同步' }), /^正文已更新并同步到飞书云盘/)
+})
+
+test('docs-panel: 提交完整 perProject 表，且只在回读一致时显示「已保存」', async () => {
+  const { readFileSync } = await import('node:fs')
+  const source = readFileSync(new URL('../web/src/studio/panels/integrations.js', import.meta.url), 'utf8')
+  /* 增量提交会触发整表替换，静默清掉别的项目覆盖（方案 §14 备选 9 已驳回）。 */
+  assert.ok(source.includes('perProject: Object.fromEntries(overrides.map'), '面板保存必须提交完整 perProject 表')
+  /* 回读核对：不一致走 mismatch，一致才写「已保存」（AC1-8 的机器判据）。 */
+  assert.ok(source.includes('diffDocsReadback(payload, readback'), '保存后必须用回读值核对')
+  assert.match(source, /if \(diffs\.length > 0\)[\s\S]{0,160}status: 'mismatch'/, '回读不一致必须走 mismatch')
+  assert.match(source, /if \(diffs\.length > 0\)[\s\S]{0,400}status: 'saved'/, '回读一致才显示已保存')
+  /* 未知项目行默认保留（R9）：初值走纯函数 overridesFromDocs，行为级断言在下面一条。 */
+  assert.ok(source.includes('overridesFromDocs(docs.perProject'), '初值必须走 overridesFromDocs（不许内联过滤）')
+  assert.ok(source.includes('overridesFromDocs(next.perProject'), '保存后按回读刷新也必须走同一个纯函数')
+  assert.ok(!/overrides\.filter\(/.test(source), '不许对 overrides 做过滤：未知项目行必须原样保留')
+  assert.ok(source.includes("'data-perproject-known'"), '未知项目行要有可判定钩子')
+  assert.ok(source.includes('删除项目 ${item.id} 的覆盖？'), '显式删除要写明 key 与后果（二次确认）')
+>>>>>>> fix/bug002-docs-secret-surface
 })

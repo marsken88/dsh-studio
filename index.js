@@ -54,7 +54,8 @@ import { sanitizeLimits } from './src/host/limits.js'
 import { attachWebhooks, sanitizeWebhooks } from './src/host/webhooks.js'
 import { updateTaskComment, removeTaskComment } from './src/host/comments.js'
 import { deleteProjectFolder, deleteRequirementFolder } from './src/host/drive-sync.js'
-import { publicDocsConfig, sanitizeDocsConfig } from './src/host/doc-sink.js'
+import { publicDocsConfig } from './src/host/doc-sink.js'
+import { writeDocsConfig } from './src/host/docs-config.js'
 import { addAssertedCases, addDraftCases, buildDashboard, codingVerifyLine, commentTask, configureExecutor, larkJson, ensureReqFolder, larkCliReady, invalidateLarkProbe, larkProbeCache, mutateReqDoc, probeEnv, pullFeishuDoc, requirementGate, requirementMatrix, requirementProgress, requirementRollup, runCommand, runSuite, runTaskCases, saveRequirement, syncArtifact, syncRequirementArtifacts, taskExitGate, updateTask, verifyCodingRecord } from './src/host/executor.js'
 import { configureAuthRoutes, handleAuthRoute } from './src/host/routes/auth.js'
 import { configureExportRoutes, handleExportRoute } from './src/host/routes/exports.js'
@@ -1101,10 +1102,8 @@ async function applyConfig(store, patch) {
     /* 用例闸门：同样四处齐活。 */
     if (patch.caseGate !== undefined) config.caseGate = sanitizeCaseGate({ ...config.caseGate, ...(patch.caseGate ?? {}) })
     if (patch.requirementGate !== undefined) config.requirementGate = sanitizeRequirementGate({ ...config.requirementGate, ...(patch.requirementGate ?? {}) })
-    /* 文档出口：同样四处齐活，少一处就是「/config 返回 200 但什么都没改」。 */
-    if (patch.docs !== undefined && patch.docs !== null && typeof patch.docs === 'object') {
-      config.docs = sanitizeDocsConfig({ ...(config.docs ?? {}), ...patch.docs }, config.docs)
-    }
+    /* 文档出口：校验 + 合并写在 src/host/docs-config.js（index.js 有行数棘轮），与 mutate 同一快照。 */
+    if (patch.docs !== undefined) writeDocsConfig(config, patch.docs)
     if (patch.costs !== undefined) config.costs = sanitizeCosts({ ...config.costs, ...patch.costs })
     if (patch.ldap !== undefined && typeof patch.ldap === 'object') {
       const ld = patch.ldap
