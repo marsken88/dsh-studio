@@ -478,3 +478,18 @@ test('archive-copy: 老数据没有 provider 时按飞书（token/url 语义不�
   assert.match(archiveNotice({ token: 't', url: 'https://x/docx/1' }), /已归档到飞书云盘：https:\/\/x\/docx\/1/)
   assert.match(archiveNotice({}, { verb: '正文已更新并同步' }), /^正文已更新并同步到飞书云盘/)
 })
+
+test('docs-panel: 提交完整 perProject 表，且只在回读一致时显示「已保存」', async () => {
+  const { readFileSync } = await import('node:fs')
+  const source = readFileSync(new URL('../web/src/studio/panels/integrations.js', import.meta.url), 'utf8')
+  /* 增量提交会触发整表替换，静默清掉别的项目覆盖（方案 §14 备选 9 已驳回）。 */
+  assert.ok(source.includes('perProject: Object.fromEntries(overrides.map'), '面板保存必须提交完整 perProject 表')
+  /* 回读核对：不一致走 mismatch，一致才写「已保存」（AC1-8 的机器判据）。 */
+  assert.ok(source.includes('diffDocsReadback(payload, readback'), '保存后必须用回读值核对')
+  assert.match(source, /if \(diffs\.length > 0\)[\s\S]{0,160}status: 'mismatch'/, '回读不一致必须走 mismatch')
+  assert.match(source, /if \(diffs\.length > 0\)[\s\S]{0,400}status: 'saved'/, '回读一致才显示已保存')
+  /* 未知项目行默认保留（R9）：初值直接来自 docs.perProject 的 entries，不做过滤。 */
+  assert.ok(source.includes('Object.entries(docs.perProject ?? {})'), '初值必须完整保留既有覆盖（含未知项目）')
+  assert.ok(source.includes("'data-perproject-known'"), '未知项目行要有可判定钩子')
+  assert.ok(source.includes('删除项目 ${item.id} 的覆盖？'), '显式删除要写明 key 与后果（二次确认）')
+})
