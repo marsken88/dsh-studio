@@ -735,10 +735,18 @@ try {
     if (button === undefined) return { ok: false, reason: 'no-save-button' }
     button.click()
     await new Promise(resolve => setTimeout(resolve, 1500))
-    return { ok: true }
+    /* 面板保存后会在 [data-docs-note] 上写状态：saved=回读一致，mismatch=回读不一致，
+       error=服务端 400（例如 WeKnora 没配全）。探针要读它，而不是假定保存一定成功。 */
+    const note = document.querySelector('[data-docs-note]')
+    return { ok: true, status: note?.getAttribute('data-docs-status') ?? '', text: String(note?.textContent ?? '') }
   }, value)
   const providerBefore = docsPane.provider
-  const providerTarget = providerBefore === 'weknora' ? 'feishu' : 'weknora'
+  /* 保存期闸门（REQ-2026-003 p3）：目标出口是 weknora/both 且 WeKnora 没配全时 /config 会 400。
+     先读一次配置：配全了才断言「保存成功并回读」，没配全就断言「保存被拒且提示没配全」——
+     否则换一台没配 WeKnora 的机器，这里会报一个和产品行为不符的假红。 */
+  const sinkBefore = (await state()).config?.docs?.weknora ?? {}
+  const sinkReady = sinkBefore.apiKeySet === true && String(sinkBefore.baseUrl ?? '').trim() !== '' && String(sinkBefore.knowledgeBaseId ?? '').trim() !== ''
+  const providerTarget = sinkReady ? (providerBefore === 'weknora' ? 'feishu' : 'weknora') : (providerBefore === 'feishu' ? 'both' : 'feishu')
   const writeAttempt = await saveOnce(providerTarget)
   await clickExact('集成健康')
   const backOk = await page.evaluate(() => {
@@ -749,9 +757,36 @@ try {
   })
   await new Promise(resolve => setTimeout(resolve, 1200))
   const providerAfter = await page.evaluate(() => document.querySelector('[data-docs-sink]')?.getAttribute('data-docs-sink') ?? null)
-  check('④c 文档出口「保存」真的写进 config.docs', writeAttempt.ok === true && backOk === true && providerAfter === providerTarget, `期望 ${providerTarget}，回读 ${providerAfter}${writeAttempt.ok === true ? '' : '（' + writeAttempt.reason + '）'}`)
+  if (sinkReady) {
+    check('④c 文档出口「保存」真的写进 config.docs', writeAttempt.ok === true && writeAttempt.status === 'saved' && backOk === true && providerAfter === providerTarget, `期望 ${providerTarget}，回读 ${providerAfter}，提示 ${writeAttempt.status}${writeAttempt.ok === true ? '' : '（' + writeAttempt.reason + '）'}`)
+  } else {
+    /* 没配全时保存必须被拒，而且提示要能看出是「没配全」——静默失败比报错更糟。 */
+    check('④c 未配全 WeKnora 时保存被拒（提示含「没配全」）且配置没被写坏', writeAttempt.ok === true && writeAttempt.status === 'error' && /没配全/.test(writeAttempt.text) && backOk === true && providerAfter === providerBefore, `提示 ${writeAttempt.status}：${writeAttempt.text.slice(0, 120)}；回读 ${providerAfter}（期望仍为 ${providerBefore}）`)
+  }
   await saveOnce(providerBefore)
   await new Promise(resolve => setTimeout(resolve, 800))
+
+  // ④e 项目级覆盖区：行与 config.docs.perProject 对得上；不在项目列表里的键默认保留（R9）
+  const overrideFacts = await page.evaluate(() => ({
+    section: document.querySelector('[data-section="per-project"]') !== null,
+    rows: [...document.querySelectorAll('[data-perproject-row]')].map(node => ({
+      id: node.getAttribute('data-perproject-id') ?? '',
+      value: node.getAttribute('data-perproject-value') ?? '',
+      known: node.getAttribute('data-perproject-known') ?? '',
+    })),
+  }))
+  const cfgNow = (await state()).config ?? {}
+  const expectedOverrides = cfgNow.docs?.perProject ?? {}
+  const knownProjectIds = new Set((cfgNow.projects ?? []).map(item => String(item.id ?? '')))
+  const overrideIds = Object.keys(expectedOverrides).sort()
+  const rowById = new Map(overrideFacts.rows.map(row => [row.id, row]))
+  const overridesMatch = overrideIds.length === overrideFacts.rows.length && overrideIds.every(id => {
+    const row = rowById.get(id)
+    if (row === undefined) return false
+    if (row.value !== expectedOverrides[id]) return false
+    return row.known === (knownProjectIds.has(id) ? 'true' : 'false')
+  })
+  check('④e 设置页有「项目级覆盖」区且行与 config.docs.perProject 一致（未知项目行不会被静默剔除）', overrideFacts.section === true && overridesMatch, `覆盖表 ${JSON.stringify(expectedOverrides)}，行 ${JSON.stringify(overrideFacts.rows)}`)
 
   // ④d 设置 → 专家：角色模板已删（专家是模型与提示词的唯一来源）。
   // 反过来守两条：导航里不该再有「角色与模型」，专家面板里不该再有「角色模板」那张卡。

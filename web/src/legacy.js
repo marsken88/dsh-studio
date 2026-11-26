@@ -1142,7 +1142,7 @@ html[data-dsh-theme="light"] [class*="rightbarCol"] { background: #fafafa !impor
         { group: '接入' },
         { id: 'gitlab', label: '代码仓库', count: (config.gitlab.projects ?? []).length },
         { id: 'feishu', label: '飞书机器人', count: (config.feishu.bots ?? []).length },
-      { id: 'docs', label: '文档出口', count: (config.docs?.provider ?? 'feishu') === 'feishu' ? 0 : 1 },
+      { id: 'docs', label: '文档出口', count: (config.docs?.provider ?? 'feishu') !== 'feishu' || Object.keys(config.docs?.perProject ?? {}).length > 0 ? 1 : 0 },
         { id: 'health', label: '集成健康', count: state.integrations?.broken ?? 0 },
         { group: '运行' },
         { id: 'agents', label: '自动派单' },

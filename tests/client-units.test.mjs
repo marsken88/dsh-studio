@@ -404,3 +404,77 @@ test('roster: artifactsWithoutBody reads contentLength when the body is not ship
   assert.deepEqual(artifactsWithoutBody(task).map(item => item.id), ['a2', 'a3'])
 })
 
+
+test('docs-readback: 回读一致返回空数组，perProject 键序无关', async () => {
+  const { diffDocsReadback } = await import('../web/src/studio/docs-readback.js')
+  const sent = {
+    provider: 'both',
+    perProject: { pjB: 'weknora', pjA: 'both' },
+    weknora: { baseUrl: 'http://kb/api/v1', apiKey: '', tenantId: '10000', knowledgeBaseId: 'kb1' },
+  }
+  const readback = {
+    provider: 'both',
+    perProject: { pjA: 'both', pjB: 'weknora' },
+    weknora: { ...sent.weknora, apiKeySet: true },
+  }
+  /* apiKey 不参与比对：回读恒空，判据是 apiKeySet = 保存前已配置 || 本次输入了 key。 */
+  assert.deepEqual(diffDocsReadback(sent, readback, { apiKeySetBefore: true }), [])
+  assert.deepEqual(diffDocsReadback({ ...sent, weknora: { ...sent.weknora, apiKey: 'sk-new' } }, readback, { apiKeySetBefore: false }), [])
+})
+
+test('docs-readback: provider 不符 / perProject 少一项 / apiKeySet 不对都要报', async () => {
+  const { diffDocsReadback } = await import('../web/src/studio/docs-readback.js')
+  const sent = {
+    provider: 'both',
+    perProject: { pjA: 'both', pjB: 'weknora' },
+    weknora: { baseUrl: 'http://kb/api/v1', apiKey: '', tenantId: '10000', knowledgeBaseId: 'kb1' },
+  }
+  const readback = {
+    provider: 'feishu',
+    perProject: { pjA: 'both' },
+    weknora: { ...sent.weknora, apiKeySet: false },
+  }
+  const diffs = diffDocsReadback(sent, readback, { apiKeySetBefore: true })
+  assert.equal(diffs.length, 3, diffs.join(' | '))
+  assert.match(diffs.join('\n'), /provider：提交 both \/ 回读 feishu/)
+  assert.match(diffs.join('\n'), /perProject：.*pjB/)
+  assert.match(diffs.join('\n'), /apiKeySet：期望 true \/ 回读 false/)
+  /* 回读带明文 key 也要报（服务端契约：apiKey 恒空）。 */
+  const leak = diffDocsReadback(sent, { ...readback, weknora: { ...readback.weknora, apiKey: 'sk-1' } }, { apiKeySetBefore: true })
+  assert.match(leak.join('\n'), /apiKey：回读不应带明文/)
+})
+
+test('archive-copy: 按实际出口说话（weknora 不许出现「飞书」）', async () => {
+  const { archiveNotice, archiveFailureNotice, archivePendingNotice } = await import('../web/src/studio/archive-copy.js')
+  const pending = archivePendingNotice()
+  assert.ok(!pending.includes('飞书') && !pending.includes('WeKnora'), '还不知道生效出口时不许先喊某一方：' + pending)
+  const feishu = archiveNotice({ provider: 'feishu', url: 'https://x/docx/1' })
+  assert.match(feishu, /已归档到飞书云盘/)
+  const weknora = archiveNotice({ provider: 'weknora', url: 'http://kb/knowledge/k-1' })
+  assert.match(weknora, /WeKnora/)
+  assert.ok(!weknora.includes('飞书'), 'weknora 出口不许提飞书：' + weknora)
+  const weknoraFail = archiveFailureNotice('weknora', '建文档失败（HTTP 500）')
+  assert.ok(!weknoraFail.includes('飞书'), 'weknora 失败文案也不许提飞书：' + weknoraFail)
+  assert.match(weknoraFail, /WeKnora.*建文档失败/)
+})
+
+test('archive-copy: both 成功同时点名（飞书为主）；副出口失败带原因', async () => {
+  const { archiveNotice, archiveFailureNotice } = await import('../web/src/studio/archive-copy.js')
+  const both = archiveNotice({ provider: 'both', primary: 'feishu', url: 'https://x/docx/1', sinks: { weknora: { ok: true, url: 'http://kb/k/1' } } })
+  assert.match(both, /飞书云盘（主）/)
+  assert.match(both, /WeKnora/)
+  const partial = archiveNotice({ provider: 'both', url: 'https://x/docx/1', sinks: { weknora: { ok: false, error: '建文档失败（HTTP 500）：boom' } } })
+  assert.match(partial, /飞书云盘（主）/)
+  assert.match(partial, /WeKnora 知识库未写入：建文档失败/)
+  const failed = archiveFailureNotice('both', '飞书 403 缺 scope')
+  assert.match(failed, /飞书云盘为主出口/)
+  assert.match(failed, /飞书 403 缺 scope/)
+  const clipped = archiveFailureNotice('feishu', 'x'.repeat(300))
+  assert.ok(clipped.length < 160, '失败原因要截断，别把 300 字塞进提示：' + clipped.length)
+})
+
+test('archive-copy: 老数据没有 provider 时按飞书（token/url 语义不变）', async () => {
+  const { archiveNotice } = await import('../web/src/studio/archive-copy.js')
+  assert.match(archiveNotice({ token: 't', url: 'https://x/docx/1' }), /已归档到飞书云盘：https:\/\/x\/docx\/1/)
+  assert.match(archiveNotice({}, { verb: '正文已更新并同步' }), /^正文已更新并同步到飞书云盘/)
+})
