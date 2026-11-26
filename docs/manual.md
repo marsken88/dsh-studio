@@ -317,6 +317,7 @@ studio_task_check          { id, itemId, note }         // 清单逐项勾，附
 | README 截图重拍 | `npm run shots -- --base http://127.0.0.1:<端口>` |
 | 云盘孤儿目录体检 / 清理 | `npm run drive:gc -- --base <端口>` / 加 `--apply` |
 | 会话归档目录清理（`~/.dsh/sessions-archive`，只删 `*.stale-<时间戳>`） | `npm run gc:archive`（预览）→ `npm run gc:archive -- --apply`；`--days 7 --keep 50` 可调保留窗口 |
+| 执行播报写哪儿 | 设置 → 自动派单 → 「执行播报」：`feed`（默认，卡上「执行记录 → 执行播报」）/ `comment`（写成评论，旧行为）/ `off` |
 | 派单会话目录体检 / 清理幽灵卡 | `npm run gc:sessions`（预览）/ 加 `--apply` 才删。判据是「卡已不在台账里」，先看预览再删 |
 | 平台全闭环自检 | `STUDIO_BASE=… node tools/e2e-loop.mjs --k 3`（跑完自删） |
 | 真库能不能起 | `npm run smoke:store -- ~/.dsh/dsh-studio.db` |

@@ -103,7 +103,7 @@ test('执行播报：一个会话只建一条评论，后续更新同一条', as
     return { task: { comments: [created] } }
   }
   const updateTaskComment = async (s, taskId, id, body) => { updated.push({ id, body }) }
-  const push = createFeedComments({ store, commentTask, updateTaskComment })
+  const push = createFeedComments({ store, postComment: commentTask, updateTaskComment })
   push('s1', { taskId: 't1', expertId: 'dev', body: '第一段' })
   await new Promise(resolve => setTimeout(resolve, 10))
   push('s1', { taskId: 't1', expertId: 'dev', body: '第二段' })

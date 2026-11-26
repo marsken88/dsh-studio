@@ -1030,6 +1030,7 @@ html[data-dsh-theme="light"] [class*="rightbarCol"] { background: #fafafa !impor
         gitlabSyncLabel: config.gitlab.syncLabel ?? '',
         agentsEnabled: config.agents?.enabled === true,
         agentsMaxConcurrent: String(config.agents?.maxConcurrent ?? 2),
+        agentsBroadcast: String(config.agents?.broadcast ?? 'feed'),
         agentsPreset: config.agents?.agentPreset ?? 'standard',
         agentsWorkspace: config.agents?.workspaceDir ?? '',
         agentsSandbox: config.agents?.sandbox ?? 'workspace-write',
@@ -1077,6 +1078,7 @@ html[data-dsh-theme="light"] [class*="rightbarCol"] { background: #fafafa !impor
             agents: {
               enabled: form.agentsEnabled,
               maxConcurrent: Number(form.agentsMaxConcurrent) || 2,
+              broadcast: String(form.agentsBroadcast ?? 'feed'),
               agentPreset: form.agentsPreset,
               workspaceDir: form.agentsWorkspace,
               sandbox: form.agentsSandbox,

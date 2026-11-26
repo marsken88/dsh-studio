@@ -227,6 +227,9 @@ export function defaultConfig() {
       /** 沙箱：卡会话的操作系统级文件/命令边界（DSH 的 permission preset）；提权审批（allow/deny）口径见 escalation.js。 */
       sandbox: 'workspace-write',
       escalation: 'allow',
+      /** 执行播报写到哪：feed = 卡上的「执行播报」（默认，不进讨论区）；comment = 旧行为（写评论）；
+       *  off = 不播报。播报是机器进度，不该混进人的讨论（2026-11-26 真机：讨论区被播报占满）。 */
+      broadcast: 'feed',
       /** 隔离：none = 所有卡共用 workspaceDir；worktree = 每张卡一个 git worktree。 */
       isolation: 'none',
       /** 工作区分组：card = 一个 worktree 一个侧栏文件夹；requirement = 一个需求一个文件夹

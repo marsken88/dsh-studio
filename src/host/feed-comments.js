@@ -12,11 +12,11 @@ export const FEED_BODY_CAP = 12000
 /**
  * @param {object} deps
  * @param {object} deps.store            StudioStore（只用 snapshot）
- * @param {Function} deps.commentTask    commentTask(store, taskId, body, author, kind)
+ * @param {Function} deps.postComment    commentTask(store, taskId, body, author, kind)
  * @param {Function} deps.updateTaskComment updateTaskComment(store, taskId, commentId, body, by)
  * @returns {(sessionId: string, snapshot: { taskId: string, expertId: string, body: string }) => void}
  */
-export function createFeedComments({ store, commentTask, updateTaskComment, cap = FEED_BODY_CAP }) {
+export function createFeedComments({ store, postComment, updateTaskComment, cap = FEED_BODY_CAP }) {
   const seen = new Map()
   return (sessionId, snapshot) => {
     if (snapshot === null || snapshot === undefined || String(snapshot.taskId ?? '') === '') return
@@ -27,7 +27,7 @@ export function createFeedComments({ store, commentTask, updateTaskComment, cap 
     const merged = previous === undefined ? snapshot.body : `${previous.body}\n\n---\n\n${snapshot.body}`
     const body = merged.length > cap ? `…（前面省略）\n\n${merged.slice(-cap)}` : merged
     if (previous === undefined) {
-      void commentTask(store, snapshot.taskId, body, author, 'agent').then(result => {
+      void postComment(store, snapshot.taskId, body, author, 'agent').then(result => {
         const created = (result?.task?.comments ?? []).slice(-1)[0]
         if (created !== undefined) seen.set(sessionId, { taskId: snapshot.taskId, id: created.id, body })
       }).catch(() => {})

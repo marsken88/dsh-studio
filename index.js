@@ -48,7 +48,7 @@ import { toolAccessTable, toolLevel } from './src/host/tool-access.js'
 import { isStudioProfile } from './src/host/profile-detect.js'
 import { isStalled } from './src/host/dispatch-state.js'
 import { approvalNote, createFeedBuffer, parseStudioSession } from './src/host/agent-feed.js'
-import { createFeedComments } from './src/host/feed-comments.js'
+import { createBroadcast, publicFeed } from './src/host/feed-store.js'
 import { ESCALATION_MODES, escalationFor, escalationOutcome } from './src/host/escalation.js'
 import { sanitizeLimits } from './src/host/limits.js'
 import { attachWebhooks, sanitizeWebhooks } from './src/host/webhooks.js'
@@ -955,6 +955,7 @@ function publicState(store) {
         ...publicComments(task),
         ...publicCases(task),
         ...publicChecklist(task),
+        ...publicFeed(task),
         sla: bugSla(task, state.config),
         /* 停摆：派单印记还在这一列但会话已经不在跑（崩过 / 被中断）。
            这种卡不会自己恢复，也不再被自动派单——以前界面上和「排队中」一模一样，
@@ -2647,7 +2648,7 @@ export function apply(ctx) {
        内容是 思考摘要 · 回复正文 · 调了哪些工具 · **本次实际用的模型**——
        最后一项以前只能靠猜（设置里配 flash，实际请求用了哪个型号只有这里说得清）。 */
     /* 一个会话只占一条评论，后续增量更新同一条（见 src/host/feed-comments.js）。 */
-    const feed = createFeedBuffer(createFeedComments({ store, commentTask, updateTaskComment }))
+    const feed = createFeedBuffer(createBroadcast({ store, postComment: commentTask }))
     const offSessionEvent = dispatcherCtx.on('session/event', (session, event) => {
       const sessionId = String(session?.id ?? '')
       const parsed = parseStudioSession(sessionId)

@@ -1259,6 +1259,9 @@ function Drawer({ task, state, onClose, onChanged, onOpenTask = null }) {
   /* 子卡按钮上要显示它现在的列名；这个 helper 在合并时被丢掉过一次（只剩调用），
      结果一开抽屉就 ReferenceError → 整页「工作空间渲染失败」。 */
   const statusLabelOf = id => (state.statuses ?? []).find(item => item.id === id)?.label ?? String(id ?? '')
+  /* 执行播报（机器进度）：/state 只下发最近几条（文本已截断），完整历史在台账里。 */
+  const feedList = Array.isArray(task.feed) ? task.feed : []
+  const feedCount = Number(task.feedCount ?? feedList.length)
   const collabRequirement = (state.requirements ?? []).find(item => item.id === task.requirementId) ?? null
   const collabDesign = task.design ?? null
   const collabDrafts = Array.isArray(collabDesign?.drafts) ? collabDesign.drafts : []
@@ -2091,6 +2094,27 @@ function Drawer({ task, state, onClose, onChanged, onOpenTask = null }) {
             h('span', { className: HINT }, '需要卡片关联 MR、且配了 GitLab 项目。'),
           ),
           mergeRun.line === '' ? null : h('div', { className: HINT, style: { marginTop: 8 } }, mergeRun.line),
+        ),
+      ),
+      h(Section, { pane: 'coding', current: pane, id: 'feed' },
+        h(SectionHead, null, '执行播报',
+          h('span', { className: HINT }, '派单会话在跑时的机器进度（工具 / 模型 / 回复摘要）。它不再写进讨论区——讨论区只留人和专家的评论')),
+        h('div', { className: SECTION_BODY, 'data-drawer-feed': '' },
+          (feedList.length === 0)
+            ? h('div', { className: HINT }, '这张卡还没有播报。派单会话跑起来后，这里会显示最近的机器进度。')
+            : h('div', { className: 'flex flex-col gap-2' },
+              ...feedList.slice().reverse().map((entry, index) => h('div', {
+                key: `${entry.at}-${index}`,
+                className: 'flex min-w-0 flex-col gap-1 rounded-lg bg-background-secondary-default px-3 py-2',
+                'data-feed-entry': '',
+              },
+                h('div', { className: 'flex min-w-0 items-center gap-2 text-caption-1-regular text-text-tertiary' },
+                  h('span', null, fmtTime(entry.at)),
+                  entry.expert ? h('span', { className: 'min-w-0 truncate' }, entry.expert) : null),
+                h('div', { className: 'whitespace-pre-wrap break-words text-caption-1-regular text-text-primary', style: { maxHeight: 200, overflow: 'auto' } }, String(entry.text ?? '')))),
+              feedCount > feedList.length
+                ? h('div', { className: HINT }, `只显示最近 ${feedList.length} 条，共 ${feedCount} 条`)
+                : null),
         ),
       ),
       h(Section, { pane: 'coding', current: pane, id: 'coding' },

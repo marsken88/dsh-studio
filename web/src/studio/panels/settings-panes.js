@@ -117,6 +117,11 @@ export function AutoDispatchPane({ form, setForm, saveBar }) {
         ['deny', '自动拒绝：只做沙箱允许的事，被拒的写进卡上评论'],
       ]),
       h('div', { className: HINT }, '选「自动批准」= 派单 / 发起会话一开头就拿到完全权限（DSH 的 danger-full-access），不会再因为越界写入停下来问；选「自动拒绝」才把上面的沙箱档位当边界用，越界一律拒绝并写成卡上评论。专家自己的沙箱选「只读」时永远只读。'),
+      selectOf('执行播报写到哪里', 'agentsBroadcast', [
+        ['feed', '卡上的「执行播报」（推荐）：讨论区只留人和专家的话'],
+        ['comment', '写成评论（旧行为，会把讨论区刷满）'],
+        ['off', '不播报'],
+      ]),
       selectOf('代码隔离', 'agentsIsolation', [
         ['none', '不隔离：所有卡共用一个工作区'],
         ['worktree', '一卡一个 git worktree（推荐给多卡并行）'],
