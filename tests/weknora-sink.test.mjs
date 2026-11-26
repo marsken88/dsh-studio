@@ -156,6 +156,29 @@ test('幂等：建文档失败时也要回报 replaced（台账靠它判「旧�
   }
 })
 
+test('超时：建文档到点没回包就当场失败，不当作写进去了（裁定②的超时面）', async () => {
+  /* 真机上「POST manual 超时」最坏的情况是：远端其实建成功了，但 id 没回来，本地拿不到锚点，
+     下一轮再建 → 库里多一份没有台账可追踪的孤儿。这个残余窗口是**已接受**的（方案裁定②），
+     但「超时必须算失败」不能被悄悄改成「超时也当成功」——否则观感更好、账更烂。
+     timeoutMs 必须传 1000：callJson 里有 Math.max(1000, timeoutMs) 夹紧，写 300 会被抬到 1000。 */
+  const server = createServer((req, res) => { req.resume(); res.on('error', () => {}) /* 故意永不回包 */ })
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve))
+  const { port } = server.address()
+  try {
+    const result = await uploadToWeknora({
+      sink: { ...sink, baseUrl: `http://127.0.0.1:${port}` },
+      title: 't', markdown: 'm', timeoutMs: 1000,
+    })
+    assert.equal(result.ok, false, '超时不能算写进去了')
+    assert.match(result.error, /建文档失败/, '要说清是哪一步超的')
+    assert.match(result.error, /请求超时/, '文案要能让人看出是超时，不是鉴权/参数错')
+    assert.equal(result.replaced, false, '首次写入没有旧锚点，不许带 replaced=true')
+  } finally {
+    server.closeAllConnections?.()
+    await new Promise(resolve => server.close(resolve))
+  }
+})
+
 test('幂等：旧文档删不掉（500）时中止本轮入库，不建第二份（先失效再入库）', async () => {
   let posts = 0
   const server = createServer((req, res) => {
