@@ -337,3 +337,20 @@ test('并发槽满时手动派单被拒；同一槽位重派放行', async t => 
   await dispatcher.launchNow('t-1')
   assert.equal(dispatcher.running.size, 1, '同一张卡同一位专家是替换，不占新名额')
 })
+
+test('条件型阻塞：人工签字一到，tick 自动解除并正常派单', async t => {
+  const { dispatcher, store, state } = await harness(t, {
+    tasks: [{
+      id: 't-1',
+      blocked: { by: 'agent', at: 1, reason: '准出只差人工签字', until: 'human-signoff' },
+      signoff: { by: '张三', at: 2, note: 'ok', actorKind: 'human' },
+    }],
+    autoStatuses: ['test'],
+  })
+  await dispatcher.tick()
+  const task = store.snapshot().tasks.find(entry => entry.id === 't-1')
+  assert.equal(task.blocked, null, '条件满足后阻塞要自动清掉')
+  assert.ok((task.history ?? []).some(row => /系统自动解除阻塞/.test(String(row.note ?? ''))), '历史里要留一行系统自动解除')
+  assert.ok(dispatcher.running.size >= 1 || (task.dispatch !== null && task.dispatch !== undefined), '解除后这一轮就该派出去')
+  assert.equal(state.tasks.length, 1)
+})
