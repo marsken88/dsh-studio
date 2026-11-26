@@ -77,30 +77,68 @@ test('buildDocsConfig：非法输入一次列清（400 docs_config_invalid）', 
   )
 })
 
-test('buildDocsConfig：apiKey 永不回显（400 invalid[] 只给遮蔽符）', () => {
-  const longKey = 'sk-' + 'x'.repeat(250)
+test('buildDocsConfig：8 种误写形态零回显（BUG-002 A 段，路径白名单）', () => {
+  const SECRET = 'sk-LEAK-0123456789'
+  /* 8 条全部来自 p3 验收探针实测：旧实现（key==='apiKey' 精确匹配才遮蔽）在这 6 条上回显原值。
+     期望：invalid[].value 一律只给类型标签，响应体里连密钥前缀都找不到。 */
   const cases = [
-    [{ weknora: { apiKey: longKey } }, 'too-long'],
-    [{ weknora: { apiKey: 12345 } }, 'not-string'],
-    [{ weknora: { apiKey: { value: longKey } } }, 'not-string'],
+    ['weknora 整块是字符串', { weknora: SECRET }, 'weknora', 'not-object', '（字符串）'],
+    ['weknora 整块是数组', { weknora: [SECRET] }, 'weknora', 'not-object', '（数组）'],
+    ['密钥误放在 docs 层', { apiKey: SECRET }, 'docs.apiKey', 'unknown-field', '（字符串）'],
+    ['拼成 api_key', { weknora: { api_key: SECRET } }, 'weknora.api_key', 'unknown-field', '（字符串）'],
+    ['拼成 apikey', { weknora: { apikey: SECRET, knowledgeBaseId: 'kb' } }, 'weknora.apikey', 'unknown-field', '（字符串）'],
+    ['docs 整块是数组', [SECRET], 'docs', 'not-object', '（数组）'],
+    ['正确字段 + 非字符串', { weknora: { apiKey: [SECRET] } }, 'weknora.apiKey', 'not-string', '（数组）'],
+    ['正确字段 + 超长', { weknora: { apiKey: SECRET + 'x'.repeat(300) } }, 'weknora.apiKey', 'too-long', '（字符串）'],
   ]
-  for (const [patch, reason] of cases) {
+  for (const [label, patch, key, reason, value] of cases) {
     let caught
     try { buildDocsConfig(BASE, patch) } catch (error) { caught = error }
-    assert.ok(caught instanceof DocsConfigError, '必须抛 DocsConfigError')
-    assert.equal(caught.invalid[0].key, 'weknora.apiKey')
-    assert.equal(caught.invalid[0].reason, reason)
-    assert.equal(caught.invalid[0].value, '（已隐藏）', 'apiKey 的非法值只能给遮蔽符')
+    assert.ok(caught instanceof DocsConfigError, label + '：必须抛 DocsConfigError')
+    assert.equal(caught.invalid[0].key, key, label + '：键名要保留（便于定位）')
+    assert.equal(caught.invalid[0].reason, reason, label + '：原因不变')
+    assert.equal(caught.invalid[0].value, value, label + '：白名单外的值只能给类型标签（不带内容、不带长度）')
     const payload = JSON.stringify({ error: caught.message, invalid: caught.invalid, missing: caught.missing, scopes: caught.scopes })
-    assert.ok(!payload.includes('sk-'), '400 响应体不许出现密钥前缀：' + payload)
-    assert.ok(!payload.includes('xxxx'), '连片段都不许出现：' + payload)
+    assert.ok(!payload.includes('sk-LEAK'), label + '：400 响应体不许出现密钥：' + payload)
+    assert.ok(!payload.includes('LEAK'), label + '：连片段都不许出现：' + payload)
   }
-  /* 遮蔽只针对 apiKey：其它字段不是密钥，保留前缀才好定位是哪个值错了。 */
+  /* 老约定里「weknora.* 任何字段都只给类型标签」也要钉住：非密钥字段同样不回显，
+     因为 key 可能被误填进 baseUrl（下一行就是这种手误的形状）。 */
   let baseUrlError
   try { buildDocsConfig(BASE, { weknora: { baseUrl: 'x'.repeat(301) } }) } catch (error) { baseUrlError = error }
   assert.ok(baseUrlError instanceof DocsConfigError)
-  assert.notEqual(baseUrlError.invalid[0].value, '（已隐藏）', '非密钥字段不该被一起抹掉')
-  assert.ok(String(baseUrlError.invalid[0].value).startsWith('xxxxxxxxxxxx'), '非密钥字段保留前缀便于定位')
+  assert.equal(baseUrlError.invalid[0].reason, 'too-long')
+  assert.equal(baseUrlError.invalid[0].value, '（字符串）', 'weknora.* 任何字段都只给类型标签（契约 §A）')
+})
+
+test('buildDocsConfig：provider/perProject 的枚举手误仍带值（保留可用性）+ 非标量只给类型标签', () => {
+  const SECRET = 'sk-LEAK-0123456789'
+  /* 这两条是白名单内的唯一回显面：面板要能看出用户填了什么，才知道是改类型还是改值。 */
+  let providerError
+  try { buildDocsConfig(BASE, { provider: 'nope' }) } catch (error) { providerError = error }
+  assert.equal(providerError.invalid[0].value, 'nope', "provider:'nope' 必须回显 nope（契约：保留定位能力）")
+
+  let projectError
+  try { buildDocsConfig(BASE, { perProject: { pjBad: 'nope' } }) } catch (error) { projectError = error }
+  assert.equal(projectError.invalid[0].key, 'perProject.pjBad')
+  assert.equal(projectError.invalid[0].value, 'nope', 'perProject 的枚举错也带值')
+
+  /* 白名单以外的形状（非标量、形状错）一律标签。 */
+  const shapes = [
+    [{ provider: { apiKey: SECRET } }, 'provider', '（对象）'],
+    [{ provider: [SECRET] }, 'provider', '（数组）'],
+    [{ perProject: [SECRET] }, 'perProject', '（数组）'],
+    [{ perProject: null }, 'perProject', '（null）'],
+    [{ provider: SECRET + 'x'.repeat(250) }, 'provider', '（字符串）'],
+  ]
+  for (const [patch, key, value] of shapes) {
+    let caught
+    try { buildDocsConfig(BASE, patch) } catch (error) { caught = error }
+    assert.ok(caught instanceof DocsConfigError, JSON.stringify(patch).slice(0, 40))
+    assert.equal(caught.invalid[0].key, key)
+    assert.equal(caught.invalid[0].value, value, '非标量 / 超长值只给类型标签')
+    assert.ok(!JSON.stringify(caught.invalid).includes('LEAK'), '密钥片段不许出现在 invalid 里')
+  }
 })
 
 test('buildDocsConfig：保存后全部 weknora-ish 生效范围都要配齐（Q6 裁定 A）', () => {
@@ -281,9 +319,45 @@ test('真 HTTP AC1-5b：400 响应体不回显 apiKey（连前缀都不许）', 
   const body = JSON.parse(text)
   assert.equal(body.code, 'docs_config_invalid')
   assert.equal(body.invalid[0].key, 'weknora.apiKey')
-  assert.equal(body.invalid[0].value, '（已隐藏）', '响应体里 apiKey 只能给遮蔽符')
+  assert.equal(body.invalid[0].value, '（字符串）', 'weknora.* 只给类型标签（契约 §A）')
   assert.ok(!text.includes('sk-'), '400 响应原文不许出现密钥前缀：' + text.slice(0, 300))
   assert.ok(!text.includes('xxxx'), '连密钥片段都不许出现：' + text.slice(0, 300))
+})
+
+test('真 HTTP BUG-002 A：8 种误写形态响应原文零回显；provider 枚举错仍带值', async () => {
+  const secret = 'sk-LEAK-0123456789'
+  const shapes = [
+    ['weknora 整块字符串', { docs: { weknora: secret } }, 'weknora'],
+    ['weknora 整块数组', { docs: { weknora: [secret] } }, 'weknora'],
+    ['docs.apiKey（层级放错）', { docs: { apiKey: secret } }, 'docs.apiKey'],
+    ['api_key（拼写变体）', { docs: { weknora: { api_key: secret } } }, 'weknora.api_key'],
+    ['apikey（大小写变体）', { docs: { weknora: { apikey: secret } } }, 'weknora.apikey'],
+    ['docs 整块数组', { docs: [secret] }, 'docs'],
+    ['apiKey 非字符串', { docs: { weknora: { apiKey: [secret] } } }, 'weknora.apiKey'],
+    ['apiKey 超长', { docs: { weknora: { apiKey: secret + 'x'.repeat(300) } } }, 'weknora.apiKey'],
+  ]
+  for (const [label, payload, key] of shapes) {
+    const response = await fetch(base + '/config', {
+      method: 'POST',
+      headers: { 'x-studio-user': 'docs-config-test', 'content-type': 'application/json' },
+      body: JSON.stringify(payload),
+    })
+    /* 判据是**响应原文**：JSON.stringify 出来的 invalid 也可能被日志/代理转发。 */
+    const text = await response.text()
+    assert.equal(response.status, 400, label + '：必须 400')
+    const body = JSON.parse(text)
+    assert.equal(body.code, 'docs_config_invalid', label)
+    assert.equal(body.invalid[0].key, key, label + '：键名保留')
+    assert.ok(!text.includes('sk-LEAK'), label + '：400 响应原文不许出现密钥：' + text.slice(0, 300))
+    assert.ok(!text.includes('LEAK'), label + '：连片段都不许出现：' + text.slice(0, 300))
+  }
+  /* 保留可用性：枚举写错仍要回显原值，否则面板无法判断是改类型还是改值。 */
+  const nope = await saveDocs({ provider: 'nope' })
+  assert.equal(nope.status, 400)
+  assert.equal(nope.body.invalid[0].value, 'nope', "provider:'nope' 仍带值")
+  const badProject = await saveDocs({ perProject: { pjBad: 'nope' } })
+  assert.equal(badProject.status, 400)
+  assert.equal(badProject.body.invalid[0].value, 'nope', 'perProject 枚举错仍带值')
 })
 
 test('真 HTTP AC2-3：项目级 both 缺 knowledgeBaseId → 保存即被拒，指名影响范围', async () => {

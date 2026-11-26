@@ -22,10 +22,30 @@ const DOC_FIELDS = ['provider', 'perProject', 'weknora']
 
 const isPlainObject = value => value !== null && typeof value === 'object' && !Array.isArray(value)
 
-/* 密钥永不回显：apiKey 的非法值（原值、前缀、长度）一律不进 400 响应体 —— 它会被客户端日志、
-   代理日志、错误上报落盘。用固定遮蔽符；其它字段不是密钥，照旧带值才好定位是哪个值错了。 */
-const MASKED_SECRET = '（已隐藏）'
-const invalidValue = (key, value) => (key === 'apiKey' ? MASKED_SECRET : value)
+/* 密钥永不回显（BUG-002 A 段）：400 响应体会进客户端日志、代理日志、错误上报，所以按**路径白名单**
+   决定能不能带值，而不是按字段名猜（实测漏过 6 条：`docs` 整块、`docs.apiKey`、`weknora.api_key`、
+   `weknora.apikey`、`weknora` 整块字符串/数组 —— 密钥可能被放错层级、拼错变体）。
+   · 带值：只有 `provider` / `perProject.<id>` 的**枚举手误**（reason=unknown-provider）—— 面板要能看出
+     用户到底填了什么，否则「改类型还是改值」都判断不了；
+   · 其余：一律只给类型标签，不带内容、不带长度（`weknora.*` 任何字段含 baseUrl/tenantId/knowledgeBaseId
+     与未知字段名、`docs`/`weknora`/`perProject` 整块形状错、非标量值）。
+   白名单内的字符串另有长度闸：误把长 key 填进 provider 时不能再开一条回显面。 */
+const TYPE_LABELS = { string: '（字符串）', number: '（数字）', boolean: '（布尔）', object: '（对象）', undefined: '（null）' }
+const ECHO_MAX = 40
+const isProviderPath = key => key === 'provider' || key.startsWith('perProject.')
+
+function typeLabel(value) {
+  if (value === null) return '（null）'
+  if (Array.isArray(value)) return '（数组）'
+  return TYPE_LABELS[typeof value] ?? '（对象）'
+}
+
+/** invalid[].value 的唯一出口：白名单外的路径只回类型，不回内容。 */
+const invalidValue = (key, value, reason) => {
+  if (reason !== 'unknown-provider' || !isProviderPath(key)) return typeLabel(value)
+  if (typeof value === 'number') return value
+  return typeof value === 'string' && value.length <= ECHO_MAX ? value : typeLabel(value)
+}
 
 /** 归一：只认字符串（数组/对象/boxed string 都不算），trim + lower 后必须落在枚举里。 */
 const pickProvider = value => {
@@ -49,17 +69,17 @@ export class DocsConfigError extends Error {
 /** provider / perProject 值：形状错与枚举错要分开报，面板才知道是改类型还是改值。 */
 function readProvider(value, key, invalid) {
   if (typeof value !== 'string') {
-    invalid.push({ key, value, reason: 'not-string' })
+    invalid.push({ key, value: invalidValue(key, value, 'not-string'), reason: 'not-string' })
     return ''
   }
   const picked = pickProvider(value)
-  if (picked === '') invalid.push({ key, value, reason: 'unknown-provider' })
+  if (picked === '') invalid.push({ key, value: invalidValue(key, value, 'unknown-provider'), reason: 'unknown-provider' })
   return picked
 }
 
 function readPerProject(input, invalid) {
   if (!isPlainObject(input)) {
-    invalid.push({ key: 'perProject', value: input, reason: 'not-object' })
+    invalid.push({ key: 'perProject', value: invalidValue('perProject', input, 'not-object'), reason: 'not-object' })
     return undefined
   }
   const table = {}
@@ -68,14 +88,16 @@ function readPerProject(input, invalid) {
     /* 键先 trim：面板提交的是项目 id，前后空格是手误不是新项目；trim 后撞车按重复键报错，
        不能后者覆盖前者（那会静默丢一个覆盖）。 */
     const id = String(rawKey).trim()
-    if (id === '') { invalid.push({ key: 'perProject.', value, reason: 'empty-key' }); continue }
-    if (id.length > MAX_PROJECT_ID) { invalid.push({ key: 'perProject.' + id.slice(0, 20) + '…', value, reason: 'too-long' }); continue }
-    if (seen.has(id)) { invalid.push({ key: 'perProject.' + id, value, reason: 'duplicate-key' }); continue }
+    if (id === '') { invalid.push({ key: 'perProject.', value: invalidValue('perProject.', value, 'empty-key'), reason: 'empty-key' }); continue }
+    if (id.length > MAX_PROJECT_ID) { invalid.push({ key: 'perProject.' + id.slice(0, 20) + '…', value: invalidValue('perProject.', value, 'too-long'), reason: 'too-long' }); continue }
+    if (seen.has(id)) { invalid.push({ key: 'perProject.' + id, value: invalidValue('perProject.' + id, value, 'duplicate-key'), reason: 'duplicate-key' }); continue }
     seen.add(id)
     const picked = readProvider(value, 'perProject.' + id, invalid)
     if (picked !== '') table[id] = picked
   }
   if (Object.keys(table).length > MAX_PER_PROJECT) {
+    /* 这个 value 是我们自己数出来的条数（派生值，不是用户输入），带出去不泄露任何内容，
+       但面板要靠它判断「超了多少」。所以它不走 invalidValue。 */
     invalid.push({ key: 'perProject', value: Object.keys(table).length, reason: 'too-many' })
   }
   return table
@@ -83,7 +105,7 @@ function readPerProject(input, invalid) {
 
 function readWeKnora(input, invalid) {
   if (!isPlainObject(input)) {
-    invalid.push({ key: 'weknora', value: input, reason: 'not-object' })
+    invalid.push({ key: 'weknora', value: invalidValue('weknora', input, 'not-object'), reason: 'not-object' })
     return undefined
   }
   const sink = {}
@@ -91,10 +113,10 @@ function readWeKnora(input, invalid) {
     /* apiKeySet 是 /state 回读的形状（只读回声）：面板会把整块 weknora 原样带回，
        这里忽略而不是判 unknown-field，否则「打开面板点保存」直接 400。 */
     if (key === 'apiKeySet') continue
-    if (SINK_LIMITS[key] === undefined) { invalid.push({ key: 'weknora.' + key, value: invalidValue(key, value), reason: 'unknown-field' }); continue }
-    if (typeof value !== 'string') { invalid.push({ key: 'weknora.' + key, value: invalidValue(key, value), reason: 'not-string' }); continue }
+    if (SINK_LIMITS[key] === undefined) { invalid.push({ key: 'weknora.' + key, value: invalidValue('weknora.' + key, value, 'unknown-field'), reason: 'unknown-field' }); continue }
+    if (typeof value !== 'string') { invalid.push({ key: 'weknora.' + key, value: invalidValue('weknora.' + key, value, 'not-string'), reason: 'not-string' }); continue }
     if (value.trim().length > SINK_LIMITS[key]) {
-      invalid.push({ key: 'weknora.' + key, value: invalidValue(key, value.slice(0, 12) + '…'), reason: 'too-long' })
+      invalid.push({ key: 'weknora.' + key, value: invalidValue('weknora.' + key, value, 'too-long'), reason: 'too-long' })
       continue
     }
     sink[key] = value.trim()
@@ -120,12 +142,12 @@ function weknoraScopes(docs) {
 export function buildDocsConfig(currentDocs, patchDocs) {
   if (!isPlainObject(patchDocs)) {
     throw new DocsConfigError('docs 必须是对象（清空传 {}，null 不等于清空）', {
-      invalid: [{ key: 'docs', value: patchDocs, reason: 'not-object' }],
+      invalid: [{ key: 'docs', value: invalidValue('docs', patchDocs, 'not-object'), reason: 'not-object' }],
     })
   }
   const invalid = []
   for (const key of Object.keys(patchDocs)) {
-    if (!DOC_FIELDS.includes(key)) invalid.push({ key: 'docs.' + key, value: patchDocs[key], reason: 'unknown-field' })
+    if (!DOC_FIELDS.includes(key)) invalid.push({ key: 'docs.' + key, value: invalidValue('docs.' + key, patchDocs[key], 'unknown-field'), reason: 'unknown-field' })
   }
 
   const provider = patchDocs.provider === undefined ? undefined : readProvider(patchDocs.provider, 'provider', invalid)
