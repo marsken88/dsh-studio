@@ -1464,10 +1464,14 @@ function Drawer({ task, state, onClose, onChanged, onOpenTask = null }) {
                   h(Button, {
                     variant: 'primary',
                     size: 'sm',
-                    disabled: busy || pendingChildren.length > 0,
-                    title: pendingChildren.length > 0 ? '先收口子卡' : '以你本人的身份签字（AI 代签不计入）',
+                    /* 空结论点下去服务端会 400「验收签字要写一句结论」，人只会觉得“点了没反应”，所以先禁用。 */
+                    disabled: busy || pendingChildren.length > 0 || gateNote.trim() === '',
+                    title: pendingChildren.length > 0 ? '先收口子卡' : (gateNote.trim() === '' ? '先写一句验收结论' : '以你本人的身份签字（AI 代签不计入）'),
                     onClick: () => void signOff('sign'),
                   }, '签字确认')),
+                gateNote.trim() === '' && pendingChildren.length === 0
+                  ? h('div', { className: HINT, 'data-signoff-hint': '' }, '先在上面写一句验收结论（验了什么、遗留什么），「签字确认」才会亮。')
+                  : null,
                 pendingChildren.length > 0
                   ? h('div', { className: 'flex min-w-0 flex-col gap-1 rounded-lg bg-background-secondary-default p-2', 'data-pending-children': '' },
                       h('div', { className: 'text-caption-1-regular text-text-warning-primary' }, '子卡没到「已完成」之前主卡签不了。做法：打开下面那张子卡，点它顶部的「推进到「已完成」」。'),
