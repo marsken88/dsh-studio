@@ -18,6 +18,7 @@ import {
 } from '../web/src/studio/labels.js'
 import { buildRoster, ownerLabel, memberLabel, toDateInput, fromDateInput } from '../web/src/studio/roster.js'
 import { fmtTime, fmtDate } from '../web/src/studio/format.js'
+import { productChainRow } from '../web/src/studio/collab-chain.js'
 import { searchItems, filterItems } from '../web/src/studio/palette.js'
 
 test('labels: every ordered status has a label', () => {
@@ -516,4 +517,52 @@ test('docs-panel: 提交完整 perProject 表，且只在回读一致时显示�
   assert.ok(!/overrides\.filter\(/.test(source), '不许对 overrides 做过滤：未知项目行必须原样保留')
   assert.ok(source.includes("'data-perproject-known'"), '未知项目行要有可判定钩子')
   assert.ok(source.includes('删除项目 ${item.id} 的覆盖？'), '显式删除要写明 key 与后果（二次确认）')
+})
+
+// 2026-11-26 真机：卡片到「待验收」了，协作链还显示「缺验收：p1/p2 · 缺三问」——
+// 那是按整条需求聚合的旧口径，被误读成阻塞。现在只认本卡挂的功能点。
+
+test('协作链产品行：本卡功能点有验收 → 可验收，同需求其它点缺验收只作补充', () => {
+  const row = productChainRow({
+    task: { pointId: 'p3' },
+    requirement: {
+      code: 'REQ-2026-003',
+      discovery: { server: '', auth: '', boundary: '' },
+      points: [
+        { id: 'p1', acceptance: [] },
+        { id: 'p2', acceptance: [{ text: '' }] },
+        { id: 'p3', acceptance: [{ text: 'A1' }, { text: 'A2' }, { text: '  ' }] },
+      ],
+    },
+  })
+  assert.equal(row.tone, 'ok')
+  assert.equal(row.chip, '本卡可验收')
+  assert.match(row.detail, /本卡功能点 p3 有 2 条验收/)
+  assert.match(row.detail, /同需求还有 p1\/p2 缺验收/)
+  assert.match(row.detail, /需求三问未填/)
+})
+
+test('协作链产品行：本卡功能点自己缺验收 → 待补齐', () => {
+  const row = productChainRow({
+    task: { pointId: 'p2' },
+    requirement: { code: 'REQ-1', points: [{ id: 'p2', acceptance: [] }, { id: 'p3', acceptance: [{ text: 'A1' }] }] },
+  })
+  assert.equal(row.tone, 'warn')
+  assert.equal(row.chip, '待补齐')
+  assert.match(row.detail, /缺验收：p2/)
+})
+
+test('协作链产品行：没挂功能点就退回需求级判断', () => {
+  const bare = productChainRow({ task: {}, requirement: { code: 'REQ-2', points: [{ id: 'p1', acceptance: [] }] } })
+  assert.equal(bare.tone, 'warn')
+  assert.match(bare.detail, /缺验收：p1/)
+  const ready = productChainRow({ task: {}, requirement: { code: 'REQ-3', points: [{ id: 'p1', acceptance: [{ text: 'A' }] }] } })
+  assert.equal(ready.tone, 'ok')
+  assert.equal(ready.chip, '需求可验收')
+})
+
+test('协作链产品行：没挂需求 → 未挂需求', () => {
+  const row = productChainRow({ task: { pointId: 'p1' }, requirement: null })
+  assert.equal(row.tone, 'missing')
+  assert.equal(row.chip, '未挂需求')
 })

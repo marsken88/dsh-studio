@@ -9,6 +9,7 @@ import { Button, TreeView, TreeViewItem } from '../boardui/index'
 import { EmptyState } from '../boardui/empty-state'
 import { ProgressTrack } from '../components/base/progress/progress'
 import { archiveFailureNotice, archiveNotice, archivePendingNotice } from './archive-copy.js'
+import { productChainRow } from './collab-chain.js'
 
 /* 抽屉版面：token + Tailwind（4px 档）。这一版起不再用手写类：
    小节是圆角卡片，说明文字是 caption-1，字段是「标签 + 控件」两行。
@@ -1254,16 +1255,6 @@ function Drawer({ task, state, onClose, onChanged }) {
     ),
   )
   const collabRequirement = (state.requirements ?? []).find(item => item.id === task.requirementId) ?? null
-  const collabPoints = Array.isArray(collabRequirement?.points) ? collabRequirement.points : []
-  const collabAcceptance = collabPoints.map(point => ({
-    point,
-    count: (Array.isArray(point.acceptance) ? point.acceptance : []).filter(item => String(item?.text ?? '').trim() !== '').length,
-  }))
-  const collabBare = collabAcceptance.filter(item => item.count === 0)
-  const collabDiscovery = collabRequirement?.discovery ?? {}
-  const collabMissingDiscovery = [['server', '有没有服务端'], ['auth', '谁做鉴权'], ['boundary', '交付边界']]
-    .filter(([key]) => String(collabDiscovery[key] ?? '').trim() === '')
-    .map(([, label]) => label)
   const collabDesign = task.design ?? null
   const collabDrafts = Array.isArray(collabDesign?.drafts) ? collabDesign.drafts : []
   const collabChosen = collabDrafts.find(item => item.id === collabDesign?.chosenId) ?? null
@@ -1400,15 +1391,8 @@ function Drawer({ task, state, onClose, onChanged }) {
           h('span', { className: HINT }, '四个角色接力：产品挖需求与验收 → 架构出方案 → 研发实现并自测 → 测试按三层验；缺哪一棒一眼看到')),
         h('div', { className: SECTION_BODY, 'data-role-chain': '' },
           (() => {
-            if (collabRequirement === null) return roleRow('product', '产品', 'missing', '未挂需求', '先建需求并把卡挂上')
-            const detail = `${collabRequirement.code || collabRequirement.id} · 功能点 ${collabPoints.length} · 验收条件 ${collabAcceptance.reduce((sum, item) => sum + item.count, 0)} 条`
-            if (collabBare.length > 0 || collabMissingDiscovery.length > 0) {
-              const gaps = []
-              if (collabBare.length > 0) gaps.push(`缺验收：${collabBare.map(item => item.point.id).join('/')}`)
-              if (collabMissingDiscovery.length > 0) gaps.push(`缺三问：${collabMissingDiscovery.join('、')}`)
-              return roleRow('product', '产品', 'warn', '待补齐', `${detail} · ${gaps.join(' · ')}`)
-            }
-            return roleRow('product', '产品', 'ok', '需求可验收', detail)
+            const row = productChainRow({ task, requirement: collabRequirement })
+            return roleRow('product', '产品', row.tone, row.chip, row.detail)
           })(),
           (() => {
             if (collabDesign === null) return roleRow('architect', '架构', 'missing', '未登记方案', '让架构师出方案（多稿 + 定案 + 评审）')
