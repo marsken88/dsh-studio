@@ -1531,7 +1531,7 @@ function Drawer({ task, state, onClose, onChanged, onOpenTask = null }) {
               : task.dispatch?.state === 'failed'
                 ? `上次派单失败：${task.dispatch.error ?? '未知原因'}`
                 : task.dispatch?.state === 'stopped'
-                  ? '上次派单已被停止（重启也不会自己接着跑，点「马上处理」继续）'
+                  ? `上次派单已被停止（${fmtTime(task.dispatch.at)} · ${String(task.dispatch.by ?? '未记录谁停的')}；重启也不会自己接着跑，点「马上处理」继续）`
                   : task.dispatch?.state === 'done'
                     ? (task.dispatch.advanced === true
                         ? `上一轮已结束并推进到下一列 · ${ownerLabel(state.config ?? {}, { kind: 'expert', id: task.dispatch.expert ?? '' }) || 'AI'}`

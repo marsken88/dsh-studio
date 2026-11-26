@@ -98,7 +98,7 @@ if (method === 'POST' && route === '/agents/stop') {
     return true
   }
   const id = String(body.id ?? '')
-  dispatcher.abortTask(id, body.expert === undefined ? undefined : String(body.expert))
+  dispatcher.abortTask(id, body.expert === undefined ? undefined : String(body.expert), '人')
   host.sendJson(res, 200, { ok: true, state: host.publicState(store) })
   return true
 }

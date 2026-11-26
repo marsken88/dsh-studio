@@ -723,13 +723,16 @@ export class Dispatcher {
   }
 
   /** Stop whatever an expert is doing on this card (still keeps its output). */
-  abortTask(taskId, expertId) {
+  abortTask(taskId, expertId, by = '人') {
     let stopped = 0
     for (const [slot, info] of [...this.running]) {
       if (info.taskId !== taskId) continue
       if (typeof expertId === 'string' && expertId !== '' && info.expert !== expertId) continue
       this.running.delete(slot)
-      markDispatch(this.store, info.taskId, { ...info, state: 'stopped', at: Date.now() }).catch(() => {})
+      markDispatch(this.store, info.taskId, { ...info, state: 'stopped', at: Date.now(), by: String(by).slice(0, 20) }).catch(() => {})
+      /* 停止也要留痕：以前只写 state，没人知道是谁什么时候停的，界面上只能说「被停止过」。
+         现在记 by，卡上能直接写「11-11 13:46 由 人/agent 停止」。 */
+      this.appendHistory(info.taskId, `停止：${info.expert} 的会话被中止（${String(by).slice(0, 20)}）`).catch(() => {})
       try { this.ctx.agents.get(info.sessionId)?.abort?.() } catch { /* best effort */ }
       this.note(`${info.sessionId} aborted`)
       stopped += 1
@@ -817,7 +820,7 @@ export class Dispatcher {
     for (const [slot, info] of [...this.running.entries()]) {
       if (!alive.has(info.taskId)) {
         this.note(`drop ghost slot ${slot} (${info.taskId} 已删除)`)
-        this.abortTask(info.taskId, info.expert)
+        this.abortTask(info.taskId, info.expert, '系统')
       }
     }
     // 并发只有在「每张卡一个 worktree」时才安全：隔离是 none 时多张卡会在同一目录互相覆盖。
