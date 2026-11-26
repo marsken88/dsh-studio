@@ -5,6 +5,7 @@ import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'no
 import { createServer } from 'node:http'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { DatabaseSync } from 'node:sqlite'
 import test from 'node:test'
 
 import { publicDocsConfig } from '../src/host/doc-sink.js'
@@ -254,12 +255,14 @@ test('BUG-002 B：老库明文 + 历史快照明文一次性迁移，重复启�
     const reopened = openStore(dir)
     stores.push(reopened)
     await reopened.ready
+    /* 评审必修：迁移要在**首启**就把 meta.state 换成已剥离版本，不能等下一次有人保存配置。 */
+    assert.equal(stateRow(reopened).config.docs.weknora.apiKey, '', '首启即剥离 meta.state（不等下一次保存）')
     assert.equal(reopened.snapshot().config.docs.weknora.apiKey, KEY, '老库里的明文先在内存里（上传要用）')
     assert.equal(vaultDocsKey(dir), KEY, '启动时先把它写进密钥文件')
     assert.ok(!String(reopened.db.prepare('SELECT blob FROM snapshots WHERE id = ?').get(legacyId).blob).includes(KEY), '历史快照里的明文要擦掉')
 
     await reopened.mutate(state => { state.updatedAt = Date.now() })
-    assert.equal(stateRow(reopened).config.docs.weknora.apiKey, '', '下一次落盘把 state 里的明文剥离')
+    assert.equal(stateRow(reopened).config.docs.weknora.apiKey, '', '再落盘一次仍是剥离态（幂等）')
     assert.ok(!lastSnapshot(reopened).includes(KEY), '新快照不含明文')
 
     /* 幂等：再启动一次，不重复搬、不覆盖；已剥离的 state 从密钥文件补回。 */
@@ -277,7 +280,7 @@ test('BUG-002 B：老库明文 + 历史快照明文一次性迁移，重复启�
   }
 })
 
-test('BUG-002 B：单文件模式（sqlite 不可用）state.json 也不带明文，重开能补回', async () => {
+test('BUG-002 B：单文件模式（sqlite 不可用）首启就剥离 state.json，重开能补回', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'dsh-studio-docs-key-file-'))
   const stores = []
   const KEY = 'sk-test-bug002-fileengine-01'
@@ -285,28 +288,83 @@ test('BUG-002 B：单文件模式（sqlite 不可用）state.json 也不带明�
     /* 用一个同名文件挡住 dbFile 的父目录 → sqlite 起不来 → 回落单文件模式（生产上的兼容路径）。 */
     const blocked = join(dir, 'blocked')
     writeFileSync(blocked, 'x')
-    const store = new StudioStore(join(dir, 'state.json'), {
-      dbFile: join(blocked, 'state.db'),
+    const dbFile = join(blocked, 'state.db')
+    const openFile = () => new StudioStore(join(dir, 'state.json'), {
+      dbFile,
       secrets: new SecretStore(join(dir, 'secrets.json')),
     })
+    const store = openFile()
     stores.push(store)
     await store.ready
     assert.equal(store.engine, 'file', '这条用例要的就是单文件模式')
     await setDocsKey(store, KEY)
 
     const raw = readFileSync(join(dir, 'state.json'), 'utf8')
-    assert.ok(!raw.includes(KEY), 'state.json 原文不许出现 key')
+    assert.ok(!raw.includes(KEY), '正常落盘后 state.json 原文不许出现 key')
     assert.equal(JSON.parse(raw).config.docs.weknora.apiKey, '')
     assert.equal(vaultDocsKey(dir), KEY)
 
-    const reopened = new StudioStore(join(dir, 'state.json'), {
-      dbFile: join(blocked, 'state.db'),
-      secrets: new SecretStore(join(dir, 'secrets.json')),
-    })
+    /* 模拟升级前：state.json 里是明文、密钥文件没有 docs 段。 */
+    const legacy = JSON.parse(raw)
+    legacy.config.docs.weknora.apiKey = KEY
+    writeFileSync(join(dir, 'state.json'), JSON.stringify(legacy, null, 2))
+    const vault = vaultOf(dir)
+    delete vault.docs
+    writeFileSync(join(dir, 'secrets.json'), JSON.stringify(vault))
+    closeAll([store])
+
+    const reopened = openFile()
     stores.push(reopened)
     await reopened.ready
+    /* 评审必修：单文件模式同样要首启剥离（不 mutate 也不许有明文）。 */
+    const afterBoot = readFileSync(join(dir, 'state.json'), 'utf8')
+    assert.ok(!afterBoot.includes(KEY), '首启即剥离：重开（不 mutate）state.json 原文不许有明文')
+    assert.equal(JSON.parse(afterBoot).config.docs.weknora.apiKey, '')
     assert.equal(reopened.snapshot().config.docs.weknora.apiKey, KEY, '单文件模式同样靠 hydration 补回')
+    assert.equal(vaultDocsKey(dir), KEY, '迁移把明文写进密钥文件')
     assert.ok(existsSync(join(dir, 'secrets.json')))
+  } finally {
+    closeAll(stores)
+    cleanup(dir)
+  }
+})
+
+test('BUG-002 B：首启落盘失败只 warn 不抛（宿主必须能起来，明文留着但 key 不丢）', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'dsh-studio-docs-key-bootfail-'))
+  const stores = []
+  const KEY = 'sk-test-bug002-bootfail-01'
+  try {
+    const store = openStore(dir)
+    stores.push(store)
+    await store.ready
+    await setDocsKey(store, KEY)
+    /* 布场：升级前形态（state 明文 + 密钥文件无 docs）。 */
+    const saved = stateRow(store)
+    saved.config.docs.weknora.apiKey = KEY
+    store.db.prepare("UPDATE meta SET value = ? WHERE key = 'state'").run(JSON.stringify(saved))
+    const vault = vaultOf(dir)
+    delete vault.docs
+    writeFileSync(join(dir, 'secrets.json'), JSON.stringify(vault))
+    closeAll([store])
+    /* 让首启那次落盘失败：meta 的写入被触发器 ABORT（快照与 state 一起回滚）。 */
+    const raw = new DatabaseSync(join(dir, 'state.db'))
+    raw.exec("CREATE TRIGGER bug002_block_meta BEFORE INSERT ON meta BEGIN SELECT RAISE(ABORT, 'disk full'); END")
+    raw.close()
+
+    const reopened = openStore(dir)
+    stores.push(reopened)
+    /* 关键断言：不能 reject —— 安全修复不能变成启动故障点。 */
+    await reopened.ready
+    assert.equal(reopened.snapshot().config.docs.weknora.apiKey, KEY, 'key 仍在内存（可上传）')
+    assert.equal(vaultDocsKey(dir), KEY, '密钥文件里已经有值（迁移先于落盘）')
+    assert.equal(stateRow(reopened).config.docs.weknora.apiKey, KEY, '落盘失败就好回现状：明文暂时留着，但没丢 key')
+
+    /* 故障排除后的下一次落盘把明文剥离。 */
+    const fix = new DatabaseSync(join(dir, 'state.db'))
+    fix.exec('DROP TRIGGER bug002_block_meta')
+    fix.close()
+    await reopened.mutate(state => { state.updatedAt = Date.now() })
+    assert.equal(stateRow(reopened).config.docs.weknora.apiKey, '', '恢复后下一次落盘再剥离')
   } finally {
     closeAll(stores)
     cleanup(dir)

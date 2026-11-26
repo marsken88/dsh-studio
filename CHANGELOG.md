@@ -7,7 +7,7 @@
 `apiKey` 只允许出现在一个地方：0600 权限的密钥文件。这一版把两个输出面同时收紧（**数据需一次迁移**）：
 
 - **400 响应不再回显密钥**：`POST /config` 的 `invalid[].value` 改为**路径白名单**——只有 `provider` / `perProject.<id>` 的枚举写错（`unknown-provider`）才回显原值（面板要靠它定位手误）；`docs`/`weknora` 整块形状错、`weknora.*` **任何**字段（含 baseUrl/tenantId/knowledgeBaseId 与拼写变体 `api_key`/`apikey`）、`docs` 下的未知字段、非标量值，一律只给类型标签 `（对象）/（数组）/（字符串）/（null）`，不带内容也不带长度。实测 8 种误写形态从「6 条泄露」到「0 条」，`provider:'nope'` 仍回显 `nope`。
-- **快照与磁盘不再有明文**：`config.docs.weknora.apiKey` 与 GitLab token 走同一套——落盘前写进密钥文件（`docs.weknora.apiKey` 段）、`state`/`snapshots.blob` 里置空（内存保留给运行期上传）、启动时从密钥文件补回。升级后第一次启动会把老库/老快照里的明文搬进密钥文件、并擦掉历史快照里的明文；重复启动不重复搬、不覆盖新 key。密钥文件写失败时明文留在 state 里（宁可这次落盘多带一份，也不能让重启后上传变成「没配全」）。
+- **快照与磁盘不再有明文**：`config.docs.weknora.apiKey` 与 GitLab token 走同一套——落盘前写进密钥文件（`docs.weknora.apiKey` 段）、`state`/`snapshots.blob` 里置空（内存保留给运行期上传）、启动时从密钥文件补回。升级后**第一次启动就会完成迁移**：老库/老快照里的明文先进密钥文件，随即把 `meta.state` / `state.json` 换成已剥离版本（条件落盘一次，不需要再点一次保存；落盘失败只 warn，宿主照常启动、明文留着但不丢 key），并用同一次启动擦掉历史快照里的明文；重复启动不重复搬、不覆盖新 key。**历史快照里的明文 key 会被永久擦除，即使当前未配置 key 也会擦**——回滚这些快照不会带回 key（拿到的是当前密钥文件里的 key 或空值）。密钥文件写失败时明文留在 state 里（宁可这次落盘多带一份，也不能让重启后上传变成「没配全」）。
 - **回滚代价**：回退到旧版本后，旧代码不会从密钥文件取 apiKey，**需要重新填一次 API Key**（或在回滚前保留旧快照）。`/state` 形状不变（`apiKey` 恒空 + `apiKeySet` 表示是否已配置）。
 
 验证：`tests/docs-config.test.mjs`（8 形态单测 + 真 HTTP 响应原文 + 红绿）、`tests/secrets-migration.test.mjs`（state/快照无明文、重开后真打一次上传、老库与历史快照迁移幂等、单文件模式、密钥写失败不丢 key）；`npm run check` 全绿。

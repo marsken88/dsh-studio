@@ -139,6 +139,11 @@ test('buildDocsConfig：provider/perProject 的枚举手误仍带值（保留可
     assert.equal(caught.invalid[0].value, value, '非标量 / 超长值只给类型标签')
     assert.ok(!JSON.stringify(caught.invalid).includes('LEAK'), '密钥片段不许出现在 invalid 里')
   }
+  /* undefined（键在、没给值）要与 null 区分开：面板要能看出「没填」还是「填了 null」。 */
+  let missingError
+  try { buildDocsConfig(BASE, { foo: undefined }) } catch (error) { missingError = error }
+  assert.equal(missingError.invalid[0].key, 'docs.foo')
+  assert.equal(missingError.invalid[0].value, '（缺失）', 'undefined 值给「缺失」，不是 null')
 })
 
 test('buildDocsConfig：保存后全部 weknora-ish 生效范围都要配齐（Q6 裁定 A）', () => {

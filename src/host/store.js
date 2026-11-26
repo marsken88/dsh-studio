@@ -260,6 +260,10 @@ export class StudioStore {
     /* 加载完成就把本进程的基础版本对齐磁盘 —— 单写者校验拿它比对，
        没这一步第一次写就会误判成"被其它进程改过"。 */
     this.baseRevision = this.state.revision
+    /* 落盘里是否还带明文 apiKey（升级前的 state）。必须在 #hydrateSecrets **之前**取：
+       hydration 会把密钥文件里的 key 填回内存，之后就分不清「磁盘上本来就是明文」和「刚从密钥文件补回来的」，
+       每次启动都会误判成需要迁移、白白多写一条快照。 */
+    const hadPlaintextDocsKey = String(this.state.config.docs?.weknora?.apiKey ?? '').trim() !== ''
     await this.#hydrateSecrets()
     /* BUG-002 B 段的一次性迁移：老库/老快照里的明文 apiKey 先进密钥文件，再擦掉历史快照里的明文。
        顺序不能反 —— 万一擦完就崩，密钥文件里已经有值，重启还能补回；反过来则可能把唯一副本擦掉。 */
@@ -268,6 +272,15 @@ export class StudioStore {
     if (imported) {
       await this.#persist()
       console.log(`[dsh-studio] imported ${this.file} into ${this.dbFile}`)
+    } else if (hadPlaintextDocsKey && docsKeySafe) {
+      /* 评审必修（BUG-002）：只擦快照不够 —— meta.state / state.json 里的明文原本要等下一次有人保存配置
+         才消失，而验收口径是「首启之后磁盘上就搜不到」。这里条件落盘一次，把它换成已剥离版本。
+         失败只 warn、绝不阻断宿主启动：失败即回到现状（明文留着，但 key 没丢）。 */
+      try {
+        await this.#persist()
+      } catch (error) {
+        console.warn('[dsh-studio] boot persist after docs-key migration failed:', error?.message ?? error)
+      }
     }
     // 历史数据里的「阻塞」曾经是一列；现在它是卡上的标记。
     for (const task of this.state.tasks) {
@@ -622,8 +635,11 @@ export class StudioStore {
 
   /**
    * 擦掉历史快照里的明文 apiKey（升级前写进去的行，不擦就会一直留在 snapshots.blob 里）。
-   * 只在密钥确实已进密钥文件时擦（keySafe），否则宁可暂时留着。按行重写、已擦过的行直接跳过 → 幂等。
-   * 回滚快照时 apiKey 是空串，restoreSnapshot 会用 #hydrateSecrets 从密钥文件补回，不会丢 key。
+   * 真实规则（评审校正过的口径）：keySafe 为 true 就擦 —— 而 #migrateDocsKey 在「内存里没有明文 key」
+   * （当前压根没配 key）时也返回 true，所以**历史快照里那份唯一的明文同样会被擦掉，且不可逆**：
+   * 之后回滚这些快照，apiKey 是空串，restoreSnapshot 只会从当前密钥文件补回（有就是当前 key，没有就是空）。
+   * 这是有意的取舍：明文不得留在任何输出面，历史快照不是例外（已写进发布说明）。
+   * 按行重写、已擦过的行直接跳过 → 幂等；一次最多 snapshotLimit 行，没有新增 IO。
    */
   #scrubLegacySnapshots(keySafe = false) {
     if (this.db === null || this.secrets === null || keySafe !== true) return

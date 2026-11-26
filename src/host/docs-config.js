@@ -30,7 +30,7 @@ const isPlainObject = value => value !== null && typeof value === 'object' && !A
    · 其余：一律只给类型标签，不带内容、不带长度（`weknora.*` 任何字段含 baseUrl/tenantId/knowledgeBaseId
      与未知字段名、`docs`/`weknora`/`perProject` 整块形状错、非标量值）。
    白名单内的字符串另有长度闸：误把长 key 填进 provider 时不能再开一条回显面。 */
-const TYPE_LABELS = { string: '（字符串）', number: '（数字）', boolean: '（布尔）', object: '（对象）', undefined: '（null）' }
+const TYPE_LABELS = { string: '（字符串）', number: '（数字）', boolean: '（布尔）', object: '（对象）', undefined: '（缺失）' }
 const ECHO_MAX = 40
 const isProviderPath = key => key === 'provider' || key.startsWith('perProject.')
 
