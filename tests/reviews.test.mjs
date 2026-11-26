@@ -145,3 +145,33 @@ test('需求链接写坏了直接报错，不再静默存成空串（issue #9 �
     rmSync(dir, { recursive: true, force: true })
   }
 })
+test('名册里两位不同专家不算自审：架构师 可以评审 支付架构师 的稿', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'dsh-design-roster-'))
+  const store = new StudioStore(join(dir, 'state.json'), { dbFile: join(dir, 'state.db'), secrets: new SecretStore(join(dir, '.secrets.json')) })
+  try {
+    await store.ready
+    await store.mutate(state => {
+      state.config.experts = [
+        { id: 'arch', name: '架构师', role: 'architect', enabled: true },
+        { id: 'pay-arch', name: '支付架构师', role: 'architect', enabled: true },
+        { id: 'dev', name: '开发工程师', role: 'dev', enabled: true },
+      ]
+      state.tasks.push({
+        id: 't-d3', code: 'DEV-003', title: '名册判自审', status: 'design', role: 'architect',
+        requirementId: '', checklist: [], artifacts: [], comments: [], history: [], cases: [], blocked: null,
+      })
+    })
+    await saveTaskDesign(store, 't-d3', { drafts: [{ id: 'a', name: '方案 A', link: 'https://x/a', by: '支付架构师' }] }, '支付架构师')
+    await assert.rejects(
+      () => saveTaskDesign(store, 't-d3', { status: 'approved', chosenId: 'a' }, '支付架构师'),
+      /设计不能自审/,
+      '同一个人（名字完全相同）仍然算自审',
+    )
+    const approved = await saveTaskDesign(store, 't-d3', { status: 'approved', chosenId: 'a' }, '架构师')
+    assert.equal(approved.status, 'approved', '名册里另一位专家评审必须放行（「架构师」⊂「支付架构师」不算自审）')
+  } finally {
+    store.db?.close?.()
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+

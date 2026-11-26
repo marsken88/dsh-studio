@@ -81,7 +81,17 @@ export async function saveTaskDesign(store, taskId, incoming, by = '人') {
     const current = sanitizeDesign(before.design)
     const drafts = patch.drafts !== undefined ? patch.drafts : (current?.drafts ?? [])
     const authors = [...new Set(drafts.map(item => String(item?.by ?? '').trim()).filter(Boolean))]
-    if (authors.length > 0 && authors.every(name => isSelfReview(name, actor))) {
+    /* 「架构师」⊂「支付架构师」这种**名册里两位不同专家**不算自审：
+       isSelfReview 用名字子串判（为了「开发」= 「开发工程师」这类岗位简称），
+       于是同一岗位下的两位专家互相评审会被误判成自审（真机 2026-11-26：REQ-001 / REQ-2026-008
+       的非作者补签被拒两次，卡在设计列卡了一整天）。 */
+    const roster = new Set((store.snapshot().config?.experts ?? []).map(item => String(item?.name ?? '').trim()).filter(name => name !== ''))
+    const selfReview = authors.length > 0 && authors.every(name => {
+      if (name === actor) return true
+      if (roster.has(name) && roster.has(actor)) return false
+      return isSelfReview(name, actor)
+    })
+    if (selfReview) {
       throw new Error(`设计不能自审：这 ${drafts.length} 稿都是「${actor}」放的。评审结论要另一个专家或人来下（例如 @架构师 代评审，或用面板以「人」的身份通过），通过后再定案推进`)
     }
   }
