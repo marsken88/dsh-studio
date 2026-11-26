@@ -436,6 +436,22 @@ export function mergeConfig(saved) {
   }
 }
 
+/* /config 的顶层键白名单 = defaultConfig() 的键。
+   以前传扁平键（例如面板表单里就叫 agentsMaxConcurrent）会 200 但什么都不改，
+   调用方以为保存成功；现在直接抛 config_unknown_key，由 /config 映射成 400。 */
+const CONFIG_META_KEYS = new Set(['by', 'confirm', 'reason'])
+
+export function assertConfigKeys(patch) {
+  const body = patch !== null && typeof patch === 'object' ? patch : {}
+  const allowed = new Set(Object.keys(defaultConfig()))
+  const unknown = Object.keys(body).filter(key => !allowed.has(key) && !CONFIG_META_KEYS.has(key))
+  if (unknown.length === 0) return body
+  const error = new Error(`/config 不认这些顶层键：${unknown.join('、')}。配置是分组形状——并发上限写 {"agents":{"maxConcurrent":3}}，而 {"agentsMaxConcurrent":3} 会被拒。可用键：${[...allowed].join('、')}`)
+  error.code = 'config_unknown_key'
+  error.unknown = unknown
+  throw error
+}
+
 /** 评审闸门：默认开（只有显式 false 才算关）。默认值 / mergeConfig / applyConfig / 运行时判据共用这一份。 */
 export function sanitizeReviewGate(raw) {
   const input = raw !== null && typeof raw === 'object' ? raw : {}

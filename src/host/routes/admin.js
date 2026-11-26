@@ -37,6 +37,11 @@ if (method === 'POST' && route === '/config') {
   try {
     await host.applyConfig(store, body)
   } catch (error) {
+    /* 顶层键白名单（agentsMaxConcurrent 这类扁平键以前会被静默丢掉）：明确 400，并列出认得的键。 */
+    if (error?.code === 'config_unknown_key') {
+      host.sendJson(res, 400, { ok: false, code: error.code, error: error.message, unknown: error.unknown ?? [] })
+      return true
+    }
     if (error?.code === 'docs_config_invalid' || error?.code === 'docs_config_not_ready') {
       host.sendJson(res, 400, {
         ok: false, code: error.code, error: error.message,

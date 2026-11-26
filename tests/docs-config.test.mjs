@@ -381,6 +381,26 @@ test('真 HTTP：清空项目覆盖（降级）与空表可用', async () => {
   assert.deepEqual((await readDocs()).perProject, {}, '显式空表 = 清空覆盖（配合全局用）')
 })
 
+/* ── 二·b、/config 顶层键白名单（扁平键不许静默丢掉） ───────────────── */
+
+test('真 HTTP：扁平键 agentsMaxConcurrent 被 400 拒绝，并指出正确的分组形状', async () => {
+  const res = await api('/config', { agentsMaxConcurrent: 3 })
+  assert.equal(res.status, 400, '扁平键以前是 200 但什么都不改')
+  assert.equal(res.body.code, 'config_unknown_key')
+  assert.ok(res.body.unknown.includes('agentsMaxConcurrent'), '要指出是哪个键')
+  assert.match(res.body.error, /maxConcurrent/, '要给出正确的分组形状（{"agents":{"maxConcurrent":3}}）')
+  const state = (await api('/state')).body.state
+  assert.equal(state.config.agents.maxConcurrent, 2, '被拒时配置一项都不能改')
+})
+
+test('真 HTTP：分组形状照旧生效，请求元信息 by 不拦', async () => {
+  const res = await api('/config', { agents: { maxConcurrent: 3 }, by: 'config-keys-test' })
+  assert.equal(res.status, 200)
+  assert.equal((await api('/state')).body.state.config.agents.maxConcurrent, 3)
+  // 复原，别把 3 留给后面的用例
+  await api('/config', { agents: { maxConcurrent: 2 } })
+})
+
 /* ── 三、源码守卫：行为对了但接线被改回去，也要在这里响 ───────────────── */
 
 test('源码守卫：index.js 走 writeDocsConfig、admin.js 映射两个 400 码', () => {

@@ -110,6 +110,12 @@
 - `⑥e`：探针原来把自己那张卡挪进 test 列，但进「待测试」要过评审门禁、更新被拒，卡留在 review → `dryRun` 永远 0 张、确认弹窗不出现。改成造一张**直接落在 test** 的探针卡；并加一行日志把 dryRun 的 count 打出来，分清是前提问题还是 UI 问题。
 - 预期内的 400：④c 故意让服务端 400（半配置保存被拒），Chrome 会记成 console error；按「负向用例」口径摘掉，不再误伤最后那条「全程没有 pageerror」。
 
+### `/config` 不认的顶层键直接 400（不再 200 静默忽略）
+
+- 现象：`POST /config {"agentsMaxConcurrent":3}` 返回 **200 但一项都没改**（面板表单里就叫这个名字，直接打接口的人很容易中招）。
+- 改法：`applyConfig` 先过 `assertConfigKeys`（白名单 = `defaultConfig()` 的键 + 请求元信息 `by/confirm/reason`），不认的键抛 `config_unknown_key` → `/config` 映射 400，正文列出未知键与可用键，并给出分组形状示例。
+- 顺带：`{"agents":{"maxConcurrent":3}}` 这类分组形状照旧生效（真 HTTP 用例覆盖）。
+
 ## [0.17.2] — 2026-11-26
 
 ### 卡「跑完就停在原地 / 重启后不接着跑」：正常结束有印记，重启会续跑
