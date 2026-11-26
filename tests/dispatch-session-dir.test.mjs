@@ -183,3 +183,37 @@ test('启动自愈：宿主没给 sessionPersistence / 没给工作区列表时�
   assert.equal(await throwing.healWorkspaceMembership(), 0)
   assert.ok(throwing.log.some(entry => entry.line.includes('读工作区列表失败')))
 })
+
+// 2026-11-26 真机：会话按创建时的 cwd 归组，卡换了派单目录再 attach 会同时留在两个工作区；
+// 宿主启动校验直接失败（workspaceRegistry 起不来 → /studio-api 全挂，.218 两次）。
+
+test('joinWorkspace：先把会话从旧工作区摘掉再挂新的', async () => {
+  const attached = []
+  const detached = []
+  const oldWs = {
+    id: 'ws-old', title: '旧工作区', sessionIds: ['studio-t-9-dev'],
+    attachSession: async () => {},
+    detachSession: async id => { detached.push(id); oldWs.sessionIds = oldWs.sessionIds.filter(x => x !== id) },
+  }
+  const newWs = { id: 'ws-new', title: '新工作区', sessionIds: [], attachSession: async id => { attached.push(id) } }
+  const ctx = { workspaceRegistry: { list: () => [oldWs, newWs], resolveByPath: async () => newWs }, get: () => undefined }
+  const store = { snapshot: () => ({ config: { agents: {} }, tasks: [], requirements: [] }), mutate: async fn => fn({}) }
+  const dispatcher = new Dispatcher(ctx, store)
+  const ok = await dispatcher.joinWorkspace({ workspace: newWs, dir: '/tmp/x', sessionId: 'studio-t-9-dev' })
+  assert.equal(ok, true)
+  assert.deepEqual(detached, ['studio-t-9-dev'], '旧工作区的登记要先摘掉')
+  assert.deepEqual(attached, ['studio-t-9-dev'], '再挂到新工作区')
+  assert.deepEqual(oldWs.sessionIds, [])
+})
+
+test('joinWorkspace：只在新工作区里时不乱摘', async () => {
+  const attached = []
+  const detached = []
+  const only = { id: 'ws-1', title: '唯一', sessionIds: ['studio-t-9-dev'], attachSession: async id => { attached.push(id) }, detachSession: async id => { detached.push(id) } }
+  const ctx = { workspaceRegistry: { list: () => [only], resolveByPath: async () => only }, get: () => undefined }
+  const store = { snapshot: () => ({ config: { agents: {} }, tasks: [], requirements: [] }), mutate: async fn => fn({}) }
+  const dispatcher = new Dispatcher(ctx, store)
+  await dispatcher.joinWorkspace({ workspace: only, dir: '/tmp/x', sessionId: 'studio-t-9-dev' })
+  assert.deepEqual(detached, [], '目标就是它自己，不该摘')
+  assert.deepEqual(attached, ['studio-t-9-dev'])
+})

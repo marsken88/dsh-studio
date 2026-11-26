@@ -12,7 +12,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
 
-import { Dispatcher, configureDispatcher, nudgeInstruction } from '../src/host/dispatcher.js'
+import { Dispatcher, RUN_LOG, configureDispatcher, nudgeInstruction, recordRun, settleRun } from '../src/host/dispatcher.js'
 import { configureExecutor, updateTask } from '../src/host/executor.js'
 import { SecretStore, StudioStore } from '../src/host/store.js'
 
@@ -305,4 +305,35 @@ test('「已完成」列永远不派：就算被勾进自动派单也不派', as
   })
   await dispatcher.tick()
   assert.equal(deliveries.length, 0, '完成的卡不该再叫 AI 跑一遍')
+})
+
+// ---------------------------------------------------------------- 并发槽位与派单日志
+// 2026-11-26 真机：产品 @架构师 的派单 + tick 各起了一次会话，settle 只标了最新一条 run，
+// 更早那条永远 doneAt=0；而 @派活/「马上处理」又完全绕过并发上限，isolation=none 时
+// 两张卡能在同一目录同时改代码。
+
+test('settleRun：同一会话的所有未结束派单都收口，不留 doneAt=0 的幽灵记录', () => {
+  RUN_LOG.length = 0
+  try {
+    recordRun({ taskId: 't-x', sessionId: 'studio-t-x-dev', expert: 'dev' })
+    recordRun({ taskId: 't-x', sessionId: 'studio-t-x-dev', expert: 'dev' })
+    settleRun('studio-t-x-dev')
+    const mine = RUN_LOG.filter(entry => entry.sessionId === 'studio-t-x-dev')
+    assert.equal(mine.length, 2)
+    assert.ok(mine.every(entry => entry.doneAt > 0), '两条都要有 doneAt（以前只标最新那条）')
+  } finally {
+    RUN_LOG.length = 0
+  }
+})
+
+test('并发槽满时手动派单被拒；同一槽位重派放行', async t => {
+  const { dispatcher } = await harness(t, {
+    tasks: [{ id: 't-1' }, { id: 't-2' }],
+    autoStatuses: ['test'],
+  })
+  await dispatcher.tick()
+  assert.equal(dispatcher.running.size, 1, '第一张卡占住唯一槽位（isolation=none → 有效并发 1）')
+  await assert.rejects(() => dispatcher.launchNow('t-2'), /并发已满/)
+  await dispatcher.launchNow('t-1')
+  assert.equal(dispatcher.running.size, 1, '同一张卡同一位专家是替换，不占新名额')
 })
