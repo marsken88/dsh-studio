@@ -2602,7 +2602,7 @@ export function apply(ctx) {
   commentTask,
   getDispatcher: () => activeDispatcher,
   gitlabRequest,
-  gitlabMergeRequestDetail, applyConfig, ensureWorktree, mergeMergeRequest, publicState, publishMergeGate, readJsonBody, removeWorktree, sendJson, serviceOf, upsertById, workProjectOf,
+  gitlabMergeRequestDetail, applyConfig, autoVerifyCoding, ensureWorktree, mergeMergeRequest, publicState, publishMergeGate, readJsonBody, removeWorktree, sendJson, serviceOf, upsertById, workProjectOf,
   deleteProjectFolder: (store, projectId) => deleteProjectFolder(store, projectId, larkJson) })
     configureAgentsRoutes({ publicState, readJsonBody, sendJson, getDispatcher: () => activeDispatcher })
     configureConnectRoutes({ mirrorCardsToBitable, applyConfig, installedPackages, publicState, readJsonBody, resolvePackageName, runPluginCli, sendJson, upsertById, getSyncTimer: () => syncTimer })
