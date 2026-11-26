@@ -407,11 +407,19 @@ export function recordRun(entry) {
 }
 
 export function settleRun(sessionId) {
-  const entry = RUN_LOG.find(item => item.sessionId === sessionId && item.doneAt === 0)
-  if (entry === undefined) return
-  entry.doneAt = Date.now()
-  entry.ms = Math.max(0, entry.doneAt - entry.at)
-  flushRunLog()
+  /* 同一个会话可能被派过多次（@ 派活 + tick、或手动重派），RUN_LOG 里会有多条 doneAt=0。
+     以前只标最新一条，更早那条永远停在 doneAt=0 / ms=0（成本视图里的幽灵记录，
+     2026-11-26 真机就攒出一条 09:16:46 永不结束的架构师记录）。会话空闲 = 它名下所有
+     未结束的派单都结束了，一次全收口。 */
+  const now = Date.now()
+  let changed = false
+  for (const entry of RUN_LOG) {
+    if (entry.sessionId !== sessionId || entry.doneAt !== 0) continue
+    entry.doneAt = now
+    entry.ms = Math.max(0, now - entry.at)
+    changed = true
+  }
+  if (changed) flushRunLog()
 }
 
 export function runSummary() {
@@ -1117,6 +1125,13 @@ export class Dispatcher {
     const expert = resolved.expert
     const sessionId = `studio-${task.id}-${expert.id}`
     const slot = `${task.id}#${expert.id}`
+    /* 并发槽位：tick 在循环里判过一次，但「马上处理」/@ 派活这类手动入口以前绕过它 ——
+       isolation=none 时两张卡能在同一目录同时改代码，正是 parallel-guard 要防的。
+       同一个槽位再派（同一张卡同一位专家）是替换，不占新名额。 */
+    const limit = effectiveConcurrency(cfg).limit
+    if (this.running.has(slot) === false && this.running.size >= limit) {
+      throw new Error(`并发已满（当前上限 ${limit} 个会话）：等正在跑的会话结束再派；或把「设置 → 自动派单 → 代码隔离」改成 worktree 后再调大并发；也可以先在跑的卡上点「停止」`)
+    }
     /* 这是这一列的第几次尝试（催派 / 崩溃续跑的计数，上限见 config.agents.retry.max）：
        - 人手动派的（马上处理 / @ 派活）：重新计数，别让人被 AI 的失败次数挡住；
        - 同一列再来一次（催派）或重启续跑：在原有次数上 +1；
@@ -1470,6 +1485,25 @@ export class Dispatcher {
    * 刚 create 出来的会话，头部可能还没落进持久化快照（attach 会读它校验 cwd），
    * 所以给几次重试；仍然失败只记一行日志，不影响派单本身。
    */
+  /** 把会话从其它工作区的名单里摘掉（只留它真正归的那个）。宿主启动校验靠这条不重复。 */
+  async detachFromOtherWorkspaces(keepId, sessionId) {
+    const registry = this.ctx?.workspaceRegistry
+    if (typeof registry?.list !== 'function') return
+    let entities = []
+    try { entities = registry.list() } catch (error) { this.note(`workspace list: ${error?.message ?? error}`); return }
+    for (const entity of entities) {
+      if (String(entity?.id ?? '') === String(keepId)) continue
+      if (typeof entity.detachSession !== 'function') continue
+      if (!(entity.sessionIds ?? []).some(id => String(id) === String(sessionId))) continue
+      try {
+        await entity.detachSession(sessionId)
+        this.note(`会话 ${sessionId} 从工作区 ${entity.title ?? entity.id} 摘除（同一会话只能挂一个工作区）`)
+      } catch (error) {
+        this.note(`从旧工作区摘除会话失败：${error?.message ?? error}`)
+      }
+    }
+  }
+
   async joinWorkspace({ workspace, dir, sessionId }) {
     const registry = this.ctx?.workspaceRegistry
     let target = workspace
@@ -1477,6 +1511,10 @@ export class Dispatcher {
       try { target = await registry.resolveByPath(dir) } catch (error) { this.note(`workspace lookup: ${error?.message ?? error}`) }
     }
     if (target === undefined || typeof target.attachSession !== 'function') return false
+    /* 同一个会话只能属于一个工作区：宿主启动时会校验，一个 id 出现在两个工作区里会让
+       workspaceRegistry 起不来（/studio-api 全挂，2026-11-26 .218 两次实测）。会话按
+       创建时的 cwd 归组，卡后来换了派单目录再 attach 就会重复登记 —— 先摘旧的再挂新的。 */
+    await this.detachFromOtherWorkspaces(target.id, sessionId)
     let last
     for (const wait of WORKSPACE_ATTACH_DELAYS) {
       if (wait > 0) await sleep(wait)
@@ -1527,6 +1565,7 @@ export class Dispatcher {
       const entity = entities.get(item.workspaceId)
       if (entity === undefined) continue
       try {
+        await this.detachFromOtherWorkspaces(entity.id, item.sessionId)
         await entity.attachSession(item.sessionId)
         attached += 1
       } catch (error) {

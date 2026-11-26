@@ -1354,3 +1354,18 @@ header id ... and cwd identify ".../studio-t-5d1d2ad4-architect/..."` —— 宿
 修法：归档改到 `~/.dsh/sessions-archive/<slug>/<id>.stale-<ts>`（`archiveRoot()`），
 并把 .218 上 4 个 `.stale-*` 挪出 `sessions/`；重启后无激活错误，接口恢复。
 单测 `model-drift.test.mjs` 断言 `sessions/<slug>/` 下不再留 `.stale-*`。
+
+## 手动派活的并发槽位与派单日志（2026-11-26）
+
+现象：本机 `design` 列两张卡迟迟不自动派单，而「我 mention 一下就能派」。查下来不是派单引擎坏了：
+
+- 09:16:45 产品在 p3 上 @架构师，平台按评论派单拉起架构师会话（`studio-t-56eb6f64-architect`），一直跑到 09:32；
+- 本机 `isolation=none` → `effectiveConcurrency` 把有效并发压到 1，唯一槽位被这个会话占着，tick 按规则在等；
+- 我 09:19 用 `studio_task_mention` 手动派单，这个入口**不检查槽位**，于是又起了一个会话 —— 看起来像「mention 能派、tick 不能派」。
+
+顺手修的两处：
+
+1. `launch()` 统一判并发槽位：手动入口满了直接报错（附三条出路），同槽位重派放行；
+2. `settleRun()` 改为把同一会话名下**所有**未结束 run 一次收口（以前只标最新一条，更早那条永远 `doneAt=0`，成本视图里的幽灵记录）。
+
+验证：`tests/dispatch-continue.test.mjs` 新增 2 条；`npm run check` 591 条、本地与 `TZ=UTC` 全绿。
