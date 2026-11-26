@@ -1256,6 +1256,9 @@ function Drawer({ task, state, onClose, onChanged, onOpenTask = null }) {
   )
   /* 子卡没到「已完成」时主卡签不了（服务端会拒）——按钮上先说清楚，别等人点了才发现没反应。 */
   const pendingChildren = (state.tasks ?? []).filter(item => String(item.parent ?? '') === String(task.id ?? '') && item.status !== 'done')
+  /* 子卡按钮上要显示它现在的列名；这个 helper 在合并时被丢掉过一次（只剩调用），
+     结果一开抽屉就 ReferenceError → 整页「工作空间渲染失败」。 */
+  const statusLabelOf = id => (state.statuses ?? []).find(item => item.id === id)?.label ?? String(id ?? '')
   const collabRequirement = (state.requirements ?? []).find(item => item.id === task.requirementId) ?? null
   const collabDesign = task.design ?? null
   const collabDrafts = Array.isArray(collabDesign?.drafts) ? collabDesign.drafts : []
