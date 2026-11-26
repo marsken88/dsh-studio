@@ -6,11 +6,29 @@
 import { docSinksFor } from './doc-sink.js'
 import { uploadToWeknora } from './weknora-sink.js'
 
+/* 同一份交付物的同步要串行。
+   store.mutate 的串行只保护「单次写」，而一次同步是「读快照 → 网络 → 写台账」多段流程：
+   两路并发都读到同一个旧 knowledgeId，于是各删一次旧、各建一份新，台账只能记最后一个，
+   另一份就成了知识库里永久没人认领的孤儿（架构师探针已复现）。
+   换 key（不同交付物）互不影响，排队只发生在同一件身上。 */
+const inflight = new Map()
+
 /**
  * @param io.writeFeishu 已有的飞书写入（executor 注入，避免 executor ↔ doc-sync 成环）
  * @param io.buildMarkdown 渲染交付物正文（同上）
  */
-export async function syncArtifact(store, taskId, artifactId, io = {}) {
+export function syncArtifact(store, taskId, artifactId, io = {}) {
+  const key = `${taskId}::${artifactId}`
+  // 前一轮失败不能连坐下一轮：先吞掉它的结果，再执行自己这份（失败仍抛给自己的调用方）。
+  const run = (inflight.get(key) ?? Promise.resolve()).catch(() => {}).then(() => runSync(store, taskId, artifactId, io))
+  inflight.set(key, run)
+  return run.finally(() => {
+    // 只清自己这一棒：后面还有人排队时，那把 entry 已经换成它的 promise 了。
+    if (inflight.get(key) === run) inflight.delete(key)
+  })
+}
+
+async function runSync(store, taskId, artifactId, io = {}) {
   const { writeFeishu, buildMarkdown } = io
   const state = store.snapshot()
   const task = state.tasks.find(item => item.id === taskId)

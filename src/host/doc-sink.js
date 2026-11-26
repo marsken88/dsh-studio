@@ -7,7 +7,14 @@
 /** 支持的出口。both = 两边都写，飞书为主（人看的先落地）。 */
 export const DOC_PROVIDERS = ['feishu', 'weknora', 'both']
 
-const pickProvider = value => (DOC_PROVIDERS.includes(String(value ?? '').trim()) ? String(value).trim() : '')
+/* 只认真正的字符串：`String(value)` 会把数组、boxed string、带 toString 的对象一起
+   字符串化，让 `['weknora']` / `new String('both')` 冒充合法出口（非法值分了不该分的出口）。
+   归一之后仍不在集合里的一律给空串，由调用方回落到 feishu —— 不留半配置状态。 */
+const pickProvider = value => {
+  if (typeof value !== 'string') return ''
+  const normalized = value.trim().toLowerCase()
+  return DOC_PROVIDERS.includes(normalized) ? normalized : ''
+}
 
 /** WeKnora 连接的形状。空串表示还没配，不报错（配错才报错）。 */
 export function sanitizeWeKnoraSink(raw) {
@@ -78,11 +85,9 @@ export function docSinksFor(config, requirement) {
   return { provider, sinks: [provider], primary: provider }
 }
 
-/** 台账键：同一份交付物换出口不换身份（幂等键，别用远端文档 id）。 */
-export function artifactDocKey(task, artifact) {
-  const head = String(task?.code ?? '').trim() || String(task?.id ?? '').trim()
-  return `${head}::${String(artifact?.id ?? '').trim()}`
-}
+/* 幂等键就是台账里的 knowledgeId 本身（REQ-2026-001 定案「以台账 docId 作幂等键」）：
+   同步时拿上一轮的 knowledgeId 先删旧再建新。这里不再另造身份键 —— 没有「按身份查旧文档」
+   的能力时，那种键永远只能是字符串，留着只会让人以为幂等靠它。 */
 /** 交付物在每个出口上的台账。形状很小，但要能在重启后活下来（换出口不丢历史）。 */
 export function sanitizeArtifactDocs(raw) {
   const src = raw !== null && typeof raw === 'object' ? raw : {}
