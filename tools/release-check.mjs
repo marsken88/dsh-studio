@@ -124,7 +124,10 @@ if (wantProbes) {
     if (String(process.env.STUDIO_BASE ?? '').trim() === '') {
       problems.push('--probes 现在还会跑用例库探针，需要 STUDIO_BASE（例：STUDIO_BASE=http://192.168.120.218:18080），不猜默认地址免得打到别的机器上')
     }
-    const probes = ['tools/visual/pages-probe.mjs', 'tools/visual/toast-probe.mjs', 'tools/visual/drawer-probe.mjs', 'tools/visual/cases-probe.mjs', 'tools/visual/tiers-probe.mjs', 'tools/visual/a11y-probe.mjs', 'tools/visual/empty-state-probe.mjs']
+    /* panel-probe 是真浏览器挂真 client.js、逐页断言并把 /studio-api 反代到 STUDIO_BASE：
+       2026-11-26 就是它（手工跑）抓出抽屉里 statusLabelOf 未定义导致整页崩，而 npm test 与
+       verify:pages 全绿。它自带清理、跑完删自己造的数据，所以发版前固定跑一遍。 */
+    const probes = ['tools/visual/pages-probe.mjs', 'tools/visual/toast-probe.mjs', 'tools/visual/drawer-probe.mjs', 'tools/visual/cases-probe.mjs', 'tools/visual/tiers-probe.mjs', 'tools/visual/a11y-probe.mjs', 'tools/visual/empty-state-probe.mjs', 'tools/visual/panel-probe.mjs']
     /* 真机功能巡检。2026-11-23 的教训：假宿主夹具数据太简单，
        「设置页四个面板 PANE is not defined」这种崩只有真数据才暴露，
        而它一路过了 npm test、verify:pages，发到目标机才被 verify:sweep 抓到。

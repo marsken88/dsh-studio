@@ -133,6 +133,11 @@
 - 改法：抽屉对 AI 签字直接给输入框 + 「以我的身份重新签字」；路由在覆盖前把前一条写进历史（`signoff-override：覆盖前一次签字（谁 / 什么口径）：结论摘要`）。
 - 顺带统一口径：AI 签字有 `ai`（路由写）与 `agent`（工具写）两种值，抽屉以前只认 `agent`，导致面板看不到 AI 签名与覆盖入口；现在两种都认（闸门 `isAiSignoff` 一直是两种都认的）。
 
+### 面板探针挂进 `npm run release:preflight`
+
+- `--probes` 现在包含 `tools/visual/panel-probe.mjs`（真浏览器挂真 client.js，逐页 96 项断言；自带清理）。发版前固定跑，不再只靠手工。
+- 真机实测一次全量 preflight：pages 52 · toast 7 · drawer 15 · cases 8 · tiers 32 · a11y 全绿 · empty-state 11 · **panel 96/96** · smoke · sweep，全部通过。
+
 ## [0.17.2] — 2026-11-26
 
 ### 卡「跑完就停在原地 / 重启后不接着跑」：正常结束有印记，重启会续跑
