@@ -6,12 +6,12 @@
 
 | 项 | 值 |
 | --- | --- |
-| dsh-studio | `package.json` `version: 0.17.2` |
+| dsh-studio | `package.json` `version: 0.18.0` |
 | DeepSeek Harness | `0.2.2-rc.1`（`dsh --version`） |
 | Node | `v24.22.2`（Linux 目标机）；本机 Windows `v24.19.0` |
 | 目标系统 | Ubuntu 24.04，`dsh web` 监听 `18080`，nginx `:80` 反代并注入 `dsh-auth-*` cookie |
 | 插件安装方式 | npm：`dsh plugin --profile web add @marsken/dsh-studio`；本地开发：`add link:~/dsh-studio`（profile `web`） |
-| 验证范围 | 0.16.1：**纯文档补丁，代码与 0.16.0 逐字节相同**（只改 README / `docs/manual.md` / CHANGELOG），因此代码验证沿用 0.16.0：CI + 隔离实例真机 + 生产实例重启后复验（542 单测 / 0 失败 / `verify:fence` 8 条断言进 CI），外加一条 **npm 安装实测**（0.16.0 从 npm 装进干净 profile，`--dump-config` 认到插件、`/health` 200、无凭据 `/state` 401、伪造 Host 403、跨站 403、公开提单 200） |
+| 验证范围 | 0.18.0：`npm run check` 689 条测试；CI 连续绿（`main@2dd02be` 起）；目标机 `.218` 部署同版本后跑**全量 `release:preflight --probes`**（pages 52 / toast 7 / drawer 15 / cases 8 / tiers 32 / a11y 全绿 / empty 11 / panel 96/96 / smoke / sweep 全过）；真机修复项逐条在卡上留证据（派单同卡去重、签名覆盖、列未指派提示、代码事实核对基线、`/config` 顶层键白名单、四条 issue #164–#167） |
 | 兼容声明 | `engines.dsh: ">=0.2.2-rc.1"`、`dsh.compatibility.dshReleases: { "0.2.2-rc.1+": "compatible" }` |
 
 > 结论：只在 **0.2.2-rc.1** 上做过端到端验证。0.2.2 正式版、以及 `<0.2.2` 均未验证。
