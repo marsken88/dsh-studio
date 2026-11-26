@@ -31,7 +31,7 @@ export function driftNote(current, wanted, action = '归档旧会话并按配置
 
 /** DSH 的会话目录名：cwd 里的非字母数字压成 '-'，两端各包 '--'。
  *  例：`C:\\Users\\hp\\dsh-workspace` → `--C-Users-hp-dsh-workspace--`；
- *      `/home/lyf/dsh-workspace` → `--home-lyf-dsh-workspace--`。 */
+ *      `/home/<user>/dsh-workspace` → `--home-<user>-dsh-workspace--`。 */
 export function sessionWorkspaceSlug(cwd) {
   const text = String(cwd ?? '').trim()
   if (text === '') return ''

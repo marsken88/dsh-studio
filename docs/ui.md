@@ -417,9 +417,9 @@ Tailwind 产物被 `web/scripts/scope-css.mjs` 改写成 `[data-dsh-studio] .fix
 
 ## 真机验证（.218，2026-11-17）：逮到一个只有在真机才复现的 bug
 
-部署：`DSH_DEPLOY_HOST=192.168.120.218 DSH_DEPLOY_USER=lyf node tools/deploy.mjs` → `active=active files=41`。
+部署：`DSH_DEPLOY_HOST=192.0.2.10 DSH_DEPLOY_USER=<user> node tools/deploy.mjs` → `active=active files=41`。
 （脚本报的 `state=502` 是**假警报**：它 curl 的是 `127.0.0.1:18080`，而这台机器上 dsh 只绑在
-`192.168.120.218:18080`，用局域网地址请求是 200、rev 16887。）
+`192.0.2.10:18080`，用局域网地址请求是 200、rev 16887。）
 
 真机上跑出来的结果：
 - `tools/visual/smoke.mjs`：`ok: true`（30 张卡 / 100 行用例 / 面板没崩 / pageerror 空）。

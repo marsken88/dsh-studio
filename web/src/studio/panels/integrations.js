@@ -627,7 +627,7 @@ export function DocsSinkPanel({ config, onChanged }) {
           h('option', { value: 'both' }, '两个都写（飞书为主）'),
         )),
       fieldOf(h, 'WeKnora 地址',
-        h(TextField, { value: baseUrl, placeholder: 'http://192.168.120.200:8080/api/v1', onChange: event => setBaseUrl(event.target.value) }),
+        h(TextField, { value: baseUrl, placeholder: 'http://kb.example.com/api/v1', onChange: event => setBaseUrl(event.target.value) }),
         '带不带 /api/v1 都行；所有项目共用这一组 WeKnora 连接'),
       fieldOf(h, 'API Key',
         h(TextField, { value: apiKey, placeholder: weknora.apiKeySet ? '已配置（留空保持不变）' : 'sk-…', onChange: event => setApiKey(event.target.value) }),
