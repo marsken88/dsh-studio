@@ -138,6 +138,10 @@
 - `--probes` 现在包含 `tools/visual/panel-probe.mjs`（真浏览器挂真 client.js，逐页 96 项断言；自带清理）。发版前固定跑，不再只靠手工。
 - 真机实测一次全量 preflight：pages 52 · toast 7 · drawer 15 · cases 8 · tiers 32 · a11y 全绿 · empty-state 11 · **panel 96/96** · smoke · sweep，全部通过。
 
+### 会话归档目录可以清了（`npm run gc:archive`）
+
+- `~/.dsh/sessions-archive` 以前只增不减（派单被中止 / 模型漂移重建时把旧会话目录搬进去）。现在有 `tools/archive-gc.mjs`：**只删 dispatcher 自己命名的 `*.stale-<时间戳>`**，别人的目录一律保留；按「最近 30 天 + 最近 200 个」双闸保留，默认 dry-run。规则在 `src/host/archive-gc.js`（纯函数，4 条单测）。
+
 ## [0.17.2] — 2026-11-26
 
 ### 卡「跑完就停在原地 / 重启后不接着跑」：正常结束有印记，重启会续跑

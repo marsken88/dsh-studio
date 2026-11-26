@@ -316,6 +316,7 @@ studio_task_check          { id, itemId, note }         // 清单逐项勾，附
 | 看某张**真卡**的代码改动（逐文件 diff） | `STUDIO_DIFF_CARD=<标题片段> npm run probe:panel -- --base <端口>`：探针会打开那张卡 → 执行记录 → 代码改动，断言「分支 ← 基线」、文件数与逐行 patch，并截图 `tmp/probe/drawer-diff-real.png`；目标机开了登录时再加 `STUDIO_TOKEN=<会话令牌>`（登录返回的 token，或浏览器 `dsh-auth-*` cookie 的值） |
 | README 截图重拍 | `npm run shots -- --base http://127.0.0.1:<端口>` |
 | 云盘孤儿目录体检 / 清理 | `npm run drive:gc -- --base <端口>` / 加 `--apply` |
+| 会话归档目录清理（`~/.dsh/sessions-archive`，只删 `*.stale-<时间戳>`） | `npm run gc:archive`（预览）→ `npm run gc:archive -- --apply`；`--days 7 --keep 50` 可调保留窗口 |
 | 派单会话目录体检 / 清理幽灵卡 | `npm run gc:sessions`（预览）/ 加 `--apply` 才删。判据是「卡已不在台账里」，先看预览再删 |
 | 平台全闭环自检 | `STUDIO_BASE=… node tools/e2e-loop.mjs --k 3`（跑完自删） |
 | 真库能不能起 | `npm run smoke:store -- ~/.dsh/dsh-studio.db` |
