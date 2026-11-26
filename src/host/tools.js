@@ -1150,7 +1150,7 @@ export function registerTools(ctx, store) {
       const reason = text(args.reason, 500) ?? ''
       if (reason === '') throw new Error('reason is required')
       const task = await updateTask(store, args.id, { blocked: true, blockedReason: reason, blockedUntil: args.until, by: 'agent' })
-      host.getActiveDispatcher()?.abortTask?.(task.id)
+      host.getActiveDispatcher()?.abortTask?.(task.id, undefined, 'agent')
       return `已标记阻塞 ${task.id}（停在「${STATUSES.find(s => s.id === task.status)?.label ?? task.status}」）：${reason}`
     },
   }))

@@ -354,3 +354,15 @@ test('条件型阻塞：人工签字一到，tick 自动解除并正常派单', 
   assert.ok(dispatcher.running.size >= 1 || (task.dispatch !== null && task.dispatch !== undefined), '解除后这一轮就该派出去')
   assert.equal(state.tasks.length, 1)
 })
+
+test('停止留痕：abortTask 记下是谁停的，并在历史里写一行', async t => {
+  const { dispatcher, store } = await harness(t, { tasks: [{ id: 't-1' }], autoStatuses: ['test'] })
+  await dispatcher.tick()
+  assert.equal(dispatcher.running.size, 1)
+  const stopped = dispatcher.abortTask('t-1', undefined, '人')
+  assert.equal(stopped, 1)
+  const task = store.snapshot().tasks.find(entry => entry.id === 't-1')
+  assert.equal(task.dispatch.state, 'stopped')
+  assert.equal(task.dispatch.by, '人')
+  assert.ok((task.history ?? []).some(row => /停止：/.test(String(row.note ?? ''))), '历史里要写「停止：…」')
+})

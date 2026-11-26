@@ -180,7 +180,7 @@ export async function handleTaskRoute({ method, route, req, res, store, url }) {
       by: text(body.by, 60) ?? '人',
     })
     // 卡住就停手：把这个专家正在跑的会话收掉，避免它继续往前走。
-    host.getDispatcher()?.abortTask?.(id)
+    host.getDispatcher()?.abortTask?.(id, undefined, '人')
     host.sendJson(res, 200, { ok: true, task, state: host.publicState(store) })
     return true
   }
@@ -409,7 +409,7 @@ export async function handleTaskRoute({ method, route, req, res, store, url }) {
       }
     })
     // 卡没了，替它跑着的会话也要收摊，否则槽位一直被占着。
-    host.getDispatcher()?.abortTask?.(id)
+    host.getDispatcher()?.abortTask?.(id, undefined, '人')
     host.sendJson(res, 200, { ok: true, state: host.publicState(store) })
     return true
   }
