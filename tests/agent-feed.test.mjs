@@ -3,6 +3,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 
 import { approvalNote, createFeedBuffer, feedBody, parseStudioSession, readAssistantMessage, shouldFlush } from '../src/host/agent-feed.js'
+import { createFeedComments } from '../src/host/feed-comments.js'
 
 test('parseStudioSession：只认 studio-<taskId>-<expertId>', () => {
   assert.deepEqual(parseStudioSession('studio-t-1ba8dfdc-architect'), { taskId: 't-1ba8dfdc', expertId: 'architect' })
@@ -90,4 +91,25 @@ test('approvalNote：解释为什么拒绝，并告诉人怎么放行', () => {
   assert.match(note, /自动拒绝/)
   assert.match(note, /escalate sandbox/)
   assert.match(note, /设置 → 自动派单|手动跑/, '要给出放行办法')
+})
+
+test('执行播报：一个会话只建一条评论，后续更新同一条', async () => {
+  const added = []
+  const updated = []
+  const store = { snapshot: () => ({ config: { experts: [{ id: 'dev', name: '研发' }] } }) }
+  const commentTask = async (s, taskId, body, author, kind) => {
+    added.push(body)
+    const created = { id: 'c-feed1', body, author, kind }
+    return { task: { comments: [created] } }
+  }
+  const updateTaskComment = async (s, taskId, id, body) => { updated.push({ id, body }) }
+  const push = createFeedComments({ store, commentTask, updateTaskComment })
+  push('s1', { taskId: 't1', expertId: 'dev', body: '第一段' })
+  await new Promise(resolve => setTimeout(resolve, 10))
+  push('s1', { taskId: 't1', expertId: 'dev', body: '第二段' })
+  await new Promise(resolve => setTimeout(resolve, 10))
+  assert.equal(added.length, 1, '只建一条')
+  assert.equal(updated.length, 1, '后续更新同一条')
+  assert.equal(updated[0].id, 'c-feed1')
+  assert.match(updated[0].body, /第一段[\s\S]*第二段/)
 })

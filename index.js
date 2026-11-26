@@ -48,6 +48,7 @@ import { toolAccessTable, toolLevel } from './src/host/tool-access.js'
 import { isStudioProfile } from './src/host/profile-detect.js'
 import { isStalled } from './src/host/dispatch-state.js'
 import { approvalNote, createFeedBuffer, parseStudioSession } from './src/host/agent-feed.js'
+import { createFeedComments } from './src/host/feed-comments.js'
 import { ESCALATION_MODES, escalationFor, escalationOutcome } from './src/host/escalation.js'
 import { sanitizeLimits } from './src/host/limits.js'
 import { attachWebhooks, sanitizeWebhooks } from './src/host/webhooks.js'
@@ -2645,12 +2646,8 @@ export function apply(ctx) {
     /* 派单会话的执行播报：把 session/event 汇成卡上的「执行中」评论（15 秒节流，本轮结束立刻发）。
        内容是 思考摘要 · 回复正文 · 调了哪些工具 · **本次实际用的模型**——
        最后一项以前只能靠猜（设置里配 flash，实际请求用了哪个型号只有这里说得清）。 */
-    const feed = createFeedBuffer((sessionId, snapshot) => {
-      if (snapshot === null || snapshot.taskId === '') return
-      const expert = (store.snapshot().config.experts ?? []).find(entry => entry.id === snapshot.expertId)
-      const author = String(expert?.name ?? snapshot.expertId ?? 'AI')
-      void commentTask(store, snapshot.taskId, snapshot.body, author, 'agent').catch(() => {})
-    })
+    /* 一个会话只占一条评论，后续增量更新同一条（见 src/host/feed-comments.js）。 */
+    const feed = createFeedBuffer(createFeedComments({ store, commentTask, updateTaskComment }))
     const offSessionEvent = dispatcherCtx.on('session/event', (session, event) => {
       const sessionId = String(session?.id ?? '')
       const parsed = parseStudioSession(sessionId)
