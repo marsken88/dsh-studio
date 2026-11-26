@@ -792,11 +792,13 @@ try {
   })
   await new Promise(resolve => setTimeout(resolve, 1200))
   const providerAfter = await page.evaluate(() => document.querySelector('[data-docs-sink]')?.getAttribute('data-docs-sink') ?? null)
+  /* 判「配置有没有被写坏」只能看服务端：面板下拉是用户当前选择，被拒的保存不会把它重置。 */
+  const serverDocsAfter = (await state()).config?.docs?.provider ?? null
   if (sinkReady) {
-    check('④c 文档出口「保存」真的写进 config.docs', writeAttempt.ok === true && writeAttempt.status === 'saved' && backOk === true && providerAfter === providerTarget, `期望 ${providerTarget}，回读 ${providerAfter}，提示 ${writeAttempt.status}${writeAttempt.ok === true ? '' : '（' + writeAttempt.reason + '）'}`)
+    check('④c 文档出口「保存」真的写进 config.docs', writeAttempt.ok === true && writeAttempt.status === 'saved' && backOk === true && serverDocsAfter === providerTarget, `期望 ${providerTarget}，服务端回读 ${serverDocsAfter}，面板显示 ${providerAfter}，提示 ${writeAttempt.status}${writeAttempt.ok === true ? '' : '（' + writeAttempt.reason + '）'}`)
   } else {
     /* 没配全时保存必须被拒，而且提示要能看出是「没配全」——静默失败比报错更糟。 */
-    check('④c 未配全 WeKnora 时保存被拒（提示含「没配全」）且配置没被写坏', writeAttempt.ok === true && writeAttempt.status === 'error' && /没配全/.test(writeAttempt.text) && backOk === true && providerAfter === providerBefore, `提示 ${writeAttempt.status}：${writeAttempt.text.slice(0, 120)}；回读 ${providerAfter}（期望仍为 ${providerBefore}）`)
+    check('④c 未配全 WeKnora 时保存被拒（提示含「没配全」）且配置没被写坏', writeAttempt.ok === true && writeAttempt.status === 'error' && /没配全/.test(writeAttempt.text) && backOk === true && serverDocsAfter === providerBefore, `提示 ${writeAttempt.status}：${writeAttempt.text.slice(0, 120)}；服务端回读 ${serverDocsAfter}（期望仍为 ${providerBefore}），面板显示 ${providerAfter}`)
   }
   await saveOnce(providerBefore)
   await new Promise(resolve => setTimeout(resolve, 800))
@@ -1226,6 +1228,12 @@ try {
   /* ⑥e 改列负责人：面板先 dryRun 预览「会让哪几张卡被派走」，取消不落库，确认后落库并提示（issue #149）。
      跑完会在 finally 里把 test 列与角色白名单恢复原样。 */
   const cfgBefore = (await state()).config
+  /* 这条护栏只在「自动派单列」上可演示：列不在 autoStatuses 时，改负责人本来就不会派走任何卡，
+     也就不会弹确认 —— 那时候红的是探针的前提，不是产品行为。 */
+  const autoStatusesForE = Array.isArray(cfgBefore.agents?.autoStatuses) ? cfgBefore.agents.autoStatuses : []
+  if (!autoStatusesForE.includes('test')) {
+    console.log('ℹ ⑥e 跳过：test 列不在自动派单列里（护栏无法演示，不判红）')
+  } else {
   restoreColumns = cfgBefore.columns?.test ?? null
   restoreRoles = Array.isArray(cfgBefore.roles) ? [...cfgBefore.roles] : null
   const PROBE_ROLE = 'probe-role'
@@ -1299,6 +1307,7 @@ try {
   const noticeText = await page.evaluate(() => document.querySelector('[data-column-notice]')?.textContent ?? '')
   check('⑥e 确认后落库成角色位（没绑死某个专家）', confirmed !== '' && isRole, JSON.stringify(afterConfirm))
   check('⑥e 保存后把「会派走 N 张」写在面板上', /派走 \d+ 张/.test(noticeText) || noticeText.includes('已保存'), noticeText.slice(0, 80))
+  }
 
   /* ⑥f 角色位白名单能在界面上加 / 删；删还在用的岗位会被拦（issue #150） */
   const expertsNav2 = await page.evaluate(() => {
