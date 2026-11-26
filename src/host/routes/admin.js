@@ -31,7 +31,21 @@ if (method === 'POST' && route === '/config') {
     host.sendJson(res, 400, { ok: false, error: '本地账号口令请用 /auth/password，/config 不接受 localAuth' })
     return true
   }
-  await host.applyConfig(store, body)
+  /* 文档出口的写入层校验（REQ-2026-003 p3）：形状错 / WeKnora 没配全 → 400 结构化体，
+     让调用方看到「哪个键错、缺什么、影响哪些范围」。其它错误继续往上抛给全局 catch。
+     applyConfig 在 store.mutate 里抛错时状态已回滚，所以这里返回 400 时是「一项都没落库」。 */
+  try {
+    await host.applyConfig(store, body)
+  } catch (error) {
+    if (error?.code === 'docs_config_invalid' || error?.code === 'docs_config_not_ready') {
+      host.sendJson(res, 400, {
+        ok: false, code: error.code, error: error.message,
+        invalid: error.invalid ?? [], missing: error.missing ?? [], scopes: error.scopes ?? [],
+      })
+      return true
+    }
+    throw error
+  }
   host.sendJson(res, 200, { ok: true, state: host.publicState(store) })
   return true
 }
