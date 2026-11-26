@@ -8,6 +8,16 @@
 - 开关：`config.agents.broadcast` = `feed`（默认）/ `comment`（旧行为）/ `off`，改完立刻生效。
 # 更新日志
 
+## [0.18.2] — 2026-11-26
+
+### 清理会随 npm 包发出去的内网地址与个人路径
+
+- 面板「WeKnora 地址」占位符里的内网 IP 改成 `kb.example.com`（它会打进 `client.js` 一起发出去）；
+- `docs/product.md` / `docs/ui.md` 的目标机地址改为 `192.0.2.10`、用户名改 `<user>`；
+- `src/host/model-drift.js` 注释里的 `/home/lyf/...` 改为 `/home/<user>/...`。
+
+起因是发版自查清单第 4 条（仓库里不许有内网地址/个人路径）：`docs/*.md` 与 `src/` 都在 npm 包的 `files` 里，这些内容确实会随包装出去。
+
 ## [0.18.0] — 2026-11-26
 
 ### 手动派活也守并发槽位；派单日志不再留幽灵记录
