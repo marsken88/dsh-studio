@@ -327,7 +327,7 @@ token 只写进临时 npmrc（放在仓库外或 `tmp/` 且不提交），发完
   已发布过的同版本会跳过，所以重跑是安全的。
   **README 里的安装命令只教 npm 那条**：镜像给内网/CI 只能访问 GitHub 的环境用。
 
-2. 发完**在临时 profile 里装一遍**（`dsh plugin --profile <tmp> install @marsken/dsh-studio@<版本>`）并跑 `dsh --profile <tmp> --dump-config | grep dsh-studio`，确认宿主真认到了，然后把 profile 删掉。
+2. 发完**在临时 profile 里装一遍**（`dsh plugin --profile <tmp> install @marsken/dsh-studio@<版本>`）并跑 `dsh --profile <tmp> --dump-config | grep -A2 dsh-studio`（**顶层 `dsh` 命令**；写成 `dsh plugin ... --dump-config` 会透传给 pnpm 报 Unknown option），确认宿主真认到了，然后把 profile 删掉。
    **这一步是硬门槛，不是可选项**：0.5.1 及以前 `cordis.patch.yml` 里写的是裸名 `dsh-studio`，
    从 npm 装完 `plugin.not-loaded` + `ERR_MODULE_NOT_FOUND`，而所有本地探针都打的是手工部署的那份，
 3. **发版一致性用命令查，不靠记性**：`npm run verify:release`（= `node tools/verify-release.mjs`）比对五处——

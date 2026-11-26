@@ -240,7 +240,7 @@ README 里还写着旧行为（"安全边界"、"发版流程"、"探针清单"�
 | 一致性（文档） | `npm run release:check` | 校验 CHANGELOG 有本版条目、compatibility 版本号一致、README 提到的脚本都存在；**若自上个 tag 以来改了代码却没改 README，直接失败** |
 | 一致性（真机） | `STUDIO_TOKEN=… npm run release:preflight` | 文档检查 + **真机跑 pages / toast / drawer 三套探针**。接口类改动最容易「本地全绿、发出去才发现面板坏了」——0.3.1 就是这么把「保存角色模板」打成 400 的。CI 里没有部署和 token，所以这一条只在本地发 tag 前跑 |
 | 一致性（产物） | `npm run verify:pack`（已自动包含在 `release:check` 里） | **验的是 npm pack 出来的 tarball**：patch 在包里、`name` 等于包名、`exports`/`dsh` 指向的文件都在、`index.js` 能被 import。0.5.1「装完不加载」这类问题在这里就会红 |
-| 一致性（安装，周任务） | `dsh plugin --profile <临时 profile> install @marsken/dsh-studio@<版本>`，再 `--dump-config \| grep dsh-studio` | **每次发版前都要真装一遍**：0.5.1 及以前的 `cordis.patch.yml` 里写的是裸名 `dsh-studio`，从 npm 装完根本不加载（issue，2026-11-19）。探针打的是手工部署那份，抓不到这类问题 |
+| 一致性（安装，周任务） | `dsh plugin --profile <临时 profile> install @marsken/dsh-studio@<版本>`，再 `dsh --profile <临时 profile> --dump-config \| grep -A2 dsh-studio`（**注意是顶层的 `dsh --dump-config`**，`dsh plugin ... --dump-config` 会把参数透给 pnpm 报 Unknown option）；另外确认包内 `client.js` / `cordis.patch.yml` / `src/` 都在 | **每次发版前都要真装一遍**：0.5.1 及以前的 `cordis.patch.yml` 里写的是裸名 `dsh-studio`，从 npm 装完根本不加载（issue，2026-11-19）。探针打的是手工部署那份，抓不到这类问题 |
 | GitHub Packages 镜像 | 独立 workflow `publish-github-packages.yml`，**按 tag 触发**发 `@marsken88/dsh-studio`（不再由 release.yml 调，那样会互相取消） | 镜像里 **package.json 的 name 与 `cordis.patch.yml` 的 name 必须一起改**，只改一处就是装了不加载 |
 | GitHub Release | `release.yml` 自动建（正文取 CHANGELOG） | 打 tag 后要能在 Releases 页看到这一版；正文来自 `tools/changelog-section.mjs`，所以 **CHANGELOG 没写这一版 = Release 里只剩一句"没写更新日志"** |
 | 一致性（发版） | `GIT_SSH_COMMAND="ssh -p 443" npm run verify:release` | 必须「发版一致」才算完 |
