@@ -20,6 +20,36 @@ const point = {
 }
 const requirement = { id: 'r1', code: 'REQ-1', title: '登录', points: [point], status: 'active' }
 
+test('矩阵：证据型条件（声明 evidence.kind）按该功能点已交付的交付物判覆盖', () => {
+  const evidencePoint = {
+    id: 'p1',
+    title: '登录失败锁定',
+    acceptance: [
+      { id: 'a1', text: '连续 5 次错误后第 6 次返回 423', done: false },
+      { id: 'a2', text: 'QA 测试报告：三层收口结论', done: false, evidence: { kind: 'report', note: '过程证据，写不成用例' } },
+    ],
+  }
+  const req = { id: 'r1', code: 'REQ-1', title: '登录', points: [evidencePoint], status: 'active' }
+  const card = {
+    id: 't1', code: 'DEV-001', title: '登录失败次数', requirementId: 'r1', pointId: 'p1', status: 'done',
+    cases: [{ id: 'c1', title: '第 6 次 423', result: 'pass', acceptanceId: 'a1', pointId: 'p1' }],
+    artifacts: [],
+  }
+  const withCase = requirementMatrix({ config: {}, requirements: [req], tasks: [card] }, req)
+  const a2Before = withCase.points[0].acceptance.find(item => item.id === 'a2')
+  assert.equal(a2Before.covered, false, '没有交付物时证据型条件不算覆盖')
+
+  const withReport = requirementMatrix({
+    config: {},
+    requirements: [req],
+    tasks: [{ ...card, artifacts: [{ id: 'x1', kind: 'report', title: 'QA 三层收口报告', status: 'delivered' }] }],
+  }, req)
+  const a2After = withReport.points[0].acceptance.find(item => item.id === 'a2')
+  assert.equal(a2After.covered, true, '交付物已交付 → 覆盖')
+  assert.match(String(a2After.evidenceHit ?? ''), /收口报告/, '要说清是哪份交付物')
+  assert.equal(withReport.points[0].covered, true, '两条都覆盖，功能点算覆盖')
+})
+
 test('矩阵：只有挂在某条验收条件上的通过用例才算覆盖', () => {
   const state = {
     config: {},

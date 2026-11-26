@@ -40,6 +40,14 @@ export function requirementMatrix(state, requirement) {
        以前是「这个功能点任意一条用例通过 → 所有验收条件都标 covered」，
        于是矩阵上「5/5 覆盖」可能只对应 1 条用例。 */
     const acceptance = (point.acceptance ?? []).map(item => {
+      /* 证据型条件（评审结论 / 测试报告 / 产品验收记录…）：由**该功能点上已交付的同类交付物**判覆盖。
+         这类条件天生写不出可执行用例，以前永远算不覆盖，需求画像长期偏低（REQ-2026-003 p1 的 8 条）。 */
+      const evidenceKind = String(item.evidence?.kind ?? '').trim()
+      if (evidenceKind !== '') {
+        const hit = artifacts.find(entry => String(entry.kind ?? '') === evidenceKind
+          && ['delivered', 'accepted'].includes(String(entry.status ?? '')))
+        return { ...item, covered: hit !== undefined, evidenceHit: hit === undefined ? '' : (hit.title || hit.taskCode || '') }
+      }
       const matched = cases.filter(entry => entry.result === 'pass' && String(entry.acceptanceId ?? '') === item.id)
       return { ...item, covered: matched.length > 0 }
     })

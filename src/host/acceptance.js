@@ -13,11 +13,18 @@ export function sanitizeAcceptanceItem(raw, index) {
   const source = typeof raw === 'string' ? { text: raw } : raw
   const text = String(source.text ?? '').trim().slice(0, 300)
   if (text.length === 0) return undefined
-  return {
+  /* 证据型条件：有些验收条件天生没法写成可执行用例（评审结论、测试报告、产品验收记录…），
+     它们由交付物证明。声明了 evidence.kind 的条件按「该功能点上有这种交付物且已交付」判覆盖；
+     没声明的一律仍按「挂着它的通过用例」判，口径不变。 */
+  const evidenceKind = String(source.evidence?.kind ?? source.evidenceKind ?? '').trim().slice(0, 24)
+  const evidenceNote = String(source.evidence?.note ?? '').trim().slice(0, 200)
+  const item = {
     id: String(source.id ?? `a${index + 1}`).trim().slice(0, 24) || `a${index + 1}`,
     text,
     done: source.done === true,
   }
+  if (evidenceKind !== '') item.evidence = { kind: evidenceKind, ...(evidenceNote !== '' ? { note: evidenceNote } : {}) }
+  return item
 }
 
 /** 拆卡时用：把功能点的验收条件变成卡的验收清单（id 保持一致，矩阵才认得出）。 */
