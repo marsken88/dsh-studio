@@ -16,7 +16,7 @@ import {
   STRATEGY_LABEL,
   TYPE_LABEL,
 } from '../web/src/studio/labels.js'
-import { buildRoster, ownerLabel, memberLabel, toDateInput, fromDateInput } from '../web/src/studio/roster.js'
+import { buildRoster, columnUnowned, ownerLabel, memberLabel, toDateInput, fromDateInput } from '../web/src/studio/roster.js'
 import { fmtTime, fmtDate } from '../web/src/studio/format.js'
 import { productChainRow } from '../web/src/studio/collab-chain.js'
 import { searchItems, filterItems } from '../web/src/studio/palette.js'
@@ -576,4 +576,17 @@ test('协作链产品行：bug 卡没 pointId 时继承父卡的功能点（别�
   assert.equal(row.tone, 'ok')
   assert.equal(row.chip, '本卡可验收')
   assert.match(row.detail, /本卡功能点 p3 有 1 条验收/)
+})
+
+test('columnUnowned：列没配负责人时返回 true（卡上要提示「等指派」）', () => {
+  const config = {
+    experts: [{ id: 'dev', name: '开发工程师', role: 'dev', enabled: true }],
+    teams: [],
+    roles: ['product', 'architect', 'dev', 'qa'],
+    columns: { dev: { kind: 'role', id: 'dev' }, test: { kind: 'none', id: '' } },
+  }
+  assert.equal(columnUnowned(config, 'dev'), false, '有角色位负责人')
+  assert.equal(columnUnowned(config, 'test'), true, 'kind=none → 没人负责')
+  assert.equal(columnUnowned(config, 'done'), true, '整列没配置也算没人负责')
+  assert.equal(columnUnowned({}, 'dev'), true, '空配置不炸')
 })

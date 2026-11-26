@@ -312,7 +312,9 @@ function Board({ state, onOpen, onMove, onWip, onCreate }) {
           ),
           h('div', { className: COLUMN_OWNER, 'data-col-owner': '', 'data-empty': owner.length === 0 ? '1' : '0', title: '这一列的默认负责人：卡推进到本列后由它接手' },
             h('span', { className: owner.length === 0 ? 'min-w-0 truncate rounded-full border border-dashed border-separator-border px-2' : 'min-w-0 truncate rounded-full bg-background-secondary-default px-2' },
-              owner.length === 0 ? '未配置负责人' : owner),
+              owner.length === 0
+                ? (tasks.length > 0 ? `未配置负责人 · ${tasks.length} 张卡不会自动派` : '未配置负责人')
+                : owner),
           ),
           h('div', { className: COLUMN_BODY, 'data-board-column-body': '' },
             tasks.length === 0

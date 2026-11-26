@@ -39,6 +39,17 @@ export function ownerLabel(config, owner) {
   return memberLabel(config, owner)
 }
 
+/* 这一列有没有配置负责人（能解析出人/角色/专家团）。
+ *
+ * 为什么单独拎出来：**列没人负责时 tick 会静静跳过这张卡**（设计如此：等人指派），
+ * 界面上以前只把列头的小徽章写成「未配置负责人」，卡本身一句话都不说 ——
+ * 真机 2026-11-26 一张卡在「待测试」躺了半小时，人以为是平台坏了。
+ */
+export function columnUnowned(config, status) {
+  const owner = config?.columns?.[String(status ?? '')]
+  return ownerLabel(config, owner) === ''
+}
+
 export function buildRoster(config) {
   const items = []
   // 角色位放最前面：泳道默认按「产品经理 / 研发工程师」配，具体落到哪位

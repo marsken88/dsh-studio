@@ -11,7 +11,7 @@
 import { CASE_TIER_LABEL, PRIORITY_LABEL, ROLE_LABEL } from './labels.js'
 import { statusDot, uiIcon } from './icons.js'
 import { fmtDate, fmtTime } from './format.js'
-import { artifactsWithoutBody, cardOwner, caseSummaryOf, checkSummaryOf, commentCountOf } from './roster.js'
+import { artifactsWithoutBody, cardOwner, caseSummaryOf, checkSummaryOf, columnUnowned, commentCountOf } from './roster.js'
 
 /** SLA 剩余时间换成人能读的量级：48 小时以内给小时，再往上给天。 */
 function slaText(ms) {
@@ -238,6 +238,10 @@ function Card({ task, onOpen, config, requirements, onPickRequirement, onPickPro
           title: `三条测试线还缺：${missing.map(tier => CASE_TIER_LABEL[tier]).join('、')}。补能跑的用例，或在大模型会话里用 studio_task_test_plan 写明这一层为什么不适用`,
         }, '缺 ', missing.map(tier => CASE_TIER_LABEL[tier]).join('/'))
       })(),
+      /* 本列没人负责：卡不会被自动派单，光看卡片看不出来（tick 静默跳过）。 */
+      columnUnowned(config, task.status) && task.status !== 'done'
+        ? h('span', { className: `${META_ITEM} ${DANGER}`, 'data-owner-missing': '1', title: '这一列还没配置负责人：这张卡不会被自动派单。到「设置 → 列的负责人」指派，或在卡上手动派单' }, statusDot(h, 'warn'), ' 等指派')
+        : null,
       noBody > 0 ? h('span', { className: `${META_ITEM} ${DANGER}`, 'data-nobody-warn': '1', title: `${noBody} 件交付物还没写正文，云盘文档里只有标题` }, statusDot(h, 'warn'), ' 缺正文') : null,
       commentCountOf(task) > 0 ? h('span', { className: META_ITEM }, `${commentCountOf(task)} 评论`) : null,
       h('span', { className: 'ml-auto shrink-0 whitespace-nowrap tabular-nums' }, fmtTime(task.updatedAt)),
