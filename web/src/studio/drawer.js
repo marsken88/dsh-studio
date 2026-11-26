@@ -1492,8 +1492,25 @@ function Drawer({ task, state, onClose, onChanged, onOpenTask = null }) {
                 h('div', { className: 'flex min-w-0 flex-wrap items-center justify-between gap-2' },
                   h('span', { className: 'min-w-0 break-words' }, `${task.signoff.by} 于 ${fmtTime(task.signoff.at)} 签字：${task.signoff.note}`),
                   h(Button, { variant: 'ghost', size: 'sm', onClick: () => void signOff('clear') }, '取消签字')),
-                String(task.signoff.actorKind ?? '') === 'agent'
-                  ? h('span', { className: 'text-caption-1-regular text-text-warning-primary', 'data-ai-signoff': '' }, '这是 AI 代签（actorKind=agent）：准出只认人工签字。取消这条后由你本人签一次才会计入。')
+                ['agent', 'ai'].includes(String(task.signoff.actorKind ?? ''))
+                  ? h('div', { className: 'flex min-w-0 flex-col gap-2', 'data-ai-signoff': '' },
+                    h('span', { className: 'text-caption-1-regular text-text-warning-primary' }, '这是 AI 代签（actorKind=agent）：准出只认人工签字。在下面写一句结论直接签即可覆盖这条——两条都会留在历史里，不用先点「取消签字」。'),
+                    h('div', { className: 'flex min-w-0 flex-wrap items-center gap-2' },
+                      h(TextField, {
+                        style: { flex: '1 1 220px' },
+                        value: gateNote,
+                        placeholder: '验收签字：验了什么、遗留什么',
+                        'aria-label': '覆盖 AI 签字：验收结论',
+                        onChange: event => setGateNote(event.target.value),
+                      }),
+                      h(Button, {
+                        variant: 'primary',
+                        size: 'sm',
+                        disabled: busy || gateNote.trim() === '',
+                        title: gateNote.trim() === '' ? '先写一句验收结论' : '以你本人的身份签字（会覆盖上面那条 AI 签字）',
+                        'data-signoff-override': '',
+                        onClick: () => void signOff('sign'),
+                      }, '以我的身份重新签字')))
                   : null),
         ),
       ),

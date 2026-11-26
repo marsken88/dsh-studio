@@ -418,6 +418,27 @@ test('真 HTTP：/task/block 传 blocked:false 按解除处理，缺原因时指
   await api('/task/delete', { id, confirm: 'DELETE' })
 })
 
+/* ── 二·d、人工签字直接覆盖 AI 签字（不用先取消，两条都留历史） ──────────── */
+
+test('真 HTTP：AI 签字后人工直接覆盖，actorKind=human 且历史留两条', async () => {
+  const created = await api('/task/create', { title: '（测试）签字覆盖', type: 'bug', role: 'dev' })
+  const id = String(created.body.task?.id ?? '')
+  /* by 写成**配置里真实存在的专家名**才会被判成 agent；写不存在的名字会落成 human。 */
+  const experts = ((await api('/state')).body.state.config.experts ?? [])
+  const agentName = String(experts.find(item => item.enabled !== false)?.name ?? experts[0]?.name ?? '')
+  assert.notEqual(agentName, '', '配置里要有专家')
+  const first = await api('/task/signoff', { id, action: 'sign', note: 'AI 代签：证据齐全', by: agentName })
+  assert.equal(first.body.task?.signoff?.actorKind, 'ai', '第一次是 AI 签字（路由写 ai；工具写 agent，闸门两种都认）')
+  const second = await api('/task/signoff', { id, action: 'sign', note: '人工复验通过', by: '超级管理员' })
+  assert.equal(second.status, 200, '覆盖 AI 签字不该被拒')
+  assert.equal(second.body.task?.signoff?.actorKind, 'human')
+  assert.equal(second.body.task?.signoff?.note, '人工复验通过')
+  const notes = (second.body.task?.history ?? []).map(item => String(item.note ?? ''))
+  assert.ok(notes.some(note => note.includes('signoff-override')), '前一条 AI 签字要留在历史里')
+  assert.ok(notes.some(note => note.includes('signoff：人工复验通过')), '新签字也要留一条')
+  await api('/task/delete', { id, confirm: 'DELETE' })
+})
+
 /* ── 三、源码守卫：行为对了但接线被改回去，也要在这里响 ───────────────── */
 
 test('源码守卫：index.js 走 writeDocsConfig、admin.js 映射两个 400 码', () => {

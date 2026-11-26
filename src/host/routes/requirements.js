@@ -179,6 +179,14 @@ export async function handleRequirementRoute({ method, route, req, res, store, u
         entry.history.push({ at: Date.now(), by, status: entry.status, note: 'signoff-cleared' })
       } else {
         if (note.length === 0) throw new Error('验收签字要写一句结论：验了什么、遗留什么')
+        /* 已经有一条签字（多半是 AI 代签）：人工直接覆盖，不用先「取消签字」——
+           前一条写进历史，两条都能追溯（真机 2026-11-26：人签前必须先取消 AI 那条，多一次点击）。 */
+        if (entry.signoff !== null && entry.signoff !== undefined) {
+          entry.history.push({
+            at: Date.now(), by, status: entry.status,
+            note: `signoff-override：覆盖前一次签字（${entry.signoff.by} / ${entry.signoff.actorKind ?? '未知'}）：${String(entry.signoff.note ?? '').slice(0, 40)}`,
+          })
+        }
         entry.signoff = { by, at: Date.now(), note, actorKind: signoffActorKind(by, store.snapshot().config) }
         entry.history.push({ at: Date.now(), by, status: entry.status, note: `signoff：${note.slice(0, 80)}` })
       }
