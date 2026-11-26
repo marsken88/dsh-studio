@@ -57,3 +57,39 @@ export function withClarifyHistoryItem(checklist, status) {
   })
   return next
 }
+
+/* 卡上的清单项与它挂的功能点（需求的 acceptance）是两处：拆卡时复制过去，之后各写各的。
+   真机上就出现过产品在卡上补了 8 条清单、需求里 p2 仍然是 0 条验收——协作链如实标黄
+   「产品待补齐」，需求级准出也被拦（2026-11-26 .218）。 */
+
+const normText = value => String(value ?? '').replace(/\s+/g, '').toLowerCase()
+
+/** 卡上新增的清单项回写到它挂的功能点。返回是否真的写进去了（重复/没挂功能点 → false）。 */
+export function appendPointAcceptance(state, task, text) {
+  const requirementId = String(task?.requirementId ?? '')
+  const pointId = String(task?.pointId ?? '')
+  const clean = String(text ?? '').trim().slice(0, 200)
+  if (requirementId === '' || pointId === '' || clean === '') return false
+  const requirement = (state?.requirements ?? []).find(item => String(item?.id ?? '') === requirementId)
+  if (requirement === undefined) return false
+  const point = (requirement.points ?? []).find(item => String(item?.id ?? '') === pointId)
+  if (point === undefined) return false
+  const list = Array.isArray(point.acceptance) ? point.acceptance : []
+  if (list.some(item => normText(item?.text) === normText(clean))) return false
+  point.acceptance = [...list, { id: `a${list.length + 1}`, text: clean }].slice(0, 30)
+  requirement.updatedAt = Date.now()
+  return true
+}
+
+/** 这张卡挂的功能点在需求里有没有验收条件？没有就返回一句提醒（准出 warning，不是 blocker）。 */
+export function pointAcceptanceGap(state, task) {
+  const requirementId = String(task?.requirementId ?? '')
+  const pointId = String(task?.pointId ?? '')
+  if (requirementId === '' || pointId === '') return ''
+  const requirement = (state?.requirements ?? []).find(item => String(item?.id ?? '') === requirementId)
+  const point = (requirement?.points ?? []).find(item => String(item?.id ?? '') === pointId)
+  if (point === undefined) return ''
+  const count = (Array.isArray(point.acceptance) ? point.acceptance : []).filter(item => String(item?.text ?? '').trim() !== '').length
+  if (count > 0) return ''
+  return `功能点 ${pointId} 在需求里还没有验收条件（协作链会标黄「产品待补齐」，需求级准出也会拦）：让产品在需求页补一条，或在本卡清单上补（会自动回写到功能点）`
+}

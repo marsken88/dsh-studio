@@ -17,6 +17,7 @@ import { resolveRequirement, requirementRefHint, reviewRequirement, saveTaskDesi
 import { appendRequirementComment, removeRequirementComment, updateRequirementComment } from './requirement-comments.js'
 import { assistMessages, buildRequirementContext, requirementAssistPrompt, streamAssistReply } from './requirement-assist.js'
 import { splitRequirement } from './split.js'
+import { appendPointAcceptance } from './acceptance.js'
 import { skillUsage, skillUsageLine } from './skill-usage.js'
 import { mergeGateFor, mergeGateLine } from './merge-gate.js'
 import { REQUIRED_TIERS, TIER_LABEL, applyTierDeclarations, gapMessage, planLine, sanitizeTier, testPlanSummary, tierOf } from './test-plan.js'
@@ -1446,6 +1447,8 @@ export function registerTools(ctx, store) {
           const text = String(args.text ?? '').trim().slice(0, 200)
           if (text.length === 0) throw new Error('text is required')
           target.checklist.push({ id: `c${target.checklist.length + 1}-${randomBytes(2).toString('hex')}`, text, done: false, by: '', at: 0, note: '' })
+          /* 卡和功能点各写各的会脱节：卡上补的清单项顺手回写到需求的功能点（重复不写）。 */
+          appendPointAcceptance(state, target, text)
         } else {
           target.checklist = target.checklist.map(item => {
             if (item.id !== args.itemId) return item

@@ -4,6 +4,7 @@
 import { COVERAGE_TARGET, coverageStrength, draftCasesFromCriteria, isExecutable, normalizeCaseTitle, stripExecutableMarker } from './case-strength.js'
 import { gapMessage, needsTierPlan, sanitizeTier, testPlanSummary } from './test-plan.js'
 import { isAiSignoff } from './intervention.js'
+import { pointAcceptanceGap } from './acceptance.js'
 import { BLOCK_UNTIL, blockUntilMet } from './block-until.js'
 import { reviewGate } from './quality.js'
 import { overrideSummary } from './override.js'
@@ -889,6 +890,10 @@ export function taskExitGate(state, task) {
   if (parallel !== undefined) {
     warnings.push(`同一个服务「${parallel.name}」还有 ${parallel.count} 张卡在改（${parallel.tasks.slice(0, 3).map(item => item.code).join('、')}），合并前先对齐，避免互相覆盖`)
   }
+  /* 卡挂了功能点、但需求里那个功能点没有验收条件：协作链会标黄、需求级准出也会拦。
+     这是 warning 不是 blocker —— 卡的清单/用例/签字都齐了就该能收口，但不能装作没看见。 */
+  const pointGap = pointAcceptanceGap(state, task)
+  if (pointGap !== '') warnings.push(pointGap)
   return { ready: blockers.length === 0, blockers, warnings }
 }
 
