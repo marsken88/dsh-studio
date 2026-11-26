@@ -1152,6 +1152,14 @@ export class Dispatcher {
     const expert = resolved.expert
     const sessionId = `studio-${task.id}-${expert.id}`
     const slot = `${task.id}#${expert.id}`
+    /* 同一张卡只允许一轮：手动派单与 tick 会在同一秒各起一个会话（真机 2026-11-26：
+       REQ-2026-004-3 同时出现 architect 与 expert-1a0a60，两个会话改同一张卡）。
+       同槽位（同卡同专家）重派仍是替换，不算冲突。 */
+    const otherRun = [...this.running.entries()]
+      .find(([key, run]) => key !== slot && String(run?.taskId ?? '') === String(task.id ?? ''))
+    if (otherRun !== undefined) {
+      throw new Error(`这张卡已经有一轮在跑（${otherRun[1].sessionId} · ${otherRun[1].expert}）：等它结束再派，或先在卡上点「停止」`)
+    }
     /* 并发槽位：tick 在循环里判过一次，但「马上处理」/@ 派活这类手动入口以前绕过它 ——
        isolation=none 时两张卡能在同一目录同时改代码，正是 parallel-guard 要防的。
        同一个槽位再派（同一张卡同一位专家）是替换，不占新名额。 */
@@ -1847,7 +1855,7 @@ export function buildExpertPrompt(task, expert, column, config, team, instructio
       return `同服务并行：这个服务上还有 ${conflict.count} 张卡在改（${conflict.tasks.map(item => item.code).join('、')}）。只改本卡范围，动公共文件前先看别人的分支，必要时在评论里打招呼，别把别人的改动顶掉。`
     })(),
     task.owner ? `业务负责人：${task.owner}` : '',
-    task.expert ? `当前指派专家：${task.expert}` : '',
+    task.expert ? `卡上登记的专家：${task.expert}（仅登记信息；本次派单对象是本列负责人解析出的那位，见开头）` : '',
     (task.checklist ?? []).length > 0
       ? `\n这张卡的验收清单（做完一项就勾一项，没做完别勾）：\n${(task.checklist ?? []).map(item => `${item.done ? '☑' : '☐'} ${item.id} ${item.text}${item.note ? `（${item.note}）` : ''}`).join('\n')}`
       : '',

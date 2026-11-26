@@ -338,6 +338,23 @@ test('并发槽满时手动派单被拒；同一槽位重派放行', async t => 
   assert.equal(dispatcher.running.size, 1, '同一张卡同一位专家是替换，不占新名额')
 })
 
+test('同一张卡已经在跑：手动派单不会再起第二个会话（手动 vs tick 撞车）', async t => {
+  const { dispatcher, state } = await harness(t, { tasks: [{ id: 't-1', status: 'design', role: 'architect' }], autoStatuses: ['design'] })
+  state.config.columns.design = { kind: 'pool', id: '', members: [{ kind: 'role', id: 'architect' }], strategy: 'round_robin' }
+  state.config.experts = [...state.config.experts, { id: 'arch1', name: '架构师一', role: 'architect', enabled: true, model: 'acme/flash' }, { id: 'arch2', name: '架构师二', role: 'architect', enabled: true, model: 'acme/flash' }]
+  await dispatcher.tick()
+  assert.equal(dispatcher.running.size, 1, 'tick 先起一个')
+  /* 轮询可能正好派给了 arch2：换「另一个」专家，才测得到冲突。 */
+  const runningExpert = String([...dispatcher.running.values()][0]?.expert ?? '')
+  const other = runningExpert === 'arch2' ? 'arch1' : 'arch2'
+  await assert.rejects(
+    () => dispatcher.launchNow('t-1', other),
+    /已经有一轮在跑/,
+    '同一张卡换个人再派也不行：两个会话会改同一张卡',
+  )
+  assert.equal(dispatcher.running.size, 1, '被拒时不能留下第二个槽位')
+})
+
 test('条件型阻塞：人工签字一到，tick 自动解除并正常派单', async t => {
   const { dispatcher, store, state } = await harness(t, {
     tasks: [{
