@@ -1390,7 +1390,8 @@ function Drawer({ task, state, onClose, onChanged }) {
           h('span', { className: HINT }, '四个角色接力：产品挖需求与验收 → 架构出方案 → 研发实现并自测 → 测试按三层验；缺哪一棒一眼看到')),
         h('div', { className: SECTION_BODY, 'data-role-chain': '' },
           (() => {
-            const row = productChainRow({ task, requirement: collabRequirement })
+            const parent = (state.tasks ?? []).find(item => item.id === task.parent) ?? null
+            const row = productChainRow({ task, requirement: collabRequirement, parent })
             return roleRow('product', '产品', row.tone, row.chip, row.detail)
           })(),
           (() => {
@@ -1457,9 +1458,13 @@ function Drawer({ task, state, onClose, onChanged }) {
                   onChange: event => setGateNote(event.target.value),
                 }),
                 h(Button, { variant: 'primary', size: 'sm', disabled: busy, onClick: () => void signOff('sign') }, '签字确认'))
-            : h('div', { className: 'flex min-w-0 flex-wrap items-center justify-between gap-2 rounded-xl bg-background-secondary-default p-3 text-caption-1-regular text-text-primary', 'data-drawer-signoff': '' },
-                h('span', { className: 'min-w-0 break-words' }, `${task.signoff.by} 于 ${fmtTime(task.signoff.at)} 签字：${task.signoff.note}`),
-                h(Button, { variant: 'ghost', size: 'sm', onClick: () => void signOff('clear') }, '取消签字')),
+            : h('div', { className: 'flex min-w-0 flex-col gap-2 rounded-xl bg-background-secondary-default p-3 text-caption-1-regular text-text-primary', 'data-drawer-signoff': '', 'data-signoff-actor': String(task.signoff.actorKind ?? '') },
+                h('div', { className: 'flex min-w-0 flex-wrap items-center justify-between gap-2' },
+                  h('span', { className: 'min-w-0 break-words' }, `${task.signoff.by} 于 ${fmtTime(task.signoff.at)} 签字：${task.signoff.note}`),
+                  h(Button, { variant: 'ghost', size: 'sm', onClick: () => void signOff('clear') }, '取消签字')),
+                String(task.signoff.actorKind ?? '') === 'agent'
+                  ? h('span', { className: 'text-caption-1-regular text-text-warning-primary', 'data-ai-signoff': '' }, '这是 AI 代签（actorKind=agent）：准出只认人工签字。取消这条后由你本人签一次才会计入。')
+                  : null),
         ),
       ),
       h(Section, { pane: 'overview', current: pane, id: 'blocked' },
