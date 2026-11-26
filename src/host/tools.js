@@ -634,7 +634,7 @@ export function registerTools(ctx, store) {
       iteration: { type: 'string', description: '迭代 id（属于上面那个项目）。' },
       service: { type: 'string', description: '服务 id：一个项目里有多个服务时指定这次改哪个服务（决定用哪个 git 路径切 worktree）。' },
       parent: { type: 'string', description: '父任务 id：缺陷挂到它发现自的那张卡上。' },
-      requirementId: { type: 'string', description: '挂到哪条需求（REQ 的 id）。挂上后自动分配编号 DEV-001 / TEST-001 等。' },
+      requirementId: { type: 'string', description: '挂到哪条需求（REQ 的 id）。挂上后自动分配编号：需求卡是「需求编号-NN」（REQ-2026-003-01），其它类型是 DEV-001 / TEST-001 / BUG-001 等。' },
       pointId: { type: 'string', description: '挂到需求的哪个功能点 id（可追溯矩阵靠它对齐）。' },
       dueAt: { type: 'number', description: '期望完成时间（epoch 毫秒）。' },
     },

@@ -27,8 +27,9 @@ export const inject = ['tools', 'systemPrompt']
 // ------------------------------------------------------------------ domain
 
 
-import { assertConfigKeys, sanitizeProjectFolders, ACCESS_ROLE_LABEL, ACCESS_ROLES, ADMIN_ROUTES, ARTIFACT_KINDS, ARTIFACT_STATUS, CASE_HTTP_METHODS, CASE_PRIORITIES, CASE_RESULTS, CASE_TYPE_LABEL, CASE_TYPES, cleanId, CODE_PREFIX, CODING_FILE_CHANGES, CODING_REVIEW_STATUS, codingSummary, COLUMN_STRATEGIES, DEFAULT_ROLES, defaultColumns, defaultConfig, defaultDeployEnvs, defaultTemplates, DEPLOY_ENV_KINDS, FALLBACK_AGENT_MODEL, hashLocalPassword, ISOLATION_MODES, LEGACY_BLOCKED_STATUS, LEVEL_RANK, LOCAL_DEFAULT_PASSWORD, mergeCoding, mergeConfig, mergeSection, nextRequirementCode, nextTaskCode, normalizePatch, normalizeStrategy, publicArtifact, publicCases, publicChecklist, publicComments, PRIORITIES, ROLE_LABELS, roleIdsOf, rolesInColumns, canonicalAuthor, RELEASE_STATUSES, RELEASE_STATUS_LABEL, REQ_DOC_KIND_LABEL, REQ_DOC_KINDS, REQ_DOC_STATUS, REQ_REVIEW_LABEL, REQ_REVIEW_STATUS, REQ_STATUS_LABEL, REQ_STATUSES, ROLE_IDS, ROLE_LEVEL, SANDBOX_MODES, sanitizeAccess, sanitizeAllowHosts, sanitizeArtifact, sanitizeArtifacts, sanitizeBaseline, sanitizeBots, sanitizeBugSource, sanitizeCase, sanitizeCaseHttp, sanitizeCaseRun, sanitizeCases, sanitizeChangedFile, sanitizeChangedFiles, sanitizeChecklist, sanitizeChecklistItem, sanitizeCaseGate, sanitizeCoding, sanitizeColumns, sanitizeCommit, sanitizeCommits, sanitizeCosts, sanitizeDeployEnvs, sanitizeEnvs, sanitizeExperts, sanitizeIterations, sanitizeLdap, sanitizeLocalAuth, sanitizeProjects, sanitizeReqDoc, sanitizeReqDocs, sanitizeRelease, sanitizeRequirement, sanitizeRequirementChange, sanitizeRequirementGate, sanitizeRequirementHistory, sanitizeRequirementPoint, sanitizeRequirementPoints, sanitizeRequirementPool, sanitizeRequirementQuestions, sanitizeRequirementReview, sanitizeRequirements, sanitizeReviewGate, sanitizeServices, sanitizeSla, sanitizeRoles, sanitizeTeams, sanitizeTemplates, sanitizeTesting, sanitizeTestRun, sanitizeTestRuns, sanitizeUsers, sanitizeWorkProjects, seedExperts, SEVERITIES, STATUS_IDS, STATUS_SET, STATUSES, TASK_TYPES, text, verifyLocalPassword, worktreeRoot } from './src/host/domain.js'
+import { assertConfigKeys, sanitizeProjectFolders, ACCESS_ROLE_LABEL, ACCESS_ROLES, ADMIN_ROUTES, ARTIFACT_KINDS, ARTIFACT_STATUS, CASE_HTTP_METHODS, CASE_PRIORITIES, CASE_RESULTS, CASE_TYPE_LABEL, CASE_TYPES, cleanId, CODING_FILE_CHANGES, CODING_REVIEW_STATUS, codingSummary, COLUMN_STRATEGIES, DEFAULT_ROLES, defaultColumns, defaultConfig, defaultDeployEnvs, defaultTemplates, DEPLOY_ENV_KINDS, FALLBACK_AGENT_MODEL, hashLocalPassword, ISOLATION_MODES, LEGACY_BLOCKED_STATUS, LEVEL_RANK, LOCAL_DEFAULT_PASSWORD, mergeCoding, mergeConfig, mergeSection, nextRequirementCode, normalizePatch, normalizeStrategy, publicArtifact, publicCases, publicChecklist, publicComments, PRIORITIES, ROLE_LABELS, roleIdsOf, rolesInColumns, canonicalAuthor, RELEASE_STATUSES, RELEASE_STATUS_LABEL, REQ_DOC_KIND_LABEL, REQ_DOC_KINDS, REQ_DOC_STATUS, REQ_REVIEW_LABEL, REQ_REVIEW_STATUS, REQ_STATUS_LABEL, REQ_STATUSES, ROLE_IDS, ROLE_LEVEL, SANDBOX_MODES, sanitizeAccess, sanitizeAllowHosts, sanitizeArtifact, sanitizeArtifacts, sanitizeBaseline, sanitizeBots, sanitizeBugSource, sanitizeCase, sanitizeCaseHttp, sanitizeCaseRun, sanitizeCases, sanitizeChangedFile, sanitizeChangedFiles, sanitizeChecklist, sanitizeChecklistItem, sanitizeCaseGate, sanitizeCoding, sanitizeColumns, sanitizeCommit, sanitizeCommits, sanitizeCosts, sanitizeDeployEnvs, sanitizeEnvs, sanitizeExperts, sanitizeIterations, sanitizeLdap, sanitizeLocalAuth, sanitizeProjects, sanitizeReqDoc, sanitizeReqDocs, sanitizeRelease, sanitizeRequirement, sanitizeRequirementChange, sanitizeRequirementGate, sanitizeRequirementHistory, sanitizeRequirementPoint, sanitizeRequirementPoints, sanitizeRequirementPool, sanitizeRequirementQuestions, sanitizeRequirementReview, sanitizeRequirements, sanitizeReviewGate, sanitizeServices, sanitizeSla, sanitizeRoles, sanitizeTeams, sanitizeTemplates, sanitizeTesting, sanitizeTestRun, sanitizeTestRuns, sanitizeUsers, sanitizeWorkProjects, seedExperts, SEVERITIES, STATUS_IDS, STATUS_SET, STATUSES, TASK_TYPES, text, verifyLocalPassword, worktreeRoot } from './src/host/domain.js'
 import { withClarifyHistoryItem } from './src/host/acceptance.js'
+import { nextCodeForTask } from './src/host/task-code.js'
 import { accessLevelFor, checkAccess, isCrossSiteRequest, isLoopbackRequest, needsConfirm, needsLocalSource, READ_ONLY_POST_ROUTES, trustOutcomeFor } from './src/host/access.js'
 import { Dispatcher, RUN_LOG, attachRunLog, claimDispatchLock, clearAgentFailure, configureDispatcher, noteAgentFailure, parseMentions, runSummary } from './src/host/dispatcher.js'
 import { worktreeBaseFor } from './src/host/dispatch-cwd.js'
@@ -1211,28 +1212,27 @@ async function createTask(store, input) {
   // 这里是建卡唯一入口（API /task/create、studio_task_create、需求拆卡）；GitLab 导入那条路在 integrations.js 另接。
   const seeded = withClarifyHistoryItem(patch.checklist ?? template.map((text, index) => ({ id: `c${index + 1}`, text, done: false, by: '', at: 0, note: '' })), initialStatus)
   const requirementId = patch.requirementId ?? ''
+  // 需求只查一次：编号、领域继承、基线都要用它。
+  const requirementRecord = requirementId === ''
+    ? undefined
+    : store.snapshot().requirements.find(entry => entry.id === requirementId)
+  const requirementCode = String(requirementRecord?.code ?? '').trim()
   // 卡片的业务领域默认跟随所属需求：泳道按角色位派单时靠它挑对应领域专家。
   const inheritedDomain = (() => {
     const own = String(patch.domain ?? '').trim()
     if (own !== '') return own
-    const requirement = store.snapshot().requirements.find(entry => entry.id === requirementId)
-    return String(requirement?.domain ?? '').trim()
+    return String(requirementRecord?.domain ?? '').trim()
   })()
   // 记住这张卡是照着哪一版需求基线做的，需求改版后能看出谁需要返工。
-  const baseline = requirementId === ''
-    ? null
-    : (store.snapshot().requirements.find(item => item.id === requirementId)?.baseline ?? null)
+  const baseline = requirementId === '' ? null : (requirementRecord?.baseline ?? null)
   const task = {
     id: newTaskId(),
     title,
     type,
-    /* 需求卡直接用需求自己的编号（REQ-2026-00x）：按「需求内序号」编号的话，
-       每条需求的卡都会叫 REQ-001，界面上根本分不清（真机数据里 7 条需求各有一张 REQ-001）。 */
-    code: requirementId === ''
-      ? ''
-      : (type === 'requirement'
-        ? String(store.snapshot().requirements.find(entry => entry.id === requirementId)?.code ?? nextTaskCode(store.snapshot().tasks, requirementId, 'REQ'))
-        : nextTaskCode(store.snapshot().tasks, requirementId, CODE_PREFIX[type] ?? 'TASK')),
+    /* 需求卡用「需求编号-NN」（REQ-2026-003-01）：同一需求拆出来的卡要能互相区分，
+       又必须一眼看出属于哪条需求（卡号自带需求编号，卡上的紫色 chip 还带需求名称）。
+       其它类型照旧用 DEV-001 / TEST-001 / BUG-001 各自递增。 */
+    code: nextCodeForTask(store.snapshot().tasks, { requirementId, requirementCode, type }),
     requirementId,
     pointId: patch.pointId ?? '',
     releaseId: patch.releaseId ?? '',
@@ -1291,12 +1291,13 @@ async function createTask(store, input) {
   await store.mutate(state => {
     /* 编号必须在临界区里再校验：并发开卡（一次跑多条用例会连着开一批）时，快照里算出的编号会撞号。
        只补一次不够——补出来的值也可能已被同一批里的另一张占掉，所以循环到真正空位。
-       需求卡不参与重排：它的编号就是需求编号，撞了说明数据本身有问题，交给模块体检报出来。 */
-    if (task.code !== '' && task.type !== 'requirement') {
+       需求卡也要参与：按「需求编号-NN」重排，其它卡按类型前缀重排。 */
+    if (task.code !== '') {
       const taken = new Set(state.tasks.filter(entry => entry.requirementId === task.requirementId).map(entry => String(entry.code ?? '')))
+      const requirementCodeNow = String(state.requirements.find(entry => entry.id === task.requirementId)?.code ?? '')
       let guard = 0
       while (taken.has(task.code) && guard < 1000) {
-        task.code = nextTaskCode(state.tasks, task.requirementId, CODE_PREFIX[task.type] ?? 'TASK')
+        task.code = nextCodeForTask(state.tasks, { requirementId: task.requirementId, requirementCode: requirementCodeNow, type: task.type })
         guard += 1
       }
     }

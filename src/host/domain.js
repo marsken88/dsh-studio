@@ -102,7 +102,9 @@ export const REQ_STATUS_LABEL = { draft: '草稿', review: '待评审', active: 
 /** 需求评审结论：提交评审 → 通过 / 打回。 */
 export const REQ_REVIEW_STATUS = ['pending', 'approved', 'changes_requested']
 export const REQ_REVIEW_LABEL = { pending: '待评审', approved: '已通过', changes_requested: '已打回' }
-/** 卡片编号前缀：同一需求下 DEV-001、TEST-001、BUG-001 各自递增。 */
+/** 卡片编号前缀：同一需求下 DEV-001、TEST-001、BUG-001 各自递增。
+    需求卡（拆卡产物，type=requirement）不用这里的前缀，而是「需求编号-NN」（`REQ-2026-003-01`），
+    见 nextRequirementTaskCode()：卡号自带需求归属，也不会和需求编号本身混成一个。 */
 export const CODE_PREFIX = { requirement: 'REQ', design: 'DES', dev: 'DEV', test: 'TEST', bug: 'BUG', ops: 'OPS' }
 
 /** 每种卡片默认要交什么，建卡时铺成验收清单（可在设置里改）。 */
@@ -172,7 +174,7 @@ export function seedExperts() {
 /** Fresh default settings. */
 export function defaultConfig() {
   return {
-    schema: 8,
+    schema: 9,
     board: { title: '需求&任务工作空间' },
     /** 角色位白名单：defaultColumns 之外的自定义岗位（运营 / 财务 / 支持…）在这里登记后，列负责人和专家都能选（issue #150）。 */
     roles: [...ROLE_IDS],
@@ -1071,18 +1073,6 @@ export function clearDeletedReferences(tasks, deletedId) {
     }
   }
   return touched
-}
-
-/** 同一需求下，DEV-001 / TEST-001 各自递增。 */
-export function nextTaskCode(tasks, requirementId, prefix) {
-  const pattern = new RegExp(`^${prefix}-(\\d+)$`)
-  let max = 0
-  for (const task of tasks) {
-    if ((task.requirementId ?? '') !== requirementId) continue
-    const match = pattern.exec(String(task.code ?? ''))
-    if (match !== null) max = Math.max(max, Number(match[1]))
-  }
-  return `${prefix}-${String(max + 1).padStart(3, '0')}`
 }
 
 /** 需求编号按年递增：REQ-2026-001。 */

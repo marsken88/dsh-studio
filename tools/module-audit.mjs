@@ -67,13 +67,22 @@ for (const task of tasks) {
     const projects = state.config?.projects ?? []
     if (!projects.some(p => p.id === task.project)) add('卡片', '中', `${task.code || task.id} 挂的项目 ${task.project} 不存在`, task.id)
   }
-  if (task.code) codes.set(task.code, (codes.get(task.code) ?? 0) + 1)
+  /* 编号的唯一性是「同一需求内」的：DEV-001 / BUG-001 在每条需求下都会各出现一次（设计如此），
+     跨需求重复不是问题；同一需求内撞号才是。 */
+  if (task.code) {
+    const key = `${task.requirementId || '(未挂需求)'}|${task.code}`
+    codes.set(key, (codes.get(key) ?? 0) + 1)
+  }
   for (const item of task.checklist ?? []) {
     if (String(item.text ?? '').trim() === '') add('卡片', '低', `${task.code || task.id} 有一条空清单项`, task.id)
   }
   if (task.signoff && String(task.signoff.note ?? '').trim() === '') add('卡片', '低', `${task.code || task.id} 签字没有结论`, task.id)
 }
-for (const [code, count] of codes) if (count > 1) add('卡片', '中', `编号 ${code} 重复 ${count} 次`, '')
+for (const [key, count] of codes) {
+  if (count <= 1) continue
+  const [requirementId, code] = key.split('|')
+  add('卡片', '中', `编号 ${code} 在同一需求内重复 ${count} 次（${requirementId}）`, '')
+}
 
 /* -------------------------------------------------------------- 需求 --- */
 for (const req of requirements) {
