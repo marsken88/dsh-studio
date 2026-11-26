@@ -191,6 +191,23 @@ npm publish（几分钟生效，以 registry 为准）
 > 判断「收录是否生效」只看三处：`npm view @marsken/dsh-studio version`、`npm run verify:release`、以及上游 `data/plugins/marsken88__dsh-studio.yml` 的内容。市场页面显示哪个版本只是下游展示，滞后是正常的。
 
 
+
+## 2.5 版本维护：deprecate / dist-tag / unpublish
+
+发版本身走 **Trusted Publishing（OIDC）**（`release.yml`，仓库里不放令牌）。但**维护动作仍要 token**：
+npm 目前只允许 OIDC 做 `publish`，`deprecate` / `dist-tag` / `unpublish` 都需要长期凭据。
+
+两条路：
+
+1. **本机**（推荐，用完即弃）：`npm login` 后直接跑，例如
+   `npm deprecate "@marsken/dsh-studio@0.18.2" "0.18.2 与 0.18.3 内容相同；请安装 0.18.3"`；
+2. **CI**：加一个有效期最短的 Granular Access Token（只勾本包 read+write）到仓库 secret `NPM_TOKEN`，
+   然后用 `.github/workflows/npm-maintenance.yml`（Actions → npm-maintenance → Run workflow）跑
+   deprecate / dist-tag / unpublish。没配 secret 时它会直接告诉你缺什么，不会抛 ENEEDAUTH。
+
+> 2026-11-26：0.18.2 的 tarball 传播慢了约 20 分钟，当时误判成「发布失败」并重发了同内容的 0.18.3；
+> 两版都可用。这类「元数据在、包还没到」的判断现在由 `verify:release` 的 tarball 检查（带重试）覆盖。
+
 ## 3. 自查清单（收录前逐条过）
 
 - [ ] `npm run check` 全绿；干净 clone 上能构建出**逐字节一致**的产物

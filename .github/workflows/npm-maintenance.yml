@@ -1,8 +1,13 @@
 # npm 维护任务（手动触发）：deprecate / dist-tag / unpublish。
 #
-# 为什么要有它：这些操作需要 npm token，而本地机器没有（`npm whoami` → need auth）；
-# CI 里已有 NPM_TOKEN secret（release.yml 用它发布），把同样的门禁搬过来即可。
-# 只做「人已经决定要做」的一次性维护，不要在 release 流程里自动跑。
+# 为什么单独一个工作流、而且需要 NPM_TOKEN：
+#   release.yml 用的是 **Trusted Publishing（OIDC）**，npm 目前只允许它做 `publish`；
+#   `npm deprecate` / `dist-tag` / `unpublish` 仍然需要长期 token。
+#   仓库里没有 NPM_TOKEN secret 时，本工作流会**明确告诉你**这一点并退出 1，
+#   而不是抛一个看不懂的 ENEEDAUTH（2026-11-26 第一次跑就踩了）。
+#
+# 用法：Settings → Secrets → Actions 加一个有效期最短的 Granular Access Token
+#       （只勾 @marsken/dsh-studio 的 read+write），再 Actions → npm-maintenance → Run workflow。
 name: npm-maintenance
 
 on:
@@ -17,10 +22,10 @@ on:
         required: true
         default: '@marsken/dsh-studio'
       version:
-        description: '版本（deprecate / unpublish 必填；dist-tag 用 target 指定）'
+        description: '版本（deprecate / unpublish 必填）'
         required: false
       message:
-        description: 'deprecate 的提示语 / dist-tag 的 tag 名（dist-tag 用 target）'
+        description: 'deprecate 的提示语；dist-tag 时是 tag 名'
         required: false
       target:
         description: 'dist-tag 要指向的版本'
@@ -37,20 +42,34 @@ jobs:
         with:
           node-version: 22
           registry-url: https://registry.npmjs.org
-      - name: whoami
+
+      - name: 检查 NPM_TOKEN
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-        run: npm whoami
+        run: |
+          if [ -z "$NODE_AUTH_TOKEN" ]; then
+            echo "::error::这个仓库没有 NPM_TOKEN secret。"
+            echo "release.yml 走的是 Trusted Publishing（OIDC），它只能 publish；"
+            echo "deprecate / dist-tag / unpublish 需要长期 token："
+            echo "  1) npmjs.com → Access Tokens → Granular Access Token（只勾本包 read+write，有效期选最短）"
+            echo "  2) 仓库 Settings → Secrets and variables → Actions → New secret → 名字 NPM_TOKEN"
+            echo "  3) 或者在本机 'npm login' 后直接跑 npm deprecate（凭据只留在本机 ~/.npmrc）"
+            exit 1
+          fi
+          npm whoami
+
       - name: deprecate
         if: ${{ inputs.action == 'deprecate' }}
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: npm deprecate "${{ inputs.package }}@${{ inputs.version }}" "${{ inputs.message }}"
+
       - name: dist-tag
         if: ${{ inputs.action == 'dist-tag' }}
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: npm dist-tag add "${{ inputs.package }}@${{ inputs.target }}" "${{ inputs.message }}"
+
       - name: unpublish
         if: ${{ inputs.action == 'unpublish' }}
         env:
