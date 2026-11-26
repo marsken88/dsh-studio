@@ -163,12 +163,14 @@ const check = (name, ok, detail = '') => {
 let requirementId = ''
 let taskId = ''
 let childId = ''
+let eCardId = ''
 /* 命令面板那条判据要搜「探针自己造的卡」的编号：以前写死 BUG-041，
    看板里没有那张卡时必然 0 命中，把探针假红误报成面板坏了（issue #159）。 */
 let taskCode = ''
 /* ⑥e/⑥f 会临时改 test 列负责人与角色白名单：跑完必须恢复（探针可能对着真实看板跑）。 */
 let restoreColumns = null
 let restoreRoles = null
+const PROBE_ROLE = 'probe-role'
 const saveTestColumn = async owner => {
   if (owner === null || owner === undefined) return
   if (Array.isArray(owner.members)) return api('/columns/save', { status: 'test', members: owner.members, strategy: owner.strategy })
@@ -782,6 +784,7 @@ try {
   const providerTarget = sinkReady
     ? (providerBefore === 'weknora' ? 'feishu' : 'weknora')
     : (weknoraishBefore ? providerBefore : 'both')
+  const errorsBeforeReject = errors.length
   const writeAttempt = await saveOnce(providerTarget)
   await clickExact('集成健康')
   const backOk = await page.evaluate(() => {
@@ -799,6 +802,8 @@ try {
   } else {
     /* 没配全时保存必须被拒，而且提示要能看出是「没配全」——静默失败比报错更糟。 */
     check('④c 未配全 WeKnora 时保存被拒（提示含「没配全」）且配置没被写坏', writeAttempt.ok === true && writeAttempt.status === 'error' && /没配全/.test(writeAttempt.text) && backOk === true && serverDocsAfter === providerBefore, `提示 ${writeAttempt.status}：${writeAttempt.text.slice(0, 120)}；服务端回读 ${serverDocsAfter}（期望仍为 ${providerBefore}），面板显示 ${providerAfter}`)
+    /* 这一步**故意**让服务端 400：Chrome 会把它记成 console error，摘掉，别误伤最后那条检查。 */
+    errors.length = errorsBeforeReject
   }
   await saveOnce(providerBefore)
   await new Promise(resolve => setTimeout(resolve, 800))
@@ -926,7 +931,12 @@ try {
     const pane = document.querySelector('[data-settings-pane="agents"]')
     if (pane === null) return { pane: false, labels: [], options: [] }
     const selects = [...pane.querySelectorAll('select')]
-    const hit = selects.find(sel => String(sel.innerText ?? '').includes('始终允许完全访问'))
+    /* BoardUI 的 Select 是 React-Aria：原生 <select> 是隐藏的，innerText 取不到选项文案，
+       只能按 option.value 认（allow / deny 只有「提权审批」那一个有）。 */
+    const hit = selects.find(sel => {
+      const values = [...sel.options].map(option => String(option.value ?? ''))
+      return values.includes('allow') && values.includes('deny')
+    })
     return {
       pane: true,
       labels: selects.map(sel => String(sel.getAttribute('aria-label') ?? '').slice(0, 24)),
@@ -1236,12 +1246,14 @@ try {
   } else {
   restoreColumns = cfgBefore.columns?.test ?? null
   restoreRoles = Array.isArray(cfgBefore.roles) ? [...cfgBefore.roles] : null
-  const PROBE_ROLE = 'probe-role'
   if (restoreRoles !== null && restoreRoles.includes(PROBE_ROLE)) {
     await api('/config', { roles: restoreRoles.filter(role => role !== PROBE_ROLE) })
   }
   await saveTestColumn({ kind: 'none', id: '' })
-  await api('/task/update', { id: taskId, status: 'test' })
+  /* 不能拿主探针卡去挪 test：进「待测试」要过评审门禁（没评审通过会被拒，卡还在 review），
+     那样 dryRun 永远是 0 张，弹窗自然不出现。这里造一张直接落在 test 的卡。 */
+  const eCard = await api('/task/create', { title: '（探针）列负责人影响面', type: 'dev', role: 'dev', status: 'test', requirementId, pointId: 'p1' })
+  eCardId = eCard.json.task?.id ?? ''
   await clickExact('设置')
   await new Promise(resolve => setTimeout(resolve, 800))
   const columnsNav = await page.evaluate(() => {
@@ -1280,6 +1292,8 @@ try {
     return text
   }, label)
 
+  const dryProbe = await api('/columns/save', { status: 'test', members: [{ kind: 'role', id: 'product' }], strategy: 'round_robin', dryRun: true })
+  console.log('ℹ ⑥e 点候选之前的 dryRun：count=' + String((dryProbe.json?.affected?.cards ?? []).filter(card => card.willDispatch).length) + ' warning=' + String(dryProbe.json?.warning ?? '').slice(0, 60))
   const opened1 = await openTestRow()
   await new Promise(resolve => setTimeout(resolve, 400))
   const picked1 = await pickRoleCandidate()
@@ -1387,6 +1401,7 @@ try {
   } catch { /* 恢复失败不影响结论，但会在下面提一句 */ }
   if (keep !== true) {
     try {
+      if (eCardId !== '') await api('/task/delete', { id: eCardId, confirm: 'DELETE' })
       if (childId !== '') await api('/task/delete', { id: childId, confirm: 'DELETE' })
       if (taskId !== '') await api('/task/delete', { id: taskId, confirm: 'DELETE' })
       // 连云盘目录一起删：不删的话每跑一次探针就在云盘根下多一个同名文件夹（真的发生过 200 个）
