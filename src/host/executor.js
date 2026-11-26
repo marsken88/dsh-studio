@@ -20,6 +20,7 @@ import { designGate, designGateOffNote } from './design.js'
 import { requirementFolderNameOf } from './drive-folders.js'
 import { larkUploadArgs } from './lark-upload.js'
 import { commandArgs } from './cmd-args.js'
+import { runCommand } from './run-command.js'
 import { ensureKindFolder, ensureRequirementFolder } from './drive-sync.js'
 import { isStalled } from './dispatch-state.js'
 import { collectCodingFromWorktree } from './task-diff.js'
@@ -124,6 +125,25 @@ export async function verifyCodingRecord(state, task) {
       skipped: `基线分支解析不到（试过 ${candidates.join(' / ')}）：worktree.base 可能为空，或这条分支不包含任何已知基线——读不到「相对基线的改动」，不做判断`.slice(0, 300),
     }
   }
+  /* 基线已经包含 HEAD（研发把分支提交并进了 master）时，「相对基线」天然是 0 个文件 ——
+     这时改用**记录里那些提交本身**改了哪些文件当证据：提交在仓库里、且确实动了这些文件，
+     就说明「说的改动是真的」。真机 2026-11-26：REQ-001 的 master 已被合到 1f15987，
+     按基线算 0 个文件，于是 4 个文件被误报「没有实际改动」。 */
+  if (actualFiles.length === 0) {
+    const declaredShas = (coding.commits ?? []).map(item => String(item.sha ?? '').trim()).filter(item => item !== '')
+    const union = new Set()
+    for (const sha of declaredShas) {
+      const show = await git('show', '--name-only', '--format=', sha)
+      if (show.ok !== true) continue
+      for (const file of String(show.stdout ?? '').trim().split('\n')) {
+        if (file.trim() !== '') union.add(file.trim())
+      }
+    }
+    if (union.size > 0) {
+      actualFiles = [...union]
+      baseUsed = `commit:${declaredShas.join(',')}`
+    }
+  }
   const status = await git('status', '--porcelain')
   const dirty = String(status.stdout ?? '').trim().split('\n').filter(item => item !== '')
   const declaredBranch = String(coding.branch ?? '').trim()
@@ -160,18 +180,9 @@ export async function autoCollectCoding(store, taskId) {
   })
 }
 
-/** 把核对结果写成一句人话。 */
-export function codingVerifyLine(report) {
-  if (report === null || report === undefined) return ''
-  if (String(report.skipped ?? '') !== '') return String(report.skipped)
-  const bits = [`分支 ${report.branch}`]
-  if (report.branchOk !== true) bits.push(`记录里写的是 ${report.declaredBranch}`)
-  bits.push(`提交 ${report.commitCount.actual} 个、改动 ${report.fileCount.actual} 个文件`)
-  if ((report.missingCommits ?? []).length > 0) bits.push(`${report.missingCommits.length} 个记录的提交在分支上找不到`)
-  if ((report.missingFiles ?? []).length > 0) bits.push(`${report.missingFiles.length} 个记录的文件没有实际改动`)
-  if ((report.dirty ?? []).length > 0) bits.push(`还有 ${report.dirty.length} 处未提交的改动`)
-  return bits.join('；')
-}
+/* 渲染实现搬到 task-diff.js（executor 有 2000 行闸门）；这里 re-export，调用方不用改。 */
+import { codingVerifyLine } from './task-diff.js'
+export { codingVerifyLine }
 
 // ------------------------------------------------------- 接口测试执行器（P4）
 
@@ -1014,37 +1025,8 @@ export function buildDashboard(state) {
   }
 }
 
-/** 跑一个外部命令，有超时、不抛异常；lark-cli 之类没有时返回 ok:false。 */
-export function runCommand(command, args, timeoutMs = 20000, options = {}) {
-  return new Promise(resolvePromise => {
-    let child
-    // Windows 上 npm 装的 CLI（lark-cli）是 .cmd 壳，spawn 直接执行会 ENOENT，必须经 cmd.exe；
-    // 而 cmd.exe 会把 & | < > ^ % 当语法字符，所以参数要逐个加引号（见 cmd-args.js，真机两次踩过）。
-    const viaCmd = process.platform === 'win32' && command === 'lark-cli'
-    try {
-      const plan = viaCmd ? commandArgs(command, args) : { file: command, argv: args }
-      // windowsVerbatimArguments：由我们自己给参数加引号（否则 Node 的转义会和 cmd 的语法打架，
-      // 实测 `|` 仍然会被当管道 → 命令被截断）。非 cmd 路径保持默认。
-      child = spawn(plan.file, plan.argv, { windowsHide: viaCmd, windowsVerbatimArguments: viaCmd, stdio: ['ignore', 'pipe', 'pipe'], cwd: options.cwd })
-    } catch (error) {
-      resolvePromise({ ok: false, code: -1, stdout: '', stderr: String(error?.message ?? error) })
-      return
-    }
-    let stdout = ''
-    let stderr = ''
-    const timer = setTimeout(() => { child.kill('SIGKILL') }, timeoutMs)
-    child.stdout.on('data', chunk => { stdout += chunk })
-    child.stderr.on('data', chunk => { stderr += chunk })
-    child.on('error', error => {
-      clearTimeout(timer)
-      resolvePromise({ ok: false, code: -1, stdout, stderr: String(error?.message ?? error) })
-    })
-    child.on('close', code => {
-      clearTimeout(timer)
-      resolvePromise({ ok: code === 0, code, stdout, stderr })
-    })
-  })
-}
+/* 实现搬到 run-command.js（executor 有 2000 行闸门）；这里 re-export，调用方不用改。 */
+export { runCommand }
 
 /** 从飞书文档拉正文；没有 lark-cli 就如实说明，让人改成粘贴。 */
 export async function pullFeishuDoc(url) {

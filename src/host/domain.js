@@ -1637,6 +1637,8 @@ export function sanitizeCoding(raw) {
           declared: Math.max(0, Number(raw.verified.commitCount?.declared) || 0),
           actual: Math.max(0, Number(raw.verified.commitCount?.actual) || 0),
         },
+        /* 用哪条基线算的 diff（commit:<sha> 表示按提交本身算）。排查误报时第一眼要看它。 */
+        baseUsed: String(raw.verified.baseUsed ?? '').slice(0, 120),
         fileCount: {
           declared: Math.max(0, Number(raw.verified.fileCount?.declared) || 0),
           actual: Math.max(0, Number(raw.verified.fileCount?.actual) || 0),

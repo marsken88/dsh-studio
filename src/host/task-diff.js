@@ -267,3 +267,18 @@ export async function collectCodingFromWorktree(store, taskId, deps = {}) {
   }
   return { branch: facts.branch, base: facts.base, commits: facts.commits.length, files: facts.files.length }
 }
+
+/** 把「代码事实核对」的结果写成一句人话（执行记录页签与门禁提示共用）。
+ *  放在这里而不是 executor：它就是「卡上的代码事实」的一种渲染，且 executor 有 2000 行闸门。 */
+export function codingVerifyLine(report) {
+  if (report === null || report === undefined) return ''
+  if (String(report.skipped ?? '') !== '') return String(report.skipped)
+  const bits = [`分支 ${report.branch}`]
+  if (report.branchOk !== true) bits.push(`记录里写的是 ${report.declaredBranch}`)
+  const base = String(report.baseUsed ?? '')
+  bits.push(`提交 ${report.commitCount.actual} 个、改动 ${report.fileCount.actual} 个文件${base === '' ? '' : `（基线 ${base}）`}`)
+  if ((report.missingCommits ?? []).length > 0) bits.push(`${report.missingCommits.length} 个记录的提交在分支上找不到`)
+  if ((report.missingFiles ?? []).length > 0) bits.push(`${report.missingFiles.length} 个记录的文件没有实际改动`)
+  if ((report.dirty ?? []).length > 0) bits.push(`还有 ${report.dirty.length} 处未提交的改动`)
+  return bits.join('；')
+}

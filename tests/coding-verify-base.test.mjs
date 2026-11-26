@@ -65,3 +65,29 @@ test('基线彻底解析不到时返回 skipped，而不是「文件没改」', 
     rmSync(dir, { recursive: true, force: true })
   }
 })
+
+test('提交已经并进基线（master==HEAD）时，改用「记录里的提交本身」当证据', { skip }, async () => {
+  const { dir, git } = makeRepo('master', [['a.txt', 'one\n']])
+  try {
+    git('checkout', '-q', '-b', 'task/y')
+    writeFileSync(join(dir, 'c.txt'), 'three\n')
+    git('add', '-A')
+    git('commit', '-q', '-m', 'feat')
+    const sha = git('rev-parse', '--short', 'HEAD').trim()
+    // 研发把这条提交并进了 master：master 直接指向它（真实操作：merge --ff-only）
+    git('checkout', '-q', 'master')
+    git('merge', '-q', '--ff-only', 'task/y')
+    git('checkout', '-q', 'task/y')
+    const task = {
+      id: 't-v3',
+      coding: { branch: 'task/y', commits: [{ sha }], files: [{ path: 'c.txt' }] },
+      worktree: { path: dir, base: '' },
+    }
+    const out = await verifyCodingRecord({ config: {} }, task)
+    assert.equal(out.ok, true, JSON.stringify(out))
+    assert.match(String(out.baseUsed ?? ''), /^commit:/, '要标明是按提交本身算的')
+    assert.deepEqual(out.missingFiles, [])
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
