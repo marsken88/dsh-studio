@@ -6,12 +6,12 @@
 
 | 项 | 值 |
 | --- | --- |
-| dsh-studio | `package.json` `version: 0.18.0` |
+| dsh-studio | `package.json` `version: 0.18.1` |
 | DeepSeek Harness | `0.2.2-rc.1`（`dsh --version`） |
 | Node | `v24.22.2`（Linux 目标机）；本机 Windows `v24.19.0` |
 | 目标系统 | Ubuntu 24.04，`dsh web` 监听 `18080`，nginx `:80` 反代并注入 `dsh-auth-*` cookie |
 | 插件安装方式 | npm：`dsh plugin --profile web add @marsken/dsh-studio`；本地开发：`add link:~/dsh-studio`（profile `web`） |
-| 验证范围 | 0.18.0：`npm run check` 689 条测试；CI 连续绿（`main@2dd02be` 起）；目标机 `.218` 部署同版本后跑**全量 `release:preflight --probes`**（pages 52 / toast 7 / drawer 15 / cases 8 / tiers 32 / a11y 全绿 / empty 11 / panel 96/96 / smoke / sweep 全过）；真机修复项逐条在卡上留证据（派单同卡去重、签名覆盖、列未指派提示、代码事实核对基线、`/config` 顶层键白名单、四条 issue #164–#167） |
+| 验证范围 | 0.18.1：只含「执行播报改到 `task.feed`」这一处行为变更（0.18.0 之后）。`npm run check` 693 条通过、CI 绿；`.218` 部署同版本后真机验证「派单会话播报 → `feedCount=1` / `commentCount=0`」；其余验证沿用 0.18.0（全量 `release:preflight --probes`：panel 96/96、pages 52、toast 7、drawer 15、cases 8、tiers 32、a11y、empty 11、smoke、sweep） |
 | 兼容声明 | `engines.dsh: ">=0.2.2-rc.1"`、`dsh.compatibility.dshReleases: { "0.2.2-rc.1+": "compatible" }` |
 
 > 结论：只在 **0.2.2-rc.1** 上做过端到端验证。0.2.2 正式版、以及 `<0.2.2` 均未验证。
