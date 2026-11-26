@@ -162,6 +162,7 @@ const check = (name, ok, detail = '') => {
 }
 let requirementId = ''
 let taskId = ''
+let childId = ''
 /* 命令面板那条判据要搜「探针自己造的卡」的编号：以前写死 BUG-041，
    看板里没有那张卡时必然 0 命中，把探针假红误报成面板坏了（issue #159）。 */
 let taskCode = ''
@@ -337,6 +338,7 @@ try {
   check('②a1 抽屉写清本次派单的沙箱与提权审批', dispatchPolicy !== null && dispatchPolicy.includes('沙箱 ') && dispatchPolicy.includes('提权审批'), dispatchPolicy ?? '没找到 [data-dispatch-policy]')
   check('②a1 派单权限注明只对派单会话生效', await page.evaluate(() => String(document.body.innerText ?? '').includes('只对 Studio 派单的会话生效')))
   await page.screenshot({ path: join(outDir, 'dispatch-policy.png') })
+
 
   /* ②c 文档改版 → 通过过的用例要复跑（只标不改） */
   await page.evaluate(() => [...document.querySelectorAll('[role="tab"]')]
@@ -516,6 +518,34 @@ try {
     check('②b 交接页签有已填写标记', await page.evaluate(() => [...document.querySelectorAll('[role="tab"]')]
       .some(node => (node.textContent ?? '').includes('交接') && (node.textContent ?? '').includes('✓'))))
   }
+  /* ②z 父卡带未完成子卡：抽屉要列出子卡并给「打开」按钮，且整页不能崩。
+     2026-11-26 真机：statusLabelOf 的定义在合并里被丢掉、只剩调用，一打开这种卡就
+     ReferenceError → 页面级错误边界把整块看板变成「工作空间渲染失败」。 */
+  const childCard = await api('/task/create', {
+    title: '（探针）子卡未完成', type: 'bug', role: 'dev', status: 'dev',
+    parent: taskId, requirementId, pointId: 'p1',
+  })
+  childId = childCard.json.task?.id ?? ''
+  await page.keyboard.press('Escape')
+  await new Promise(resolve => setTimeout(resolve, 500))
+  const reopenParent = await page.evaluate(() => {
+    const card = [...document.querySelectorAll('[data-kanban-card]')]
+      .find(node => String(node.textContent ?? '').includes('（探针）看板卡片'))
+    if (card === undefined) return false
+    card.click()
+    return true
+  })
+  await new Promise(resolve => setTimeout(resolve, 900))
+  const pendingInfo = await page.evaluate(() => {
+    const node = document.querySelector('[data-pending-children]')
+    return {
+      text: node === null ? '' : String(node.textContent ?? '').replace(/\s+/g, ' ').trim(),
+      crashed: String(document.body.innerText ?? '').includes('渲染失败'),
+    }
+  })
+  check('②z 父卡抽屉列出未完成子卡并给「打开」按钮', reopenParent && pendingInfo.text.includes('打开') && pendingInfo.text.includes('子卡'), JSON.stringify(pendingInfo))
+  check('②z 打开带未完成子卡的卡不把页面搞崩', pendingInfo.crashed === false)
+
   await page.screenshot({ path: join(outDir, 'drawer.png') })
 
   // ③ 需求页：覆盖率口径
@@ -1348,6 +1378,7 @@ try {
   } catch { /* 恢复失败不影响结论，但会在下面提一句 */ }
   if (keep !== true) {
     try {
+      if (childId !== '') await api('/task/delete', { id: childId, confirm: 'DELETE' })
       if (taskId !== '') await api('/task/delete', { id: taskId, confirm: 'DELETE' })
       // 连云盘目录一起删：不删的话每跑一次探针就在云盘根下多一个同名文件夹（真的发生过 200 个）
       if (requirementId !== '') await api('/requirement/delete', { id: requirementId, confirm: 'DELETE', deleteFolder: true })
