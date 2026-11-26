@@ -131,7 +131,7 @@ function SectionHead({ children }) {
   return h('div', { className: SECTION_HEAD }, h('div', { className: SECTION_TITLE }, list[0]), list.slice(1))
 }
 
-function Drawer({ task, state, onClose, onChanged }) {
+function Drawer({ task, state, onClose, onChanged, onOpenTask = null }) {
   const [busy, setBusy] = React.useState(false)
   const [error, setError] = React.useState(null)
   const [comment, setComment] = React.useState('')
@@ -1468,7 +1468,16 @@ function Drawer({ task, state, onClose, onChanged }) {
                     onClick: () => void signOff('sign'),
                   }, '签字确认')),
                 pendingChildren.length > 0
-                  ? h('div', { className: 'text-caption-1-regular text-text-warning-primary', 'data-pending-children': '' }, `先收口子卡：${pendingChildren.map(item => item.code || item.id).join('、')} 还没到「已完成」，子卡没完成前主卡签不了`)
+                  ? h('div', { className: 'flex min-w-0 flex-col gap-1 rounded-lg bg-background-secondary-default p-2', 'data-pending-children': '' },
+                      h('div', { className: 'text-caption-1-regular text-text-warning-primary' }, '子卡没到「已完成」之前主卡签不了。做法：打开下面那张子卡，点它顶部的「推进到「已完成」」。'),
+                      h('div', { className: 'flex flex-wrap items-center gap-2' },
+                        pendingChildren.map(item => h(Button, {
+                          key: item.id,
+                          variant: 'secondary',
+                          size: 'sm',
+                          disabled: typeof onOpenTask !== 'function',
+                          onClick: () => { if (typeof onOpenTask === 'function') onOpenTask(item.id) },
+                        }, `打开 ${item.code || item.id}（${statusLabelOf(item.status)}）`))))
                   : null,
                 error !== null ? h('div', { className: ERR_TEXT, 'data-signoff-error': '' }, error) : null)
             : h('div', { className: 'flex min-w-0 flex-col gap-2 rounded-xl bg-background-secondary-default p-3 text-caption-1-regular text-text-primary', 'data-drawer-signoff': '', 'data-signoff-actor': String(task.signoff.actorKind ?? '') },
