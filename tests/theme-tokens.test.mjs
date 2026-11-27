@@ -30,3 +30,14 @@ test('--font-mono 的 var() 必须有回退（宿主没注入 --font-mono-source
   assert.ok(line !== undefined, '找不到 --font-mono 声明')
   assert.match(line, /var\(--font-mono-source,\s*["']?JetBrains Mono["']?\)[\s\S]*ui-monospace/, '要给 ui-monospace 当回退')
 })
+
+test('深色必须给 success 文字色（否则复用 :root 的 lime-800，暗底 2.15:1）', () => {
+  /* 不能 indexOf('.dark {')：文件头注释里也出现过这四个字（踩过）。按整行匹配找真正的块。 */
+  const lines = source('web/src/boardui/theme.css').split(/\r?\n/)
+  const darkAt = lines.findIndex(line => line.trim() === '.dark {')
+  assert.ok(darkAt >= 0, '找不到 .dark 块')
+  let closeAt = darkAt
+  while (closeAt < lines.length && lines[closeAt].trim() !== '}') closeAt += 1
+  const dark = lines.slice(darkAt, closeAt).join('\n')
+  assert.match(dark, /--color-state-success-text:\s*var\(--color-lime-500\)/, '.dark 里要显式给 lime-500')
+})

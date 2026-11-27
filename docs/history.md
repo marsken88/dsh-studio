@@ -1765,3 +1765,22 @@ header id ... and cwd identify ".../studio-t-5d1d2ad4-architect/..."` —— 宿
 
 真机取证：`actionsBelowConclusion=true`、`noteInputHidden=true`、`hasNoteToggle=true`、`gitlabDisabled=true`；
 `probe:panel 101/101`、`tests 799`（新增 3 条守卫，exec-record 共 12 条）。
+
+### 同日晚（终验必修项：深色 success 色、不适用可达、按 MR 分档、三条断言）
+
+两位专家终验后只拦下两条必修 + 一条流程问题，其余判定「可以收口」。这批发：
+
+- **深色 `--color-state-success-text`**：上一轮我插进 `.dark` 的脚本被文件里**同名自引用行**（`--color-state-success-text: var(--color-state-success-text)`）
+  骗过，判断「已有」而实际没落地 —— 深色 `+1730` 一直停在 lime-800（2.15:1）。这次按「.dark 块行范围」逐行检查后再插入，
+  真机实测 token = `oklch(76.8% .233 130.85)`（lime-500）、`data-theme=dark`、深浅截图 md5 不同。
+  **这是同一个坑第二次**（第一次是 `REVIEW_CHIP_VARIANT` 常量）：判断「要不要插入」必须看**定义所在的块**，不能看整个文件有没有这个名字。
+- **「不适用」态可达**：`publishMergeGate` 落库的 `base` 不带 `applicable`，`sanitizeMergeGate` 默认成 true → 四态里的「不适用」永远走不到。
+  现在 `base.applicable = gate.applicable !== false`。
+- **结论行按有没有 MR 分档**：没 MR 的卡（真机 5/7 张）以前被指挥「去下面同步一次」，而那个按钮必然失败。
+  现在写「合并门禁：还没关联 MR（填了 MR 号再同步）」，且「同步合并门禁」按前置 disabled。
+- **三条断言补上**（UX 指出：顺序与四态没有任何自动断言，`applicable` 这个 bug 已犯两次）：
+  `probe:panel` 新增 ②a3 两条（第一块必须是 `coding`、未同步的卡不得出现「已通过」）；
+  新增 `tests/merge-gate-applicable.test.mjs` 三条（保留 false / 默认 true / 往返不丢字段）。
+- 顺手：`textarea` 的 placeholder 也提到 secondary（上一批只改了 input）；`NOTE_BOX` 不再带文字色（它压掉了调用点的 primary）。
+
+真机：`probe:panel 103/103`、`tests 807`（806 通过 / 1 跳过）、深色截图 `dataTheme=dark` 且与浅色 md5 不同。

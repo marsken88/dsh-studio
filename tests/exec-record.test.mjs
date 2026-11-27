@@ -92,3 +92,10 @@ test('播报与技能沉淀按内容/状态条件渲染', () => {
   assert.match(s, /renderFeedSection = \(\) => \(feedCount === 0 \? null : \(/, '没有播报不渲染')
   assert.match(s, /renderSkillSection = \(\) => \(task\.status !== 'accept' && task\.status !== 'done' \? null : \(/, '技能沉淀只对验收/完成列')
 })
+
+test('结论行按有没有 MR 分档（没 MR 时不要指挥去点必然失败的按钮）', () => {
+  const s = drawer()
+  assert.match(s, /合并门禁：还没关联 MR/, '没 MR 要单独一句')
+  assert.match(s, /合并门禁：未同步（去下面「合并门禁」同步一次）/, '有 MR 才说去同步')
+  assert.match(s, /disabled: busy \|\| mergeRun\.busy \|\| !\(Number\(task\.gitlabMR\?\.iid \?\? 0\) > 0\)/, '同步按钮要前置 disabled')
+})

@@ -451,6 +451,22 @@ try {
     if (node === null) return false
     return node.querySelector('[data-diff-range]') !== null || /没配代码目录|不是可用的 git 仓库|找不到基线分支/.test(String(node.textContent ?? ''))
   }, { timeout: 8000, polling: 200 }).catch(() => {})
+  /* ②a3 区块顺序：结论块（id=coding）必须是第一块 —— 以前它排在最后，前面垫着 diff/技能/检查/门禁/播报。 */
+  const sectionOrder = await page.evaluate(() => [...document.querySelectorAll('[data-drawer-section]')]
+    .filter(node => getComputedStyle(node).display !== 'none')
+    .map(node => node.getAttribute('data-drawer-section')))
+  check('②a3 执行记录页把「执行记录」排在第一块',
+    sectionOrder[0] === 'coding',
+    JSON.stringify(sectionOrder.slice(0, 6)))
+  check('②a3 四态：没同步过的卡写「未同步/还没关联 MR」，不写「已通过」',
+    await page.evaluate(() => {
+      const node = document.querySelector('[data-review-conclusion]')
+      if (node === null) return false
+      const state = node.getAttribute('data-gate-state')
+      const text = String(node.textContent ?? '')
+      return state === 'unsynced' ? !text.includes('已通过') : true
+    }),
+    await page.evaluate(() => String(document.querySelector('[data-review-conclusion]')?.textContent ?? '')))
   const diffSection = await page.evaluate(() => document.querySelector('[data-drawer-diff]')?.textContent ?? null)
   check('②a2 执行记录里有「代码改动」区', diffSection !== null, diffSection === null ? '没找到 [data-drawer-diff]' : '')
   check('②a2 读不到仓库时说清原因（不空着不报错）', diffSection !== null && /没配代码目录|不是可用的 git 仓库|找不到基线分支/.test(diffSection), String(diffSection ?? '').slice(0, 120))
