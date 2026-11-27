@@ -1601,3 +1601,21 @@ header id ... and cwd identify ".../studio-t-5d1d2ad4-architect/..."` —— 宿
 **踩到一个坑（值得记）**：分区可见性写在 `client.src.js` 的内联 CSS 里，我先改了
 `web/src/legacy.js` —— 那是 `make-legacy` 的**生成产物**，构建时被覆盖，于是「切了页签但五个分区
 同时可见」。真正的源是 `client.src.js`；判据是构建前后产物体积有没有变（那次没变 = 白改）。
+
+### 同日晚（效能页第三批 C：跨页容器）
+
+五个页面（工作台 / 需求 / 用例 / 版本 / 效能）各抄了一份同样的容器常量，且：
+
+- **没有最大宽度** —— 2560 宽屏下单行文字到过 **2138px（≈178 字）**；
+- **页面与面板同色**（都 `background-primary`），面板只有一根 1px 边，等于没有边界；
+- 改一处要抄五遍，已经开始走样（效能页的 `PANEL` 因为分批改多出了 `shadow-xs`）。
+
+收进 `web/src/studio/pages/layout.js` 一份：`PAGE` / `PANEL` / `PANEL_HEAD` / `PANEL_BODY` / `STICKY`。
+`PAGE` 现在：
+
+- 页面底色 `background-secondary`（面板保持 primary，靠底色差 + 阴影分层）；
+- 每个直接子块 `mx-auto w-full max-w-[1440px]` —— 实测最宽文字块从 **2138px → 1438px**；
+- `STICKY` 给效能页的筛选行与分区页签吸顶（长页面滚到 1600px 处也能换区间/换页签）。
+
+验证：`verify:pages` 56/56、218 真机 `probe:panel` 99/99、`verify:audit` 29 模块 0 违规；
+2560 实测五页最宽文字块 572 / 786 / 1036 / 1406 / **1438** px。
