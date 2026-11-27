@@ -1712,3 +1712,25 @@ header id ... and cwd identify ".../studio-t-5d1d2ad4-architect/..."` —— 宿
 
 > 附注：P2 那次脚本把 `drawer.js` 的行尾从 CRLF 写成 LF，合并 diff 看起来像整文件重写（3183 删 / 3214 增）；
 > 内容无变化，且 `web/src/studio` 下其它模块本来就是 LF，所以保留现状、不来回折腾。
+
+### 同日晚（专家复验 → 两个真 bug 与两处颜色）
+
+两位专家（UI 视觉验收设计师 / UX 架构师）复验后**都不放行**，各自挖到同一个真 bug 与一个塌陷：
+
+- **[真 bug] 结论行「合并门禁：已通过」是假阳性**：`mergeGate === null` 时 `blockers` 兜成空数组 →
+  直接写「已通过」。而 7/7 张有执行记录的卡 `mergeGate` 全是 null（加截图那张 = 8/8），
+  **这是默认行为**。同屏的「合并门禁」块当时只有「同步合并门禁」按钮 —— 同页自相矛盾。
+  现在四态：**未同步 / 不适用（applicable=false）/ 还差 N 项 / 已通过（只认 state==='success'）**，
+  `sanitizeMergeGate` 也补回 `applicable`（以前被丢，面板分不清「不适用」和「通过」）。
+- **[塌陷] 640px 抽屉下整块被压扁**：结论行插在不换行的 `PANEL_HEAD` 里，`GROW` 被挤到 0–8px，
+  agent 行变成一列一字、面板高度约 3.4k px。现在结论行**独占一行**、头部加 `flex-wrap`、
+  `GROW` 给 `basis-40`。真机实测（640）：面板高 **3.4k → 456px**、GROW 宽 **0–8 → 397px**。
+- **两处颜色**：深色 `--color-state-success-text` 一直是 lime-800（暗色下 2.15:1）→ 补 lime-500；
+  浅色 `--color-text-error-primary` 从 red-500（3.81:1）提到 red-600（4.77:1）；
+  输入框 placeholder 从 `text-tertiary` 提到 `text-secondary`。
+
+真机取证：`data-gate-state=unsynced`、结论行为「架构师 · 11-22 17:03 · 合并门禁：未同步（去下面「合并门禁」同步一次）」。
+`probe:panel 101/101`、`tests 799`（798 通过 / 1 跳过）。
+
+**仍未做（专家列为下一批 P0）**：区块重排（执行记录挪到 diff 之后第一块、技能沉淀/播报按状态条件渲染、
+项目检查并入门禁），以及「主行动进结论行」。

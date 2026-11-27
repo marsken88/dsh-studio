@@ -89,6 +89,8 @@ export function sanitizeMergeGate(raw) {
   const state = ['success', 'failed', 'pending'].includes(String(raw.state)) ? String(raw.state) : 'pending'
   return {
     at,
+    /* applicable 以前在这里被丢掉：面板只能看到 blockers 空，于是「不适用」被当成「已通过」。 */
+    applicable: raw.applicable !== false,
     by: String(raw.by ?? '').slice(0, 40),
     state,
     name: String(raw.name ?? MERGE_GATE_NAME).slice(0, 40),

@@ -19,7 +19,7 @@ const HINT = 'text-caption-1-regular text-text-tertiary'
 const REVIEW_CHIP_VARIANT = { approved: 'lime', changes_requested: 'rose', pending: 'yellow' }
 /* 行内代码块：以前 <code> 没有容器、字号跑出字阶（13px 混在 12px 里），与文件 chip 的语言不一致。 */
 const CODE_CHIP = 'shrink-0 rounded bg-background-secondary-default px-1 font-mono text-caption-1-regular text-text-secondary'
-const GROW = 'min-w-0 flex-1'
+const GROW = 'min-w-0 flex-1 basis-40'
 const ROW = 'flex min-w-0 flex-wrap items-center gap-2'
 const FIELD = 'flex min-w-0 flex-col gap-1'
 const LABEL = 'text-caption-1-medium text-text-secondary'
@@ -29,7 +29,9 @@ const SECTION_TITLE = 'text-title-2-semibold text-text-primary'
 const SECTION_BODY = 'flex min-w-0 flex-col gap-3'
 const ACTIONS = 'flex flex-wrap items-center gap-2'
 const PANEL = 'flex min-w-0 flex-col gap-2 rounded-xl border border-separator-border bg-background-primary-default p-3'
-const PANEL_HEAD = 'flex min-w-0 items-start gap-2'
+/* 头部元素多（徽标 / 身份 / 单测 / 两个按钮）：不给 wrap 的话窄抽屉里 GROW 会被压到 0–8px，
+   身份行变成一列一字，整块高度飙到几千像素（视觉验收 640px 实测）。 */
+const PANEL_HEAD = 'flex min-w-0 flex-wrap items-start gap-2'
 const PANEL_LINE = 'min-w-0 break-words text-body-2-semibold text-text-primary'
 const ART_TITLE = 'text-body-2-semibold text-text-primary'
 const ART_REF = 'break-words font-mono text-caption-1-regular text-text-secondary'
@@ -2329,15 +2331,7 @@ function Drawer({ task, state, onClose, onChanged, onOpenTask = null }) {
               h('div', { className: PANEL_HEAD },
                 /* 语义上色：通过=绿、要求修改=红、待评审=黄。以前恒为 gray，只能靠读字分辨。 */
                 h(ChipField, { variant: REVIEW_CHIP_VARIANT[coding.review.status] ?? 'gray', 'data-review': coding.review.status }, CODING_REVIEW_LABEL[coding.review.status] ?? coding.review.status),
-                /* 结论行：谁在什么时候给的结论 + 合并门禁还差什么（评审的下一棒就是合并）。 */
-                (() => {
-                  const blockers = Array.isArray(task.mergeGate?.blockers) ? task.mergeGate.blockers : []
-                  const who = coding.review.by === '' ? '未记评审人' : coding.review.by
-                  const when = coding.review.at > 0 ? fmtTime(coding.review.at) : '—'
-                  return h("div", { className: HINT, 'data-review-conclusion': coding.review.status },
-                    `${who} · ${when}${blockers.length === 0 ? " · 合并门禁：已通过" : ` · 还差 ${blockers.length} 项：${blockers.slice(0, 2).join("；")}${blockers.length > 2 ? " 等" : ""}`}`)
-                })(),
-                h('div', { className: GROW },
+               h('div', { className: GROW },
                   h('div', { className: PANEL_LINE }, [coding.agent || '未登记 agent', coding.model, coding.branch].filter(Boolean).join(' · ')),
                   coding.context === '' ? null : h('details', { 'data-coding-context': '' },
                     h('summary', { className: HINT + ' cursor-pointer', title: coding.context }, coding.context.length > 80 ? coding.context.slice(0, 80) + '…' : coding.context),
@@ -2365,6 +2359,24 @@ function Drawer({ task, state, onClose, onChanged, onOpenTask = null }) {
                   }, verify.busy ? '核对中…' : (verify.line === '' ? '核对代码事实' : '再核对一次')),
                 ),
                 h(Button, { variant: 'ghost', size: 'sm', disabled: busy, title: '拉 MR 的改动、逐条提交、流水线与 CI 单测结果，和自报的文件数/提交数/单测数比一遍', onClick: () => void verifyGitlab() }, '从 GitLab 核对'),
+              /* 结论行（独占一行，不参与头部宽度竞争）。四态：未同步 / 不适用 / 还差 N 项 / 已通过。
+                 以前 mergeGate===null 时 blockers 兜成空数组 → 直接写「已通过」，而这卡的门禁从未算过。 */
+              (() => {
+                const gate = task.mergeGate
+                const who = coding.review.by === '' ? '未记评审人' : coding.review.by
+                const when = coding.review.at > 0 ? fmtTime(coding.review.at) : '—'
+                const blockers = Array.isArray(gate?.blockers) ? gate.blockers : []
+                let gateText = '合并门禁：未同步（去下面「合并门禁」同步一次）'
+                if (gate !== null && gate !== undefined) {
+                  if (gate.applicable === false) gateText = '合并门禁：不适用（这张卡没有代码改动）'
+                  else if (blockers.length > 0) gateText = `合并门禁：还差 ${blockers.length} 项：${blockers.slice(0, 2).join('；')}${blockers.length > 2 ? ' 等' : ''}`
+                  else if (gate.state === 'success') gateText = '合并门禁：已通过'
+                  else if (gate.state === 'failed') gateText = '合并门禁：未通过（见下方门禁块）'
+                  else gateText = '合并门禁：待检查'
+                }
+                return h('div', { className: HINT, 'data-review-conclusion': coding.review.status, 'data-gate-state': gate === null || gate === undefined ? 'unsynced' : (gate.applicable === false ? 'n/a' : gate.state) },
+                  `${who} · ${when} · ${gateText}`)
+              })(),
               ),
               verify.line === ''
                 ? (coding.verified === null || coding.verified === undefined
