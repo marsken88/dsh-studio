@@ -72,3 +72,23 @@ test('P2：提交列表折叠 + 行内 code 有容器 + 空态文案不重复', 
   assert.match(s, /h\('code', \{ className: CODE_CHIP \}/, '提交号要用它')
   assert.ok(!/hint: '改代码要留记录：谁、什么模型、改了什么。'/.test(s), '空态 hint 不该与小节说明逐字重复')
 })
+
+test('主行动贴到结论旁：评审通过/要求修改常显，意见输入默认收起', () => {
+  const s = drawer()
+  assert.match(s, /'data-review-actions': ''/, '要有主行动行')
+  assert.match(s, /'data-review-note-toggle': ''/, '要有「写意见」开关')
+  assert.match(s, /noteOpen \? h\('div', \{ className: 'flex min-w-0 flex-wrap items-center gap-2' \},/, '意见输入默认不渲染')
+  assert.match(s, /const \[noteOpen, setNoteOpen\] = React\.useState\(false\)/)
+})
+
+test('「从 GitLab 核对」没关联 MR 时 disabled（不再点下去才报错）', () => {
+  const s = drawer()
+  assert.match(s, /disabled: busy \|\| !\(Number\(task\.gitlabMR\?\.iid\) > 0\)/, '前置条件要进 disabled')
+  assert.match(s, /这张卡还没关联 MR/, 'disabled 时要说清原因')
+})
+
+test('播报与技能沉淀按内容/状态条件渲染', () => {
+  const s = drawer()
+  assert.match(s, /renderFeedSection = \(\) => \(feedCount === 0 \? null : \(/, '没有播报不渲染')
+  assert.match(s, /renderSkillSection = \(\) => \(task\.status !== 'accept' && task\.status !== 'done' \? null : \(/, '技能沉淀只对验收/完成列')
+})
