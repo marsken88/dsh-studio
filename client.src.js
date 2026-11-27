@@ -540,9 +540,14 @@ html[data-dsh-theme="light"] [class*="rightbarCol"] { background: #fafafa !impor
    颜色只取 BoardUI 的语义 token，字号走 4px 档（正文 13 / 标题 18·16·14 / 代码 12），
    行高落在 20·24·16 上。{--ds-*} 只在单文件产物（没有 index.css）里当兜底。 */
 /* 效能页分区：同上，只显示当前 pane 的直接子块。 */
+/* 分区切换：每个 pane 只显示「标了自己名字」的块。
+   以前这里把 pane id 写死成 overview / efficiency / ai / context；
+   效能页改成五个分区（overview / rhythm / quality / cost / context）后，
+   新 id 不再是隐藏规则的一部分 —— 表现为「切了页签但所有分区同时可见」。 */
 [data-analytics-pane="overview"] > [data-analytics-panel]:not([data-analytics-panel="overview"]),
-[data-analytics-pane="efficiency"] > [data-analytics-panel]:not([data-analytics-panel="efficiency"]),
-[data-analytics-pane="ai"] > [data-analytics-panel]:not([data-analytics-panel="ai"]),
+[data-analytics-pane="rhythm"] > [data-analytics-panel]:not([data-analytics-panel="rhythm"]),
+[data-analytics-pane="quality"] > [data-analytics-panel]:not([data-analytics-panel="quality"]),
+[data-analytics-pane="cost"] > [data-analytics-panel]:not([data-analytics-panel="cost"]),
 [data-analytics-pane="context"] > [data-analytics-panel]:not([data-analytics-panel="context"]) { display:none; }
 
 /* 需求「先聊清楚」：对话时只显示对话区与模式切换，表单字段先藏起来。 */
