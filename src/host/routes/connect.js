@@ -97,9 +97,11 @@ if (method === 'POST' && route === '/repos/save') {
   const merged = {
     ...incoming,
     id: wantedId,
-    // An empty token field means "keep the one already stored".
-    token: String(incoming.token ?? '').trim() || (saved?.token ?? ''),
+    /* 空 token = 「保留已存的」；要**撤销**就得显式 clearToken（令牌泄漏时界面得能撤掉，
+       以前只能删项目或改库）。 */
+    token: incoming.clearToken === true ? '' : (String(incoming.token ?? '').trim() || (saved?.token ?? '')),
   }
+  delete merged.clearToken
   await host.applyConfig(store, { gitlab: { projects: host.upsertById(existing, merged) } })
   // 只回公开视图：token 不能出现在响应里。
   const state = host.publicState(store)
@@ -133,9 +135,10 @@ if (method === 'POST' && route === '/bots/save') {
   const merged = {
     ...incoming,
     id: wantedId,
-    // An empty webhook field means "keep the one already stored".
-    webhook: String(incoming.webhook ?? '').trim() || (saved?.webhook ?? ''),
+    /* 空 webhook = 「保留已存的」；要撤销用 clearWebhook（机器人被删/换群时省得删了重建）。 */
+    webhook: incoming.clearWebhook === true ? '' : (String(incoming.webhook ?? '').trim() || (saved?.webhook ?? '')),
   }
+  delete merged.clearWebhook
   await host.applyConfig(store, { feishu: { bots: host.upsertById(existing, merged) } })
   const state = host.publicState(store)
   host.sendJson(res, 200, { ok: true, bots: state.config.feishu.bots, state })

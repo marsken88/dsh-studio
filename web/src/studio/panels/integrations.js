@@ -74,6 +74,19 @@ export function ReposPanel({ config, onChanged }) {
     try { await api('/repos/save', { project: draft }); setDraft(null); setNote('已保存'); toast('已保存'); await onChanged() }
     catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)) } finally { setBusy(false) }
   }
+  /* 密钥只能写不能清是个真问题：令牌泄漏时界面撤不掉，只能删项目或改库。
+     /repos/save 现在认 clearToken（空 token 仍然是「保留旧的」）。 */
+  const clearToken = async () => {
+    if (draft === null) return
+    if (!(await confirmDialog('清掉这个仓库已保存的令牌？清掉后同步会停，直到重新填一个。', { title: '清除令牌', danger: true, okText: '清除' }))) return
+    setBusy(true); setError(null); setNote(null)
+    try {
+      await api('/repos/save', { project: { ...draft, token: '', clearToken: true } })
+      setDraft({ ...draft, token: '', tokenSet: false })
+      setNote('已清除：重新填一个再保存即可恢复')
+      await onChanged()
+    } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)) } finally { setBusy(false) }
+  }
   const remove = async project => {
     if (!(await confirmDialog(`删除 GitLab 项目「${project.name}」？已同步的卡片会保留。`, { title: '删除 GitLab 项目', danger: true, okText: '删除' }))) return
     setBusy(true); setError(null)
@@ -148,6 +161,11 @@ export function ReposPanel({ config, onChanged }) {
             onChange: e => set('token', e.target.value),
           }),
           '需要 api 权限；只写入磁盘，不回显。'),
+        draft.tokenSet === true
+          ? h('div', { className: 'flex min-w-0 flex-wrap items-center gap-2', 'data-clear-token': '' },
+            h(Button, { variant: 'secondary', size: 'sm', disabled: busy, onClick: () => void clearToken() }, '清除已保存的 Token'),
+            h('span', { className: HINT }, '令牌泄漏时用它撤销：清掉后这个仓库的同步会停，直到重新填一个。'))
+          : null,
         fieldOf(h, '只同步带此标签的 Issue',
           h(TextField, { value: draft.syncLabel, placeholder: '留空则同步全部 open Issue', onChange: e => set('syncLabel', e.target.value) })),
         h(SwitchToggle, {
@@ -334,6 +352,17 @@ export function BotsPanel({ config, onChanged }) {
             onChange: e => set('webhook', e.target.value),
           }),
           '在飞书群里「添加机器人 → 自定义机器人」即可拿到，不需要自建应用。'),
+        draft.webhookSet === true
+          ? h(Button, {
+            variant: 'secondary', size: 'sm', disabled: busy, 'data-clear-webhook': '',
+            onClick: async () => {
+              if (!(await confirmDialog('清掉这个机器人已保存的 Webhook？清掉后这个群收不到通知。', { title: '清除 Webhook', danger: true, okText: '清除' }))) return
+              setBusy(true)
+              try { await api('/bots/save', { bot: { ...draft, webhook: '', clearWebhook: true } }); setDraft({ ...draft, webhook: '', webhookSet: false }); setNote('已清除 Webhook'); await onChanged() }
+              catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)) } finally { setBusy(false) }
+            },
+          }, '清除已保存的 Webhook')
+          : null,
         fieldOf(h, '备注群 chat_id（可选）',
           h(TextField, { value: draft.chatId, placeholder: 'oc_…', onChange: e => set('chatId', e.target.value) })),
         fieldOf(h, '收哪些事件',

@@ -80,17 +80,17 @@ async function runOnce(round) {
       } else {
         const saveCmd = cmd => post('/projects/save', { project: { ...project, qualityCmd: cmd, qualityTimeoutMs: 60000 } })
         await saveCmd('node --version')
-        const qualityOk = await post('/task/quality', { id: card.id, by: '产品' })
+        const qualityOk = await post('/task/quality', { id: card.id, by: '产品', wait: true })
         step('项目检查：跑过了', qualityOk.body.quality?.ok === true && String(qualityOk.body.quality?.cmd ?? '') === 'node --version',
           '退出码 ' + String(qualityOk.body.quality?.exitCode) + ' · ' + String(qualityOk.body.quality?.ms ?? '?') + 'ms')
         await saveCmd('node -e "process.exit(3)"')
-        const qualityBad = await post('/task/quality', { id: card.id, by: '产品' })
+        const qualityBad = await post('/task/quality', { id: card.id, by: '产品', wait: true })
         const gateBlocked = (qualityBad.body.gate?.blockers ?? []).some(text => String(text).includes('项目检查不通过'))
         step('项目检查：跑挂了拦准出', qualityBad.body.quality?.ok === false && gateBlocked,
           JSON.stringify((qualityBad.body.gate?.blockers ?? []).slice(0, 2)))
         // 还原成能过的状态：这张卡后面还要推到「已完成」
         await saveCmd('node --version')
-        await post('/task/quality', { id: card.id, by: '产品' })
+        await post('/task/quality', { id: card.id, by: '产品', wait: true })
         await saveCmd(String(project.qualityCmd ?? ''))
       }
     }

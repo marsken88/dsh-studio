@@ -124,6 +124,23 @@ export function LdapPanel({ config, onChanged }) {
     }
   }
 
+  /* 撤销已保存的服务账号密码：密码只能写不能清的话，泄漏时界面撤不掉。
+     单独走一次 /config（clearBindPassword），不并进上面的 save —— 免得「点保存」顺手把密码清了。 */
+  const clearBindPassword = async () => {
+    if (!(await confirmDialog('清掉已保存的服务账号密码？清掉后 LDAP 登录会失败，直到重新填一个。', { title: '清除服务账号密码', danger: true, okText: '清除' }))) return
+    setBusy(true); setNote(null); setError(null)
+    try {
+      await api('/config', { ldap: { clearBindPassword: true } })
+      patch({ bindPassword: '' })
+      setNote('已清除服务账号密码：重新填一个再保存即可恢复')
+      await onChanged()
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause))
+    } finally {
+      setBusy(false)
+    }
+  }
+
   const save = async () => {
     setBusy(true); setNote(null); setError(null)
     try {
@@ -201,6 +218,13 @@ export function LdapPanel({ config, onChanged }) {
             placeholder: ldap.bindPasswordSet === true ? '已保存，留空表示不修改' : '写一次就进密钥文件',
             onChange: event => patch({ bindPassword: event.target.value }),
           }),
+          ldap.bindPasswordSet === true
+            ? h('div', { className: 'flex min-w-0 flex-wrap items-center gap-2' },
+              h(Button, {
+                variant: 'secondary', size: 'sm', 'data-clear-bind-password': '', disabled: busy,
+                onClick: () => void clearBindPassword(),
+              }, '清除已保存的密码'))
+            : null,
         ),
         h('div', { className: FIELD, style: { flex: 1 } },
           h('div', { className: LABEL }, '用户过滤器（{user} 会被替换）'),

@@ -1061,10 +1061,16 @@ function Drawer({ task, state, onClose, onChanged, onOpenTask = null }) {
     }
   }
   // 项目检查：在项目目录（有 worktree 就用它）里跑一次本地质量命令，结果写回卡片并参与准出。
+  // 服务端改成「提交即返回 202」：编译类命令能跑 1～2 分钟，同步等会被反代 60s 断连，
+  // 结果本来就会写回卡上，这里只要说清「已提交」，结果靠已有的轮询回来。
   const runQuality = async () => {
     setQualityRun({ busy: true, line: '' })
     try {
       const result = await api('/task/quality', { id: task.id, by: '人' })
+      if (result.queued === true) {
+        setQualityRun({ busy: false, line: '已提交后台执行：跑完会写回这张卡（不用等在这里）' })
+        return
+      }
       const last = result.quality ?? {}
       const exit = last.exitCode === null || last.exitCode === undefined ? '' : ` · 退出码 ${last.exitCode}`
       setQualityRun({

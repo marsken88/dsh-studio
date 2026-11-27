@@ -1092,3 +1092,12 @@ node tools/visual/ui-audit.mjs --base ... --theme dark --only board,drawer
 DOM 钩子：`[data-diff-tree]`、`[data-diff-file]`、`[data-change]`、`[data-diff-content]`；
 panel-probe ⑦ 用真卡断言「树里的行数 > 文件数（说明目录分组生效）」「点第二个文件内容区跟着换」
 「patch 行数 > 5」。树高上限 280px、独立滚动，避免大改动把抽屉撑爆。
+
+## 构建体积观察线（2026-11-27 调整）
+
+单文件 IIFE `dist/client.js` 的观察线从 1470 kB 抬到 **1490 kB**（实测 1472 kB）。
+这一轮增加的是**设置项入口与交互闭环**（多维表格镜像 / 缺陷 SLA 与默认验收清单 / 自动重试三件套 /
+shell 默认目录 / 密钥清除 / 乐观锁提示），没有引入新的组件库或第三方依赖。
+
+**这一档是硬顶**：超过 1490 kB 就不再抬线，改为分片加载或把 BoardUI 换回宿主注入 —— 
+单文件产物到 1.5 MB 时宿主首屏会明显变慢。

@@ -20,6 +20,8 @@ window.__ModuleLoader__.load({
     // shadcn/ui 基础组件（由打包后的 main.jsx 注入）；单文件版本里保持 null，
     // 所有用到它的地方都带 legacy 兜底，所以两种产物行为一致。
     let UIKIT = null
+    /* 宿主侧把 BoardUI 那套组件注进来（见 web/src/main.jsx 的 useUIKit 调用）。
+       这个名字是被外部消费的公共 API，不是本地死代码 —— 删掉会让整个面板退回原生控件。 */
     function useUIKit(next) { UIKIT = next ?? null }
     function kit(name) { return UIKIT === null ? null : (UIKIT[name] ?? null) }
 
