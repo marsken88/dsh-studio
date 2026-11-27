@@ -22,13 +22,14 @@ const CTX_CHIP = 'flex min-w-[84px] flex-col gap-1 rounded-lg border border-sepa
 /* [&>*]:shrink-0 —— 纵向 flex 默认会压缩子项：内容高于视口时每个分区被压扁，
    而分区自己 overflow-hidden，里面的内容就被裁掉（工作台出现「空条」的根因）。 */
 const PAGE = 'flex min-w-0 flex-col gap-4 overflow-auto p-4 [&>*]:shrink-0'
-const PANEL = 'flex min-w-0 flex-col overflow-hidden rounded-xl border border-separator-border bg-background-primary-default'
+const PANEL = 'flex min-w-0 flex-col overflow-hidden rounded-xl border border-separator-border bg-background-primary-default shadow-xs'
 const PANEL_HEAD = 'flex flex-wrap items-center gap-2 border-b border-separator-border px-4 py-3 text-body-2-medium text-text-primary'
 const PANEL_BODY = 'flex min-w-0 flex-col gap-3 p-4'
-const HINT = 'text-caption-1-regular text-text-tertiary'
-const SECTION = 'mt-4 flex flex-wrap items-baseline gap-2 text-caption-1-medium text-text-tertiary'
-const FOOT = 'mt-2 border-t border-dashed border-separator-border pt-2 text-caption-1-regular text-text-tertiary'
-const KV = 'flex items-baseline justify-between gap-3 border-b border-dashed border-separator-border py-1 text-body-2-regular last:border-b-0'
+/* 正文用 text-secondary：text-tertiary 在浅色只有 2.58:1、深色 1.94:1，正文读不清（UI 评审 P0-2）。 */
+const HINT = 'text-caption-1-regular text-text-secondary'
+const SECTION = 'mt-4 flex flex-wrap items-baseline gap-2 border-t border-neutral-200 pt-3 text-body-2-medium text-text-secondary dark:border-neutral-600'
+const FOOT = 'mt-2 border-t border-neutral-200 pt-2 text-caption-1-regular text-text-secondary dark:border-neutral-600'
+const KV = 'flex items-baseline justify-between gap-3 border-b border-neutral-200 py-1 text-body-2-regular last:border-b-0 dark:border-neutral-700'
 const ROW = 'flex min-w-0 flex-wrap items-center gap-2'
 const GRID = 'grid grid-cols-1 gap-3 xl:grid-cols-12'
 const KPI_GRID = 'grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-5'
@@ -137,6 +138,8 @@ export function AnalyticsPage({ state, onOpenTask, onFixPrices }) {
   // 面板底部的小注：把每块面板补满（等高栅格里不会被撑出一片空白），顺带给一句「所以呢」
   const slowestColumn = (data.columns ?? []).reduce((best, column) => (best === null || column.avgDays > best.avgDays ? column : best), null)
   const done14 = (data.throughput ?? []).reduce((sum, point) => sum + point.count, 0)
+  /* 柱子是后端按 min(days,14) 出的：标题与日均都得跟柱子的数量走，不能写死 14。 */
+  const throughputDays = (data.throughput ?? []).length || Math.min(days, 14)
   const enabledExperts = (load?.experts ?? []).filter(item => item.enabled)
   const loadOpen = enabledExperts.reduce((sum, item) => sum + item.open, 0)
   const loadOverdue = enabledExperts.reduce((sum, item) => sum + (item.overdue ?? 0), 0)
@@ -381,10 +384,15 @@ export function AnalyticsPage({ state, onOpenTask, onFixPrices }) {
           ov.byPerson.length === 0
             ? null
             : h('div', { className: FOOT }, '谁放的：' + ov.byPerson.map(item => `${item.by} ${item.count} 次`).join(' · ')),
+          /* 每一条都是「某张卡/某条需求被强推」，以前是纯灰字、点不动 —— 同页另外两个列表都能点开。
+             有 id 就挂 onClick + 键盘（Enter/Space），没有 id 的老数据保持纯文本。 */
           ov.list.map(item => h('div', {
             key: `${item.kind}:${item.id}`,
-            className: FOOT,
+            className: FOOT + (item.kind === 'card' && typeof onOpenTask === 'function' ? ' cursor-pointer hover:text-text-primary' : ''),
             title: item.reason === '' ? '这次没写原因' : item.reason,
+            ...(item.kind === 'card' && typeof onOpenTask === 'function'
+              ? { role: 'button', tabIndex: 0, 'data-override-open': item.id, onClick: () => onOpenTask(item.id), onKeyDown: event => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); onOpenTask(item.id) } } }
+              : {}),
           }, `${item.kind === 'card' ? '卡' : '需求'} ${item.code || item.id} ${item.title} · ${item.by || '（没记签名人）'} · ${fmtTime(item.at)} — ${item.reason === '' ? '（没写原因）' : item.reason}`)),
         )),
     h('div', { className: SECTION, 'data-analytics-panel': 'efficiency' },
@@ -408,7 +416,7 @@ export function AnalyticsPage({ state, onOpenTask, onFixPrices }) {
           })),
         ),
         h('div', { className: PANEL },
-          h('div', { className: PANEL_HEAD }, '近 14 天完成'),
+          h('div', { className: PANEL_HEAD }, `近 ${throughputDays} 天完成`, throughputDays < 14 ? h('span', { className: HINT }, `区间选择器当前是 ${days} 天；超过 14 天也只画 14 根柱`) : null),
           h('div', { className: PANEL_BODY },
             h('div', { className: 'flex h-20 items-end gap-1 border-b border-separator-border pt-2' },
               (data.throughput ?? []).map((point, index) => h('div', { key: point.day, className: 'flex h-full flex-1 flex-col items-center justify-end gap-1', title: `${point.day}：完成 ${point.count} 张` },
@@ -416,7 +424,7 @@ export function AnalyticsPage({ state, onOpenTask, onFixPrices }) {
                 h('span', { className: 'h-3 whitespace-nowrap text-caption-1-regular text-text-tertiary' }, index % 2 === 0 ? point.day : ''),
               )),
             ),
-            h('div', { className: FOOT }, `近 14 天合计 ${done14} 张 · 日均 ${(done14 / 14).toFixed(1)} 张 · 空着的日子是没卡完成，不是没数据`),
+            h('div', { className: FOOT }, `近 ${throughputDays} 天合计 ${done14} 张 · 日均 ${(done14 / Math.max(1, throughputDays)).toFixed(1)} 张 · 空着的日子是没卡完成，不是没数据`),
           ),
         ),
       ),
@@ -574,7 +582,7 @@ export function AnalyticsPage({ state, onOpenTask, onFixPrices }) {
             key: item.id,
             title: `${item.code === '' ? '' : `${item.code} `}${item.title}`,
             hint: `倒退 ${item.backward} 次 · 现在在「${(state.statuses.find(entry => entry.id === item.status) ?? {}).label ?? item.status}」`,
-            action: h(Button, { variant: 'ghost', size: 'small', onClick: () => onOpenTask(item.id) }, '打开'),
+            action: h(Button, { variant: 'ghost', size: 'sm', onClick: () => onOpenTask(item.id) }, '打开'),
           })),
         ),
       ),
