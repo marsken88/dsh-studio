@@ -1133,8 +1133,27 @@ function Drawer({ task, state, onClose, onChanged, onOpenTask = null }) {
     const draft = { id: 'd' + Date.now().toString(36), name: String(name).trim(), link: String(link).trim(), note: String(note).trim() }
     await saveDesignPatch({ drafts: [...designDrafts, draft], status: task.design?.status ?? 'pending' })
   }
-  const designAction = async (action, draftId) => {
-    if (action === 'choose') return saveDesignPatch({ chosenId: draftId })
+  /* 标重复 / 取消重复：主缺陷传编号或 id 都行（服务端认 code 与 id）。
+     空 target 表示取消标记。 */
+  const markDuplicate = async target => {
+    let targetId = target
+    if (targetId === undefined) {
+      const input = await promptDialog('主缺陷的编号或 id（例如 BUG-001）', { title: '标为重复', okText: '标为重复' })
+      if (input === null || String(input).trim() === '') return
+      const wanted = String(input).trim()
+      const hit = (state.tasks ?? []).find(item => item.id === wanted || item.code === wanted)
+      if (hit === undefined) { setError(`找不到这张卡：${wanted}`); return }
+      if (hit.id === task.id) { setError('不能把自己标成重复'); return }
+      targetId = hit.id
+    }
+    setBusy(true); setError(null); setNotice(null)
+    try {
+      await api('/task/duplicate', { id: task.id, targetId })
+      setNotice(targetId === '' ? '已取消重复标记' : '已标为重复，并留了评论')
+      await onChanged()
+    } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)) } finally { setBusy(false) }
+  }
+  const designAction = async (action, draftId) => {    if (action === 'choose') return saveDesignPatch({ chosenId: draftId })
     if (action === 'remove') {
       const rest = designDrafts.filter(item => item.id !== draftId)
       return saveDesignPatch({ drafts: rest, chosenId: task.design?.chosenId === draftId ? '' : (task.design?.chosenId ?? '') })
@@ -1619,6 +1638,25 @@ function Drawer({ task, state, onClose, onChanged, onOpenTask = null }) {
                   : null),
         ),
       ),
+      /* 重复缺陷：以前卡面只显示一个「重复」徽标，人想标重复只能去调工具。
+         同一件事被自动开了两张缺陷时，在这里指认主缺陷（另一张会被关掉并互相留评论）。 */
+      task.type === 'bug'
+        ? h(Section, { pane: 'overview', current: pane, id: 'duplicate' },
+          h(SectionHead, null, '重复缺陷',
+            h('span', { className: HINT }, '和另一张缺陷是同一件事时在这里指认：被指认的那张会被关掉')),
+          h('div', { className: SECTION_BODY },
+            task.duplicateOf
+              ? h('div', { className: ACTIONS },
+                h('span', { className: HINT, 'data-duplicate-of': task.duplicateOf }, `重复于 ${(state.tasks ?? []).find(item => item.id === task.duplicateOf)?.code || task.duplicateOf}`),
+                h(Button, { variant: 'ghost', size: 'sm', disabled: busy, onClick: () => void markDuplicate('') }, '取消重复标记'))
+              : h('div', { className: ACTIONS },
+                h(Button, {
+                  variant: 'ghost', size: 'sm', disabled: busy, 'data-mark-duplicate': '',
+                  onClick: () => void markDuplicate(),
+                }, '标为重复…'),
+                h('span', { className: HINT }, '会请你填主缺陷的编号或 id；主缺陷保留，这张被标成重复并关闭'))),
+        )
+        : null,
       h(Section, { pane: 'overview', current: pane, id: 'blocked' },
         h(SectionHead, null, '阻塞',
           h('span', { className: HINT }, '卡住了打个标，卡留在本列停住，不会被自动往下派；怎么继续由人定')),

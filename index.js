@@ -2159,7 +2159,9 @@ function burndownReport(state, options = {}) {
 async function markDuplicate(store, id, targetId, by = '人') {
   const state = store.snapshot()
   const task = state.tasks.find(item => item.id === id)
-  const target = targetId === '' ? undefined : state.tasks.find(item => item.id === targetId)
+  /* 目标既认 id 也认编号（BUG-001）：人手里拿到的通常是卡号，脚本也一样。 */
+  const wanted = String(targetId ?? '').trim()
+  const target = wanted === '' ? undefined : state.tasks.find(item => item.id === wanted || item.code === wanted)
   if (task === undefined) throw new Error(`no task ${id}`)
   await store.mutate(current => {
     const entry = current.tasks.find(item => item.id === id)

@@ -88,6 +88,10 @@ export function createProjectsPage({ h, React, api }) {
             h('span', { className: 'shrink-0 text-caption-1-medium text-text-secondary tabular-nums' }, `${done}/${total}`),
           )
         }),
+        /* 以前直接 slice(0,5) 了事：卡上写「7 个迭代」却只看到 5 行，人会以为数据丢了。 */
+        iterations.length > 5
+          ? h('div', { className: HINT, 'data-iteration-more': '' }, `还有 ${iterations.length - 5} 个迭代（去「设置 → 项目与迭代」看全部）`)
+          : null,
       )
     }
 

@@ -59,14 +59,22 @@ export     function RequirementsPage({ state, onOpenTask, onChanged, createSigna
       /* 需求级沟通（issue #115 的界面那一半）：评论的草稿与提交态。 */
       const [commentDraft, setCommentDraft] = React.useState('')
       const [commentBusy, setCommentBusy] = React.useState(false)
-      /* 排序沿用老口径：按 RICE 分从高到低（reqsort 从来没有写入点，别再假装可切）。 */
+      /* 排序：显式排序号（order）优先，其次 RICE 分从高到低。
+         以前只按 RICE 排序，详情页的「排序号」存了却毫无效果 —— 用户改完保存会以为坏了。
+         两套混用时按「填了 order 的排前面且按它排，没填的按 RICE 排」，口径写在悬停说明里。 */
       const reqQueryText = reqQuery.trim().toLowerCase()
+      const orderOf = item => Number(item.order) || 0
       const visibleRequirements = requirements
         .filter(item => reqSource === 'all' || (item.source === 'business' ? 'business' : 'internal') === reqSource)
         .filter(item => reqQueryText === '' || [item.code, item.title, item.owner, item.requester?.name]
           .filter(Boolean).join(' ').toLowerCase().includes(reqQueryText))
         .slice()
-        .sort((left, right) => (right.pool?.score ?? 0) - (left.pool?.score ?? 0))
+        .sort((left, right) => {
+          const lo = orderOf(left)
+          const ro = orderOf(right)
+          if (lo !== ro) return ro - lo
+          return (right.pool?.score ?? 0) - (left.pool?.score ?? 0)
+        })
       // 从顶部「＋ 新建 → 新建需求」进来时，展开新建表单（form 为 null 时不显示面板）。
       const openNew = () => {
         setForm({ title: '', description: '', project: '', iteration: '', owner: '', priority: 'normal', status: 'draft', links: {} })
