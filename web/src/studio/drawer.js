@@ -213,6 +213,10 @@ function Drawer({ task, state, onClose, onChanged, onOpenTask = null }) {
     owner: task.owner ?? '',
     due: toDateInput(task.dueAt),
     releaseId: task.releaseId ?? '',
+    /* 类型 / 优先级 / 父任务以前只能建卡时定：紧急度填错、缺陷挂错父卡就只能删了重建。 */
+    type: task.type ?? 'requirement',
+    priority: task.priority ?? 'normal',
+    parent: task.parent ?? '',
   })
   const [newItem, setNewItem] = React.useState('')
   const [artifact, setArtifact] = React.useState({ kind: 'doc', title: '', ref: '', content: '' })
@@ -252,6 +256,8 @@ function Drawer({ task, state, onClose, onChanged, onOpenTask = null }) {
   // 必须在 tabs 之前定义：上面那个页签的 count 要读它（放后面就是 TDZ）。
   const designDrafts = Array.isArray(task.design?.drafts) ? task.design.drafts : []
   const chosenDraft = designDrafts.find(item => item.id === task.design?.chosenId) ?? null
+  /* 设计评审意见：驳回要写清改什么，通过时也允许留一句结论。 */
+  const [designNote, setDesignNote] = React.useState(String(task.design?.note ?? ''))
   const worktree = task.worktree ?? null
   const [worktreeMsg, setWorktreeMsg] = React.useState('')
   const [verify, setVerify] = React.useState({ busy: false, line: '', ok: null })
@@ -430,6 +436,8 @@ function Drawer({ task, state, onClose, onChanged, onOpenTask = null }) {
   const initialPaneFor = status => status === 'test' ? 'test' : status === 'review' ? 'coding' : status === 'accept' ? 'test' : 'overview'
   const [pane, setPane] = React.useState(() => initialPaneFor(task.status))
   React.useEffect(() => { setPane(initialPaneFor(task.status)) }, [task.id])
+  /* 换一张卡就把评审意见换成那张卡自己的（抽屉是 key 重建的兜底之外的保险）。 */
+  React.useEffect(() => { setDesignNote(String(task.design?.note ?? '')) }, [task.id])
   // 切页签时把内容滚回顶部，否则从长页面切到「讨论」会停在中间，看起来像只显示了半截。
   React.useEffect(() => {
     const node = bodyRef.current
@@ -463,24 +471,39 @@ function Drawer({ task, state, onClose, onChanged, onOpenTask = null }) {
   const push = async (patch) => {
     setBusy(true); setError(null)
     try {
-      await api('/task/update', { id: task.id, patch })
+      await api('/task/update', { id: task.id, patch, ...(Number.isInteger(Number(task.version)) ? { ifVersion: Number(task.version) } : {}) })
       await onChanged()
-    } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)) } finally { setBusy(false) }
+    } catch (cause) {
+      if (cause?.code === 'version_conflict') {
+        /* 乐观锁：卡片在我编辑期间被 AI/同事改过。刷新拿到最新版，让人重做这次修改，
+           而不是把对方刚写的内容静默覆盖掉。 */
+        setError('这张卡刚被改过（你看到的是旧版本）：已刷新，请重做这次修改')
+        await onChanged()
+        return
+      }
+      setError(cause instanceof Error ? cause.message : String(cause))
+    } finally { setBusy(false) }
   }
   /* 推进到某列：门禁拦住时给「写原因强推」的出口，与看板拖拽同一套流程。
      以前这里只 setError，而抽屉的错误只在「讨论」页可见，看起来就是按钮没反应。 */
   const advanceTo = async (status, role) => {
     setBusy(true); setError(null); setNotice(null)
+    const guard = Number.isInteger(Number(task.version)) ? { ifVersion: Number(task.version) } : {}
     try {
-      await api('/task/update', { id: task.id, patch: { status, role } })
+      await api('/task/update', { id: task.id, patch: { status, role }, ...guard })
       await onChanged()
     } catch (cause) {
+      if (cause?.code === 'version_conflict') {
+        setError('这张卡刚被改过（你看到的是旧版本）：已刷新，请重做这次推进')
+        await onChanged()
+        return
+      }
       const message = cause instanceof Error ? cause.message : String(cause)
       if (!/准出没过|进开发被拦|进测试被拦/.test(message)) { setError(message); return }
       const reason = await promptDialog(`${message}\n\n确实要强推就写原因（会计入 override 统计）：`, { title: '绕过门禁', okText: '强推' })
       if (reason === null || String(reason).trim() === '') return
       try {
-        await api('/task/update', { id: task.id, patch: { status, role, override: String(reason).trim() } })
+        await api('/task/update', { id: task.id, patch: { status, role, override: String(reason).trim() }, ...guard })
         setNotice('已强推，原因已记录')
         await onChanged()
       } catch (again) { setError(again instanceof Error ? again.message : String(again)) }
@@ -491,10 +514,17 @@ function Drawer({ task, state, onClose, onChanged, onOpenTask = null }) {
   const saveHandoff = async () => {
     setBusy(true); setError(null); setNotice(null)
     try {
-      await api('/task/update', { id: task.id, handoff: { ...handoff, by: currentUser() } })
+      await api('/task/update', { id: task.id, handoff: { ...handoff, by: currentUser() }, ...(Number.isInteger(Number(task.version)) ? { ifVersion: Number(task.version) } : {}) })
       setNotice('交接契约已保存：下一棒派单时会先读它')
       await onChanged()
-    } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)) } finally { setBusy(false) }
+    } catch (cause) {
+      if (cause?.code === 'version_conflict') {
+        setError('这张卡刚被改过（你看到的是旧版本）：已刷新，请重新填写交接契约')
+        await onChanged()
+        return
+      }
+      setError(cause instanceof Error ? cause.message : String(cause))
+    } finally { setBusy(false) }
   }
   // AI 失败后：清掉失败计数与自动挂的阻塞，让派单器重新接手。
   const retryAgent = async () => {
@@ -639,6 +669,9 @@ function Drawer({ task, state, onClose, onChanged, onOpenTask = null }) {
       owner: plan.owner,
       dueAt: fromDateInput(plan.due),
       releaseId: plan.releaseId ?? '',
+      type: plan.type,
+      priority: plan.priority,
+      parent: plan.parent ?? '',
     })
   }
   const addChecklist = async () => {
@@ -656,6 +689,9 @@ function Drawer({ task, state, onClose, onChanged, onOpenTask = null }) {
     } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)) } finally { setBusy(false) }
   }
   const removeChecklist = async (item) => {
+    /* 清单条目上常挂着勾选证据（命令输出、文件路径），点错「×」就没了；同文件里删卡/删用例/删评论都先确认。 */
+    const label = String(item.text ?? '').slice(0, 40)
+    if (!(await confirmDialog(`删除这条验收清单？${label === '' ? '' : `「${label}」`}${item.note ? '它上面的证据也会一起没掉。' : ''}`, { title: '删除清单条目', danger: true, okText: '删除' }))) return
     setBusy(true); setError(null)
     try { await api('/task/checklist', { id: task.id, action: 'remove', itemId: item.id }); await onChanged() }
     catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)) } finally { setBusy(false) }
@@ -958,6 +994,8 @@ function Drawer({ task, state, onClose, onChanged, onOpenTask = null }) {
     catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)) } finally { setBusy(false) }
   }
   const removeArtifact = async (item) => {
+    /* 交付物正文随记录一起消失，云盘那份文档会变成孤儿（卡上再无入口），必须二次确认。 */
+    if (!(await confirmDialog(`删除交付物「${String(item.title ?? '').slice(0, 40)}」？正文与云盘入口都会消失，云盘上已归档的文档不会被删。`, { title: '删除交付物', danger: true, okText: '删除' }))) return
     setBusy(true); setError(null)
     try { await api('/task/artifact', { id: task.id, action: 'remove', artifactId: item.id }); await onChanged() }
     catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)) } finally { setBusy(false) }
@@ -1095,8 +1133,22 @@ function Drawer({ task, state, onClose, onChanged, onOpenTask = null }) {
       const rest = designDrafts.filter(item => item.id !== draftId)
       return saveDesignPatch({ drafts: rest, chosenId: task.design?.chosenId === draftId ? '' : (task.design?.chosenId ?? '') })
     }
-    if (action === 'approve') return saveDesignPatch({ status: 'approved' })
-    if (action === 'changes') return saveDesignPatch({ status: 'changes_requested' })
+    if (action === 'approve') return saveDesignPatch({ status: 'approved', note: String(designNote ?? '').trim() })
+    if (action === 'changes') {
+      /* 驳回必须给意见：研发照着「评审意见」改，空的等于让人猜。
+         备注里的 @ 也会被服务端补成评论并派单（publishNoteMentions）。 */
+      const written = await promptDialog('哪里不满足？要改什么（会记成评审意见，备注里的 @某人 会叫起他）', {
+        title: '设计评审意见',
+        danger: true,
+        okText: '要求修改',
+        defaultValue: String(designNote ?? task.design?.note ?? ''),
+        placeholder: '例如：卡片密度太高，按「方案 A」改成两列；@开发工程师 改完再叫我',
+      })
+      if (written === null) return
+      if (String(written).trim() === '') { setError('要求修改要写一句意见：研发按它改'); return }
+      setDesignNote(String(written).trim())
+      return saveDesignPatch({ status: 'changes_requested', note: String(written).trim() })
+    }
   }
   // 还原度与规范体检：数字来自 tools/visual 的 design-diff / design-audit（要在装了 Chrome 的机器上跑），
   // 这里让人把结果录进来，卡片上才看得到还原度和规范野值。
@@ -1762,6 +1814,38 @@ function Drawer({ task, state, onClose, onChanged, onOpenTask = null }) {
               h('div', { className: HINT }, '一个项目有多个服务（每个服务一个 git 路径）时，这里决定这张卡改哪个服务。'),
             ),
           h('div', { className: ROW },
+            h('div', { className: FIELD, style: { flex: 1 } },
+              h('div', { className: LABEL }, '类型'),
+              h(SelectField, {
+                'aria-label': '类型',
+                value: plan.type,
+                onChange: event => setPlan({ ...plan, type: event.target.value }),
+              }, Object.keys(TYPE_LABEL).map(value => h('option', { key: value, value }, TYPE_LABEL[value]))),
+            ),
+            h('div', { className: FIELD, style: { flex: 1 } },
+              h('div', { className: LABEL }, '优先级'),
+              h(SelectField, {
+                'aria-label': '优先级',
+                value: plan.priority,
+                onChange: event => setPlan({ ...plan, priority: event.target.value }),
+              }, Object.keys(PRIORITY_LABEL).map(value => h('option', { key: value, value }, PRIORITY_LABEL[value]))),
+            ),
+            h('div', { className: FIELD, style: { flex: 1 } },
+              h('div', { className: LABEL }, '父任务（缺陷挂到来源卡）'),
+              h(SelectField, {
+                'aria-label': '父任务',
+                value: plan.parent ?? '',
+                onChange: event => setPlan({ ...plan, parent: event.target.value }),
+              },
+                h('option', { value: '' }, '没有父任务'),
+                (state.tasks ?? [])
+                  .filter(item => item.id !== task.id && (plan.parent === item.id || !String(item.parent ?? '')))
+                  .slice(0, 200)
+                  .map(item => h('option', { key: item.id, value: item.id }, `${item.code || item.id} · ${String(item.title ?? '').slice(0, 30)}`)),
+              ),
+            ),
+          ),
+          h('div', { className: ROW },
             h('div', { className: FIELD, style: { flex: 2 } },
               h('div', { className: LABEL }, '业务负责人'),
               h(TextField, {
@@ -1872,13 +1956,25 @@ function Drawer({ task, state, onClose, onChanged, onOpenTask = null }) {
                 h(Button, { variant: 'danger', size: 'sm', disabled: busy, 'data-danger': '1', onClick: () => void designAction('remove', item.id) }, '删除'),
               ),
             ))),
+          /* 评审意见就地可写：「要求修改」会把这里的内容一起提交（空的会被拦下）。 */
+          h('div', { className: FIELD, style: { marginTop: 8 } },
+            h('div', { className: LABEL }, '评审意见（驳回必填；写 @专家名 会叫起他）'),
+            h(TextAreaField, {
+              rows: 2,
+              'aria-label': '设计评审意见',
+              'data-design-note': '',
+              value: designNote,
+              placeholder: '例如：卡片密度太高，按「方案 A」改成两列；@开发工程师 改完再叫我',
+              onChange: event => setDesignNote(event.target.value),
+            }),
+          ),
           h('div', { className: ROW, style: { gap: 8, marginTop: 8, flexWrap: 'wrap' } },
             h(Button, { variant: 'ghost', size: 'sm', disabled: busy, onClick: () => void addDesignDraft() }, '＋ 加一稿'),
             h(Button, { variant: 'primary', size: 'sm', disabled: busy || designDrafts.length === 0, onClick: () => void designAction('approve') }, '评审通过'),
             h(Button, { variant: 'secondary', size: 'sm', disabled: busy, onClick: () => void designAction('changes') }, '要求修改'),
             h(Button, { variant: 'secondary', size: 'sm', disabled: busy, onClick: () => void editDesignMetrics() }, '还原度/规范体检'),
           ),
-          task.design?.note ? h('div', { className: HINT, style: { marginTop: 8 } }, `评审意见：${task.design.note}`) : null,
+          task.design?.note ? h('div', { className: HINT, style: { marginTop: 8 }, 'data-design-note-saved': '' }, `评审意见：${task.design.note}`) : null,
           task.design?.diff == null ? null : h('div', { className: HINT, style: { marginTop: 8 } }, `还原度差异 ${task.design.diff.percent}%（越高越不还原）`),
           task.design?.spec == null ? null : h('div', { className: HINT, style: { marginTop: 8 } }, `规范体检：查了 ${task.design.spec.checked} 个元素，${task.design.spec.violations} 处野值`),
         ),

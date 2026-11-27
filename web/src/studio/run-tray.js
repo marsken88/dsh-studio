@@ -30,7 +30,7 @@ export function createRunTray({ h, React, api }) {
     return `${Math.floor(total / 60)}m${String(total % 60).padStart(2, '0')}s`
   }
 
-  function RunTray({ state }) {
+  function RunTray({ state, onOpenTask }) {
     const [agents, setAgents] = React.useState(null)
     const [failed, setFailed] = React.useState(false)
 
@@ -80,10 +80,19 @@ export function createRunTray({ h, React, api }) {
     const row = info => {
       const task = (state.tasks ?? []).find(item => item.id === info.taskId)
       const expert = (state.config?.experts ?? []).find(item => item.id === info.expert)
+      /* 看到异常会话后还得回看板找卡，等于白看：整行可点，直接打开那张卡的抽屉。 */
+      const open = () => { if (typeof onOpenTask === 'function' && info.taskId) onOpenTask(String(info.taskId)) }
       return h('div', {
         key: String(info.sessionId ?? info.taskId ?? info.expert),
-        className: ROW,
+        className: ROW + (typeof onOpenTask === 'function' ? ' cursor-pointer rounded hover:bg-background-secondary-hover' : ''),
         'data-run-row': '',
+        ...(typeof onOpenTask === 'function' ? {
+          role: 'button',
+          tabIndex: 0,
+          title: '打开这张卡',
+          onClick: open,
+          onKeyDown: event => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); open() } },
+        } : {}),
       },
         h('div', { className: ROW_TITLE },
           h('b', { className: 'font-semibold text-text-primary' }, task?.code || String(info.taskId ?? '任务')),

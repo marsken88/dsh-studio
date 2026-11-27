@@ -54,6 +54,10 @@ function Card({ task, onOpen, config, requirements, onPickRequirement, onPickPro
   const dispatchPhase = (() => {
     const dispatch = task.dispatch
     if (dispatch === null || dispatch === undefined || dispatch.status !== task.status) return 'queued'
+    /* 服务端已经把「会话还在不在跑」算好了（dispatch-state.js 的 dispatchPhase，带活会话表与超时兜底）。
+       前端看不到会话表，自己按 state 判会把「running 但会话已死」当成正在处理 ——
+       于是顶栏红点写「停摆 N 张」，看板上却找不到是哪张。以服务端下发为准。 */
+    if (task.stalled === true) return 'stalled'
     if (dispatch.state === 'running') return 'running'
     if (dispatch.state === 'stopped') return 'idle'
     if (dispatch.state === 'done' || dispatch.state === 'idle') return 'done'

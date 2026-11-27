@@ -1489,6 +1489,7 @@ export async function updateTask(store, id, patch) {
     }
     const previous = task.status
     const previousRequirement = task.requirementId ?? ''
+    const previousType = task.type
     Object.assign(task, normalized)
     // 编辑版本：任何一次成功的 update 都 +1，供调用方下次带 ifVersion 做乐观锁。
     task.version = (Number(task.version) || 0) + 1
@@ -1499,11 +1500,13 @@ export async function updateTask(store, id, patch) {
       if (owner === undefined || !(owner.services ?? []).some(entry => entry.id === task.service)) task.service = ''
     }
     /* 换需求就要换编号：同一需求下 DEV-001 只出现一次；
-       需求卡走「需求编号-NN」（REQ-2026-003-01），换到哪条需求就带上哪条的编号。 */
-    if (normalized.requirementId !== undefined && normalized.requirementId !== previousRequirement) {
+       需求卡走「需求编号-NN」（REQ-2026-003-01），换到哪条需求就带上哪条的编号。
+       改类型同理：DEV-001 变成缺陷卡还叫 DEV-001，界面上「BUG-001」的预期会对不上。 */
+    const typeChanged = normalized.type !== undefined && normalized.type !== previousType
+    if ((normalized.requirementId !== undefined && normalized.requirementId !== previousRequirement) || typeChanged) {
       const others = state.tasks.filter(entry => entry.id !== task.id)
-      const requirementCode = String(state.requirements.find(entry => entry.id === normalized.requirementId)?.code ?? '')
-      task.code = nextCodeForTask(others, { requirementId: normalized.requirementId, requirementCode, type: task.type })
+      const requirementCode = String(state.requirements.find(entry => entry.id === task.requirementId)?.code ?? '')
+      task.code = nextCodeForTask(others, { requirementId: task.requirementId ?? '', requirementCode, type: task.type })
     }
     /* 「已完成」的卡不用标阻塞：它会一直挂在需求准出里（「N 张卡还卡在阻塞」），
        而实际上什么也拦不住（真机 2026-11-26：REQ-2026-001-5 已完成后被 agent 标了阻塞，
