@@ -142,6 +142,8 @@ function Drawer({ task, state, onClose, onChanged, onOpenTask = null }) {
   const [busy, setBusy] = React.useState(false)
   const [error, setError] = React.useState(null)
   /* 状态历史全文（/state 只带最近 12 条）：null = 未加载，直接用 task.history。 */
+  /* 评审意见默认收起（主行动常显）：意见是可选补充，不该占着第一屏。 */
+  const [noteOpen, setNoteOpen] = React.useState(false)
   const [historyAll, setHistoryAll] = React.useState(null)
   const [historyBusy, setHistoryBusy] = React.useState(false)
   const loadFullHistory = async () => {
@@ -1443,7 +1445,15 @@ function Drawer({ task, state, onClose, onChanged, onOpenTask = null }) {
                     onClick: () => void verifyCoding(),
                   }, verify.busy ? '核对中…' : (verify.line === '' ? '核对代码事实' : '再核对一次')),
                 ),
-                h(Button, { variant: 'ghost', size: 'sm', disabled: busy, title: '拉 MR 的改动、逐条提交、流水线与 CI 单测结果，和自报的文件数/提交数/单测数比一遍', onClick: () => void verifyGitlab() }, '从 GitLab 核对'),
+                /* 没关联 MR 时直接 disabled：以前点下去才报错，等于让人白点一次。 */
+                h(Button, {
+                  variant: 'ghost', size: 'sm',
+                  disabled: busy || !(Number(task.gitlabMR?.iid) > 0),
+                  title: Number(task.gitlabMR?.iid) > 0
+                    ? '拉 MR 的改动、逐条提交、流水线与 CI 单测结果，和自报的文件数/提交数/单测数比一遍'
+                    : '这张卡还没关联 MR（在「计划」或执行记录里填 MR 号），没东西可核对',
+                  onClick: () => void verifyGitlab(),
+                }, '从 GitLab 核对'),
               /* 结论行（独占一行，不参与头部宽度竞争）。四态：未同步 / 不适用 / 还差 N 项 / 已通过。
                  以前 mergeGate===null 时 blockers 兜成空数组 → 直接写「已通过」，而这卡的门禁从未算过。 */
               (() => {
@@ -1462,6 +1472,20 @@ function Drawer({ task, state, onClose, onChanged, onOpenTask = null }) {
                 return h('div', { className: HINT, 'data-review-conclusion': coding.review.status, 'data-gate-state': gate === null || gate === undefined ? 'unsynced' : (gate.applicable === false ? 'n/a' : gate.state) },
                   `${who} · ${when} · ${gateText}`)
               })(),
+              /* 主行动贴到结论旁边（UX：结论在最上、行动在最下，中间隔着 291px）：
+                 评审通过 / 要求修改 常显；意见输入默认收起，点「写意见」再展开。 */
+              (() => {
+                const done = coding.review.status
+                return h('div', { className: 'flex min-w-0 flex-wrap items-center gap-2', 'data-review-actions': '' },
+                  h(Button, { variant: 'primary', size: 'sm', disabled: busy, onClick: () => void reviewCoding('approved') }, busy ? '提交中…' : '评审通过'),
+                  h(Button, { variant: 'secondary', size: 'sm', disabled: busy, onClick: () => void reviewCoding('changes_requested') }, '要求修改'),
+                  h(Button, { variant: 'ghost', size: 'sm', 'data-review-note-toggle': '', onClick: () => setNoteOpen(!noteOpen) }, noteOpen ? '收起意见' : '写意见'),
+                  noteOpen ? null : h('span', { className: HINT }, `${done === 'approved' ? '已通过' : done === 'changes_requested' ? '已要求修改' : '待评审'}；意见可写可不写`),
+                )
+              })(),
+              noteOpen ? h('div', { className: 'flex min-w-0 flex-wrap items-center gap-2' },
+                h(TextField, { size: 'small', style: { flex: 1 }, value: reviewNote, placeholder: '评审意见（可选，写清文件/行为什么/怎么改）', onChange: event => setReviewNote(event.target.value) }),
+              ) : null,
               ),
               verify.line === ''
                 ? (coding.verified === null || coding.verified === undefined
@@ -1548,18 +1572,6 @@ function Drawer({ task, state, onClose, onChanged, onOpenTask = null }) {
                     : h('details', { 'data-review-note-full': '' },
                       h('summary', { className: 'cursor-pointer break-words' }, coding.review.note.length > 90 ? coding.review.note.slice(0, 90) + '…' : coding.review.note),
                       h('div', { className: 'mt-1 whitespace-pre-wrap break-words' }, coding.review.note))),
-              h('div', { className: ROW },
-                h(TextField, {
-                  size: 'small',
-                  style: { flex: 1 }, value: reviewNote, placeholder: '评审意见（可选，写清文件/行为什么/怎么改）',
-                  onChange: event => setReviewNote(event.target.value),
-                }),
-                h(Button, { variant: 'primary', size: 'sm', disabled: busy, onClick: () => void reviewCoding('approved') }, busy ? '提交中…' : '评审通过'),
-                h(Button, { variant: 'secondary', size: 'sm', disabled: busy, onClick: () => void reviewCoding('changes_requested') }, '要求修改'),
-                /* 「标记已合并」删掉了：它只写 mergedAt（自报），并不真的合并，和「合并门禁 → 合并 MR」
-                   容易混成同义词。真合并留在合并门禁；这里只在已合并时显示一行事实。 */
-                coding.mergedAt > 0 ? h('span', { className: HINT }, `已合并 · ${coding.mergedBy || '—'}`) : null,
-              ),
             ),
           codingDraft === null
             ? h('div', { className: ROW },
@@ -1860,7 +1872,7 @@ function Drawer({ task, state, onClose, onChanged, onOpenTask = null }) {
   )
 
   /* 执行记录页的六个区块：抽成具名函数后，顺序在调用处一眼可见（以前是 470 行内联 JSX）。 */
-  const renderFeedSection = () => (
+  const renderFeedSection = () => (feedCount === 0 ? null : (
       h(Section, { pane: 'coding', current: pane, id: 'feed' },
         h(SectionHead, null, '执行播报',
           h('span', { className: HINT }, '派单会话在跑时的机器进度（工具 / 模型 / 回复摘要）。它不再写进讨论区——讨论区只留人和专家的评论')),
@@ -1883,9 +1895,10 @@ function Drawer({ task, state, onClose, onChanged, onOpenTask = null }) {
         ),
       )
   )
+)
 
   /* 执行记录页的六个区块：抽成具名函数后，顺序在调用处一眼可见（以前是 470 行内联 JSX）。 */
-  const renderSkillSection = () => (
+  const renderSkillSection = () => (task.status !== 'accept' && task.status !== 'done' ? null : (
       h(Section, { pane: 'coding', current: pane, id: 'skill' },
         h(SectionHead, null, '技能沉淀',
           h('span', { className: HINT }, '把这张卡上真实发生过的证据汇总成一条技能草稿（默认停用）')),
@@ -1899,6 +1912,7 @@ function Drawer({ task, state, onClose, onChanged, onOpenTask = null }) {
         ),
       )
   )
+)
 
   const columnLabel = (state.statuses.find(item => item.id === task.status) ?? {}).label ?? task.status
   const assignee = task.dispatch?.expert ? ownerLabel(state.config ?? {}, { kind: 'expert', id: task.dispatch.expert }) : ''
