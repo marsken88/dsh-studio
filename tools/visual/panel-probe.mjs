@@ -1125,12 +1125,14 @@ try {
     `搜「${taskCode}」→ ${JSON.stringify(paletteHit)}`,
   )
 
-  /* ⑥d 效能页分区：总览 / 交付效率 / AI 与成本 / 上下文 */
+  /* ⑥d 效能页分区：总览 / 交付节奏 / AI 质量 / 成本 / 上下文（一问一个页签） */
   await clickExact('效能')
   await new Promise(resolve => setTimeout(resolve, 1500))
   const analyticsTabs = await page.evaluate(() => [...document.querySelectorAll('[data-analytics-tab]')].map(node => String(node.textContent ?? '').trim()))
   const focusBanner = await page.evaluate(() => document.querySelector('[data-analytics-focus]')?.getAttribute('data-analytics-focus') ?? '')
-  check('⑥d 效能页有 4 个分区页签', analyticsTabs.length === 4 && analyticsTabs.includes('总览') && analyticsTabs.includes('上下文'), JSON.stringify(analyticsTabs))
+  check('⑥d 效能页有 5 个分区页签（一问一个）',
+    analyticsTabs.length === 5 && analyticsTabs.join(',') === '总览,交付节奏,AI 质量,成本,上下文',
+    JSON.stringify(analyticsTabs))
   check('⑥d 效能页顶部有「现在最该看」结论条', focusBanner === 'warn' || focusBanner === 'ok', focusBanner)
   /* ⑥d2 强制放行：以前是「一堵 39 行灰字墙」，现在应收成 摘要 → 按原因聚合 → ≤5 条样本 → 展开（限高内滚）。
      有数据才断言（空库/新库上这块整块不渲染），没有就明说跳过、不判红。 */
@@ -1151,13 +1153,13 @@ try {
   } else {
     check('⑥d2 强制放行收成摘要+聚合+样本（样本 ≤5，行可点）', overrideShape.samples > 0 && overrideShape.samples <= 5 && overrideShape.clickable === true, JSON.stringify(overrideShape))
   }
-  await page.evaluate(() => document.querySelector('[data-analytics-tab="ai"]')?.click())
+  await page.evaluate(() => document.querySelector('[data-analytics-tab="cost"]')?.click())
   await new Promise(resolve => setTimeout(resolve, 1400))
   const analyticsVisible = await page.evaluate(() => [...new Set([...document.querySelectorAll('[data-analytics-panel]')].filter(node => getComputedStyle(node).display !== 'none').map(node => node.getAttribute('data-analytics-panel')))])
-  check('⑥d 切「AI 与成本」只显示对应分区', analyticsVisible.length === 1 && analyticsVisible[0] === 'ai', JSON.stringify(analyticsVisible))
+  check('⑥d 切「成本」只显示对应分区', analyticsVisible.length === 1 && analyticsVisible[0] === 'cost', JSON.stringify(analyticsVisible))
   await page.waitForFunction(() => document.querySelectorAll('[role="meter"]').length > 0, { timeout: 6000 }).catch(() => {})
   const meterCount = await page.evaluate(() => document.querySelectorAll('[role="meter"]').length)
-  check('⑥d AI 与成本有官方 Meter（负载/预算）', meterCount > 0, String(meterCount))
+  check('⑥d 成本页有官方 Meter（预算占用）', meterCount > 0, String(meterCount))
   await page.evaluate(() => document.querySelector('[data-analytics-tab="overview"]')?.click())
   await new Promise(resolve => setTimeout(resolve, 300))
 
