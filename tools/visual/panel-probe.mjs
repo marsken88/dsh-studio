@@ -1132,6 +1132,25 @@ try {
   const focusBanner = await page.evaluate(() => document.querySelector('[data-analytics-focus]')?.getAttribute('data-analytics-focus') ?? '')
   check('⑥d 效能页有 4 个分区页签', analyticsTabs.length === 4 && analyticsTabs.includes('总览') && analyticsTabs.includes('上下文'), JSON.stringify(analyticsTabs))
   check('⑥d 效能页顶部有「现在最该看」结论条', focusBanner === 'warn' || focusBanner === 'ok', focusBanner)
+  /* ⑥d2 强制放行：以前是「一堵 39 行灰字墙」，现在应收成 摘要 → 按原因聚合 → ≤5 条样本 → 展开（限高内滚）。
+     有数据才断言（空库/新库上这块整块不渲染），没有就明说跳过、不判红。 */
+  const overrideShape = await page.evaluate(() => {
+    const panel = document.querySelector('[data-override-panel]')
+    if (panel === null) return null
+    const samples = panel.querySelectorAll('[data-override-samples] [data-override-open], [data-override-samples] > div').length
+    return {
+      groups: panel.querySelectorAll('[data-override-groups] [data-chip], [data-override-groups] > *').length,
+      samples,
+      hasRest: panel.querySelector('[data-override-rest]') !== null,
+      truncated: panel.querySelector('[data-override-truncated]') !== null,
+      clickable: panel.querySelector('[data-override-open]') !== null,
+    }
+  })
+  if (overrideShape === null) {
+    console.log('ℹ ⑥d2 跳过：这个实例区间内没有强制放行记录（空块不渲染）')
+  } else {
+    check('⑥d2 强制放行收成摘要+聚合+样本（样本 ≤5，行可点）', overrideShape.samples > 0 && overrideShape.samples <= 5 && overrideShape.clickable === true, JSON.stringify(overrideShape))
+  }
   await page.evaluate(() => document.querySelector('[data-analytics-tab="ai"]')?.click())
   await new Promise(resolve => setTimeout(resolve, 1400))
   const analyticsVisible = await page.evaluate(() => [...new Set([...document.querySelectorAll('[data-analytics-panel]')].filter(node => getComputedStyle(node).display !== 'none').map(node => node.getAttribute('data-analytics-panel')))])

@@ -35,10 +35,12 @@ const GRID = 'grid grid-cols-1 gap-3 xl:grid-cols-12'
 const KPI_GRID = 'grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-5'
 
 export function AnalyticsPage({ state, onOpenTask, onFixPrices }) {
-  const { h, React, api } = client()
+  const { h, React, api, ChipField } = client()
   const [days, setDays] = React.useState(30)
   /* 效能页分区：总览 / 交付效率 / AI 与成本 / 上下文。只切显示，数据仍一次加载。 */
   const [pane, setPane] = React.useState('overview')
+  /* 切分区时把内容区滚回顶部：长页面里页签会被滚出视野，换了分区不滚回看起来像没反应。 */
+  const pageRef = React.useRef(null)
   const [project, setProject] = React.useState('')
   const [data, setData] = React.useState(null)
   const [error, setError] = React.useState(null)
@@ -241,13 +243,13 @@ export function AnalyticsPage({ state, onOpenTask, onFixPrices }) {
     return h('div', { className: `${PANEL} mt-3`, 'data-analytics-panel': 'context' }, head, h('div', { className: PANEL_BODY }, body))
   }
 
-  return h('div', { className: PAGE, 'data-analytics-page': '', 'data-analytics-pane': pane },
+  return h('div', { className: PAGE, 'data-analytics-page': '', 'data-analytics-pane': pane, ref: pageRef },
     secondaryError === null ? null : h('div', { className: 'mb-2 text-caption-1-regular text-text-error-primary' }, `部分数据没加载出来：${secondaryError}（负载 / 燃尽 / 成本 / 质量可能是空的或旧的）`),
     h('div', { className: ROW },
       h('span', { className: HINT }, `统计口径：最近 ${data.days} 天 · ${data.scope.tasks} 张卡（${data.scope.done} 张已完成）`),
       project === ''
         ? null
-        : h('span', { className: HINT, 'data-analytics-scope': project }, '（项目筛选对所有分区生效：负载 / 质量 / 成本也只算这个项目）'),
+        : h('span', { className: HINT, 'data-analytics-scope': project }, '（项目筛选只作用于负载 / 质量 / 成本；派单周活、交付时长、自动化率、强制放行是全公司口径）'),
       h(Select, {
         className: 'w-52', value: project, options: projectOptions,
         'aria-label': '按项目筛选',
@@ -260,21 +262,8 @@ export function AnalyticsPage({ state, onOpenTask, onFixPrices }) {
       }),
     ),
     (() => {
-      const tabs = [
-        { id: 'overview', label: '总览' },
-        { id: 'efficiency', label: '交付效率' },
-        { id: 'ai', label: 'AI 与成本' },
-        { id: 'context', label: '上下文' },
-      ]
-      return h('div', { className: 'flex flex-wrap items-center gap-1 border-b border-separator-border pb-2', role: 'group', 'aria-label': '效能分区' },
-        tabs.map(tab => h(Button, {
-          key: tab.id, 'aria-pressed': pane === tab.id ? 'true' : 'false', 'data-analytics-tab': tab.id,
-          variant: pane === tab.id ? 'secondary' : 'ghost', size: 'sm',
-          onClick: () => setPane(tab.id),
-        }, tab.label)))
-    })(),
-    (() => {
-      /* 先把「现在最该看什么」顶到最上面：指标很多，但不该让人自己在一屏 KPI 里找红字。 */
+      /* 产品定义要求「先结论、再分区」：这条结论讲的是**整个区间**（不随页签变），
+       所以放在页签之上，并显式写明这一点，免得切到「上下文」还以为它在说上下文。 */
       const focus = []
       const coverage = data.cases?.rate ?? null
       if (coverage !== null && coverage < 0.6) focus.push('用例可执行覆盖 ' + pct(coverage) + '（目标 ≥60%）')
@@ -288,7 +277,22 @@ export function AnalyticsPage({ state, onOpenTask, onFixPrices }) {
           + (focus.length > 0 ? 'border-status-yellow-text/40 bg-status-yellow-background/40 text-text-primary' : 'border-separator-border bg-background-secondary-default text-text-secondary'),
       },
         h('b', { className: 'text-body-2-semibold' }, focus.length > 0 ? '现在最该看' : '关键指标'),
+        h('span', { className: HINT, 'data-analytics-focus-scope': '' }, '（整个区间，不随页签变）'),
         h('span', null, focus.length > 0 ? focus.join(' · ') : '没有触发告警线：门禁、返工、覆盖、自动化率、派单周活都在目标区间内。'))
+    })(),
+    (() => {
+      const tabs = [
+        { id: 'overview', label: '总览' },
+        { id: 'efficiency', label: '交付效率' },
+        { id: 'ai', label: 'AI 与成本' },
+        { id: 'context', label: '上下文' },
+      ]
+      return h('div', { className: 'flex flex-wrap items-center gap-1 border-b border-separator-border pb-2', role: 'group', 'aria-label': '效能分区' },
+        tabs.map(tab => h(Button, {
+          key: tab.id, 'aria-pressed': pane === tab.id ? 'true' : 'false', 'data-analytics-tab': tab.id,
+          variant: pane === tab.id ? 'secondary' : 'ghost', size: 'sm',
+          onClick: () => { setPane(tab.id); if (pageRef.current !== null && pageRef.current !== undefined) pageRef.current.scrollTop = 0 },
+        }, tab.label)))
     })(),
     h('div', { className: SECTION, 'data-analytics-panel': 'overview' },
       '质量',
@@ -372,29 +376,51 @@ export function AnalyticsPage({ state, onOpenTask, onFixPrices }) {
       )),
     ov.total === 0
       ? null
-      : h('div', { className: `${PANEL} mt-3`, 'data-analytics-panel': 'overview' },
-        h('div', { className: PANEL_HEAD },
-          `${ov.overLimit ? '超限 · ' : ''}强制放行 ${ov.total} 次`,
-          h('span', { className: HINT }, `卡 ${ov.cards} · 需求 ${ov.requirements}${ov.noReason > 0 ? ` · ${ov.noReason} 次没写原因` : ''}（区间内）`)),
-        ov.overLimit
-          ? h('div', { className: 'text-caption-1-regular text-text-error-primary' }, `超过上限 ${ov.max} 次：这个口子用得太勤了，先看看下面每一次是不是真的必要`)
-          : null,
-        h('div', { className: FOOT }, `AI 推 ${ov.byAgent ?? 0} 次 · 人推 ${ov.byHuman ?? 0} 次${(ov.byUnknown ?? 0) > 0 ? ` · 没记签名人 ${ov.byUnknown} 次` : ''}`),
-        h('div', { className: PANEL_BODY },
-          ov.byPerson.length === 0
-            ? null
-            : h('div', { className: FOOT }, '谁放的：' + ov.byPerson.map(item => `${item.by} ${item.count} 次`).join(' · ')),
-          /* 每一条都是「某张卡/某条需求被强推」，以前是纯灰字、点不动 —— 同页另外两个列表都能点开。
-             有 id 就挂 onClick + 键盘（Enter/Space），没有 id 的老数据保持纯文本。 */
-          ov.list.map(item => h('div', {
-            key: `${item.kind}:${item.id}`,
-            className: FOOT + (item.kind === 'card' && typeof onOpenTask === 'function' ? ' cursor-pointer hover:text-text-primary' : ''),
-            title: item.reason === '' ? '这次没写原因' : item.reason,
-            ...(item.kind === 'card' && typeof onOpenTask === 'function'
-              ? { role: 'button', tabIndex: 0, 'data-override-open': item.id, onClick: () => onOpenTask(item.id), onKeyDown: event => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); onOpenTask(item.id) } } }
-              : {}),
-          }, `${item.kind === 'card' ? '卡' : '需求'} ${item.code || item.id} ${item.title} · ${item.by || '（没记签名人）'} · ${fmtTime(item.at)} — ${item.reason === '' ? '（没写原因）' : item.reason}`)),
-        )),
+      : (() => {
+        /* 这一块曾经是「一堵 39 行、48px 行距的灰字墙」（占全页约一半），而 39 行多是同一类原因反复出现。
+           现在按 UX 评审给的形态收：摘要 → 按原因聚合 → 5 条样本（可点）→ 展开全部（限高内滚）。 */
+        const groups = new Map()
+        for (const item of ov.list) {
+          const key = item.reason === '' ? '（没写原因）' : String(item.reason)
+          groups.set(key, (groups.get(key) ?? 0) + 1)
+        }
+        const topGroups = [...groups.entries()].sort((a, b) => b[1] - a[1]).slice(0, 5)
+        const samples = ov.list.slice(0, 5)
+        const rest = ov.list.slice(5)
+        const rowOf = (item, index) => h('div', {
+          key: `${item.kind}:${item.id}:${index}`,
+          className: FOOT + (item.kind === 'card' && typeof onOpenTask === 'function' ? ' cursor-pointer hover:text-text-primary' : ''),
+          title: item.reason === '' ? '这次没写原因' : item.reason,
+          ...(item.kind === 'card' && typeof onOpenTask === 'function'
+            ? { role: 'button', tabIndex: 0, 'data-override-open': item.id, onClick: () => onOpenTask(item.id), onKeyDown: event => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); onOpenTask(item.id) } } }
+            : {}),
+        }, `${item.kind === 'card' ? '卡' : '需求'} ${item.code || item.id} ${item.title} · ${item.by || '（没记签名人）'} · ${fmtTime(item.at)} — ${item.reason === '' ? '（没写原因）' : item.reason}`)
+        return h('div', { className: `${PANEL} mt-3`, 'data-analytics-panel': 'overview', 'data-override-panel': '' },
+          h('div', { className: PANEL_HEAD },
+            `${ov.overLimit ? '超限 · ' : ''}强制放行 ${ov.total} 次`,
+            h('span', { className: HINT }, `卡 ${ov.cards} · 需求 ${ov.requirements}${ov.noReason > 0 ? ` · ${ov.noReason} 次没写原因` : ''}（区间内）`)),
+          ov.overLimit
+            ? h('div', { className: 'px-4 pt-2 text-caption-1-regular text-text-error-primary' }, `本区间已用 ${ov.total} 次，上限是每区间 ${ov.max} 次：这个口子用得太勤了，先看看下面每一次是不是真的必要`)
+            : null,
+          h('div', { className: PANEL_BODY },
+            h('div', { className: FOOT + ' !mt-0' }, `AI 推 ${ov.byAgent ?? 0} 次 · 人推 ${ov.byHuman ?? 0} 次${(ov.byUnknown ?? 0) > 0 ? ` · 没记签名人 ${ov.byUnknown} 次` : ''}${(ov.byPerson ?? []).length > 0 ? ' · 谁放的：' + ov.byPerson.map(item => `${item.by} ${item.count} 次`).join('、') : ''}`),
+            topGroups.length === 0
+              ? null
+              : h('div', { className: 'flex min-w-0 flex-wrap items-center gap-2', 'data-override-groups': '' },
+                h('span', { className: HINT }, '按原因：'),
+                topGroups.map(([reason, count]) => h(ChipField, { key: reason, variant: 'gray', title: reason }, `${reason.length > 28 ? reason.slice(0, 27) + '…' : reason} × ${count}`))),
+            samples.length === 0 ? null : h('div', { className: 'flex min-w-0 flex-col', 'data-override-samples': '' }, samples.map(rowOf)),
+            rest.length === 0
+              ? null
+              : h('details', { className: 'rounded-lg border border-separator-border px-3 py-2', 'data-override-rest': '' },
+                h('summary', { className: 'cursor-pointer text-caption-1-regular text-text-secondary' }, `展开其余 ${rest.length} 条`),
+                h('div', { className: 'mt-2 flex max-h-72 min-w-0 flex-col overflow-auto pr-1' }, rest.map((item, index) => rowOf(item, index + 5)))),
+            ov.truncated === true || ov.list.length >= 50
+              ? h('div', { className: HINT, 'data-override-truncated': '' }, `只显示前 ${ov.list.length} 条（后端最多给 50 条）；更早的记录请到卡上的历史里看`)
+              : null,
+          ),
+        )
+      })(),
     h('div', { className: SECTION, 'data-analytics-panel': 'efficiency' },
       '流程与产能',
       h('span', { className: HINT }, '完成的卡各花了多久 · 时间都卡在哪一列 · 最近每天完成几张'),

@@ -118,7 +118,7 @@ STUDIO_TOKEN=$(sudo journalctl -u dsh-web -n 50 | grep -o 'token=[A-Za-z0-9_-]*'
     **它跑之前会临时停用自动派单、结束恢复**：目标机开着派单器时，探针造的卡会被接走（改状态、写播报、abort 会话），
     同一套判据会时红时绿（2026-11-27 在 218 上「子卡」「拖拽」「需求交付」轮流红）。`tools/e2e-loop.mjs` 同样处理。
 
-    **它已经挂在 `npm run release:preflight` 的 `--probes` 里**（发版前固定跑，98 项）：只手工跑等于没跑——
+    **它已经挂在 `npm run release:preflight` 的 `--probes` 里**（发版前固定跑，99 项）：只手工跑等于没跑——
     2026-11-26 的「抽屉里 statusLabelOf 未定义、整页渲染失败」就是它抓到的，而 `npm test` 与 `verify:pages` 全绿。
 ## 4.5 需求澄清（比代码更靠前的一道门）
 
