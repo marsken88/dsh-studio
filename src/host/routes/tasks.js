@@ -878,6 +878,7 @@ export async function handleTaskRoute({ method, route, req, res, store, url }) {
     if (body.wait !== true) {
       host.sendJson(res, 202, { ok: true, queued: true, note: '已提交后台执行：跑完结果写回各张卡（刷新可见）' })
       void runSuite(store, options).catch(error => {
+        /* recordAudit 由 index.js 注入；问号只为兼容不注它的老测试桩，线上不该缺。 */
         host.recordAudit?.(store, { by: options.by, route: '/tests/run', level: 'write', status: 500, ok: false, summary: `整批回归没跑成：${String(error?.message ?? error).slice(0, 120)}` })
       })
       return true

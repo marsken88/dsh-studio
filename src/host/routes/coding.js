@@ -442,6 +442,7 @@ if (method === 'POST' && route === '/task/quality') {
   if (body.wait !== true) {
     host.sendJson(res, 202, { ok: true, queued: true, note: '已提交后台执行：跑完结果会写回这张卡（刷新可见），不用等在这里' })
     void runTaskQuality(store, id, { by }).catch(error => {
+      /* recordAudit 由 index.js 注入；问号只为兼容不注它的老测试桩，线上不该缺。 */
       host.recordAudit?.(store, { by, route: '/task/quality', level: 'write', status: 500, ok: false, summary: `质量命令没跑成：${String(error?.message ?? error).slice(0, 120)}` })
     })
     return true
