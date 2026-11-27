@@ -88,6 +88,9 @@ export const LEVEL_RANK = { read: 0, write: 1, admin: 2 }
 export const ADMIN_ROUTES = new Set([
   '/config', '/access/save', '/access/delete',
   '/task/delete', '/experts/delete', '/teams/delete', '/skills/delete', '/experts/save', '/teams/save', '/skills/upload',
+  /* 凭证与可执行内容：普通成员改仓库地址（空 token 会沿用旧值）等于能把服务端令牌发到别的域名；
+     技能正文会落盘并注入派单提示词；团记忆/共享套件是公共资产。 */
+  '/repos/save', '/bots/save', '/skills/save', '/skills/sync', '/team/memory/clear', '/suite/delete',
   '/projects/delete', '/repos/delete', '/bots/delete', '/requirement/delete', '/projects/save',
   '/release/delete', '/release/approve', '/release/publish', '/release/rollback', '/release/gray', '/workspace/delete', '/workspace/detach',
   '/market/install', '/market/uninstall', '/audit/clear', '/snapshot/restore', '/task/merge', '/reset',

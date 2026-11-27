@@ -38,8 +38,12 @@ const rate = (part, total) => (total > 0 ? Math.round((part / total) * 100) : nu
  * 按专家汇总质量。runs 传 runSummary() 的结果（含 byExpert）。
  * 只统计「有专家」的卡；没派过的卡不进分母。
  */
-export function buildQuality(state, runs) {
-  const tasks = Array.isArray(state?.tasks) ? state.tasks : []
+export function buildQuality(state, runs, options = {}) {
+  /* 项目筛选与效能页其它面板同口径：只看这个项目的卡，别让「按专家看质量」
+     在选了项目之后还报全公司数字。 */
+  const project = String(options?.project ?? '').trim()
+  const all = Array.isArray(state?.tasks) ? state.tasks : []
+  const tasks = project === '' ? all : all.filter(task => task.project === project)
   const perExpert = new Map()
   const touch = key => {
     if (!perExpert.has(key)) perExpert.set(key, { key, cards: 0, done: 0, rework: 0, firstPass: 0 })
@@ -120,6 +124,8 @@ export function buildQuality(state, runs) {
       wired: false,
       note: '成本按真实 token 用量算：读 studio-* 会话日志，按卡 / 按专家汇总；价目表没配时只给 token，花费显示未知。',
     },
+    /* 让面板说清「这些数字算的是哪些卡」：选了项目却没生效，一眼能看出来。 */
+    scope: { project, cards: tasks.length },
   }
 }
 

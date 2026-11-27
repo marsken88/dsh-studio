@@ -31,6 +31,49 @@ const call = async (store, body) => {
   })
 }
 
+/* 套件走 side 键（readSide/writeSide），与卡上的用例不是一张表。 */
+const suiteStore = () => {
+  const side = new Map()
+  const state = { config: {}, tasks: [], requirements: [] }
+  return {
+    state,
+    snapshot: () => state,
+    mutate: async fn => { fn(state); return state },
+    readSide: async key => side.get(key) ?? null,
+    writeSide: async (key, value) => { side.set(key, value) },
+  }
+}
+const callSuite = async (store, route, body) => {
+  let payload = null
+  configureTaskRoutes({
+    readJsonBody: async () => body,
+    sendJson: (res, status, out) => { payload = { status, out } },
+    publicState: () => ({}),
+    autoBugFromCase: async () => ({}),
+  })
+  await handleTaskRoute({
+    method: 'POST', route, req: {}, res: {}, store,
+    url: new URL('http://localhost' + route),
+  })
+  return payload
+}
+
+test('套件：设为默认要真的换过去（旧默认的标记必须清掉）', async () => {
+  const store = suiteStore()
+  await callSuite(store, '/suite/save', { suite: { name: 'A', isDefault: true }, by: '人' })
+  await callSuite(store, '/suite/save', { suite: { name: 'B', isDefault: false }, by: '人' })
+  const listed = await callSuite(store, '/suite/list', {})
+  const byName = name => listed.out.suites.find(item => item.name === name)
+  assert.equal(byName('A').isDefault, true, 'A 先设默认')
+  assert.equal(byName('B').isDefault, false)
+
+  await callSuite(store, '/suite/save', { suite: { ...byName('B'), isDefault: true }, by: '人' })
+  const after = await callSuite(store, '/suite/list', {})
+  const defaults = after.out.suites.filter(item => item.isDefault === true)
+  assert.equal(defaults.length, 1, '任何时刻只能有一个默认套件')
+  assert.equal(defaults[0].name, 'B', '新设的默认要赢（以前保留数组里第一个，排在后面就设不上）')
+})
+
 test('用例定义：shell 命令可以改，lastRun 不被清掉', async () => {
   const store = makeStore({ testing: testing({ allowShell: true }) }, [{
     id: 'c1', title: 'shell', result: 'pass', lastRun: { at: 1, ok: true }, shell: { command: 'old', expectExit: 0 },

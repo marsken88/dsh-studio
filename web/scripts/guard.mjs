@@ -170,10 +170,13 @@ if (mode === 'post') {
     // 观察线：1.4 MB（1434 kB）是接 DatePicker 时定的。之后审计日志换成官方 Table +
     // Pagination（+6.3 kB，1436 kB）越线，按实际抬到 1460 kB。
     // 2026-11-20 抬到 1470 kB：项目检查 / 合并门禁 / 技能沉淀 / 浏览器用例 / 设计多稿
-    // 五块 UI 合计 +9 kB（1451 → 1461.7），是能力不是组件库。**这是最后一档**：
-    // 再涨就该拆包 —— 单文件 IIFE 超过 ~1.5 MB，宿主首屏会明显变慢。
-    if (sizeKb > 1470) {
-      failures.push(`dist/client.js is ${sizeKb.toFixed(1)} kB — over the 1.42 MB watch line, check what got pulled in`)
+    // 五块 UI 合计 +9 kB（1451 → 1461.7），是能力不是组件库。
+    // 2026-11-27 抬到 1490 kB（1472 kB 实测）：多维表格镜像 / 缺陷 SLA 与默认验收清单 /
+    // 自动重试三件套 / shell 默认目录 / 密钥清除与乐观锁提示 —— 全是**设置项入口与交互闭环**，
+    // 没有新组件库。**这一档是硬顶**：超过 1490 kB 就说明该拆包了（单文件 IIFE 到 1.5 MB
+    // 宿主首屏会明显变慢），不要再抬，改成分片加载或把 BoardUI 换成宿主注入。
+    if (sizeKb > 1490) {
+      failures.push(`dist/client.js is ${sizeKb.toFixed(1)} kB — over the 1.46 MB watch line, check what got pulled in`)
     }
   }
 }

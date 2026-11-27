@@ -185,6 +185,7 @@ process.env.DSH_HOME = home
 let server
 let base
 const disposers = []
+const registeredTools = []
 
 const api = async (path, body) => {
   const init = body === undefined
@@ -202,7 +203,7 @@ before(async () => {
   const handlers = []
   /* 假 ctx：只提供 index.js apply 需要的钩子，绝不碰 ~/.dsh 活库（DSH_HOME 已指向临时目录）。 */
   const ctx = {
-    tools: { register: () => () => {} },
+    tools: { register: tool => { registeredTools.push(tool); return () => {} } },
     systemPrompt: { section: () => () => {} },
     effect(fn) { const dispose = fn(); if (typeof dispose === 'function') disposers.push(dispose) },
     inject(deps, cb) {
@@ -423,12 +424,16 @@ test('真 HTTP：/task/block 传 blocked:false 按解除处理，缺原因时指
 test('真 HTTP：AI 签字后人工直接覆盖，actorKind=human 且历史留两条', async () => {
   const created = await api('/task/create', { title: '（测试）签字覆盖', type: 'bug', role: 'dev' })
   const id = String(created.body.task?.id ?? '')
-  /* by 写成**配置里真实存在的专家名**才会被判成 agent；写不存在的名字会落成 human。 */
   const experts = ((await api('/state')).body.state.config.experts ?? [])
   const agentName = String(experts.find(item => item.enabled !== false)?.name ?? experts[0]?.name ?? '')
   assert.notEqual(agentName, '', '配置里要有专家')
-  const first = await api('/task/signoff', { id, action: 'sign', note: 'AI 代签：证据齐全', by: agentName })
-  assert.equal(first.body.task?.signoff?.actorKind, 'ai', '第一次是 AI 签字（路由写 ai；工具写 agent，闸门两种都认）')
+  /* AI 代签走工具（actorKind=agent）：HTTP 签字的身份现在取服务端会话，
+     body.by 只是免登录单机模式的兜底，不能再拿它冒充 AI。 */
+  const signTool = registeredTools.find(item => item.name === 'studio_task_signoff')
+  assert.ok(signTool !== undefined, '要拿到 studio_task_signoff')
+  await signTool.execute({ id, action: 'sign', note: 'AI 代签：证据齐全', by: agentName })
+  const signed = (await api('/state')).body.state.tasks.find(item => item.id === id)
+  assert.equal(signed.signoff?.actorKind, 'agent', '工具代签统一记 agent')
   const second = await api('/task/signoff', { id, action: 'sign', note: '人工复验通过', by: '超级管理员' })
   assert.equal(second.status, 200, '覆盖 AI 签字不该被拒')
   assert.equal(second.body.task?.signoff?.actorKind, 'human')

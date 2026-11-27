@@ -66,8 +66,19 @@ export function BoardAppearancePane({ form, setForm, saveBar }) {
 
 /** 自动派单：总开关、逐列开关、并发与沙箱/隔离选项。 */
 export function AutoDispatchPane({ form, setForm, saveBar }) {
-  const { h, CheckField, SelectField } = client()
+  const { h, CheckField, SelectField, TextField } = client()
   const field = (key, label, hint, type) => h(SettingsField, { key, form, setForm, fieldKey: key, label, hint, type })
+  /* 数字用带 inputMode 的文本框：面板里没有独立的 Number 控件，而 `type=number` 在
+     BoardUI 的 Input 上会吃掉小键盘输入的某些按键，这里统一用 text + inputMode。 */
+  const numberField = (key, label) => h('div', { className: FIELD, style: { flex: '0 1 170px' } },
+    h('label', { className: LABEL }, label),
+    h(TextField, {
+      'aria-label': label,
+      type: 'number',
+      value: form[key],
+      onChange: e => setForm({ ...form, [key]: e.target.value }),
+    }),
+  )
   const selectOf = (label, key, options) => h('div', { className: FIELD },
     h('div', { className: LABEL }, label),
     h(SelectField, { size: 'md', 'aria-label': label, value: form[key], onChange: e => setForm({ ...form, [key]: e.target.value }) },
@@ -138,6 +149,13 @@ export function AutoDispatchPane({ form, setForm, saveBar }) {
         ['manual', '保留 worktree 和分支，等人看 diff'],
         ['on_done', '自动删掉 worktree 和分支'],
       ]),
+      /* 自动重试：跑完没推进的卡会冷却后自动再派。这三个值以前只能 curl /config 改。 */
+      h('div', { className: 'flex min-w-0 flex-wrap items-end gap-3', 'data-draft-scope': 'agents-retry' },
+        numberField('agentsRetryMax', '自动重试最多几次'),
+        numberField('agentsRetryBase', '第一次冷却（秒）'),
+        numberField('agentsRetryFactor', '每次翻几倍'),
+      ),
+      h('div', { className: 'text-caption-1-regular text-text-tertiary' }, '一轮跑完但卡没换列时：冷却后自动再派，最多 N 次，用完挂阻塞等人补一句指令。填 0 表示不自动重试。'),
     ),
     saveBar,
   )

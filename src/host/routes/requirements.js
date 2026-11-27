@@ -163,7 +163,13 @@ export async function handleRequirementRoute({ method, route, req, res, store, u
     const body = await host.readJsonBody(req)
     const id = String(body.id ?? '')   // 卡 id，不是需求引用（批量归一化时误伤过）
     const action = String(body.action ?? 'sign')
-    const by = text(body.by, 40) ?? '人'
+    /* 签字人取服务端认定的身份（会话 > 反代注入头 > 请求体），与需求签字同一口径：
+       卡签字以前直接信 body.by，登录后也能把「人签」署成任意名字（含专家名）。 */
+    const { by, source } = resolveSigner({
+      session: req.studioActor ?? '',
+      header: req.headers?.['x-studio-user'] ?? '',
+      body: body.by ?? '',
+    })
     const note = text(body.note, 600) ?? ''
     const task = await store.mutate(state => {
       const entry = state.tasks.find(item => item.id === id)
@@ -187,7 +193,7 @@ export async function handleRequirementRoute({ method, route, req, res, store, u
             note: `signoff-override：覆盖前一次签字（${entry.signoff.by} / ${entry.signoff.actorKind ?? '未知'}）：${String(entry.signoff.note ?? '').slice(0, 40)}`,
           })
         }
-        entry.signoff = { by, at: Date.now(), note, actorKind: signoffActorKind(by, store.snapshot().config) }
+        entry.signoff = { by, at: Date.now(), note, actorKind: signoffActorKind(by, store.snapshot().config), source }
         entry.history.push({ at: Date.now(), by, status: entry.status, note: `signoff：${note.slice(0, 80)}` })
       }
       entry.updatedAt = Date.now()

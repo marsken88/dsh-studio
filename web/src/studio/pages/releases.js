@@ -133,7 +133,11 @@ export function ReleasesPage({ state, onOpenTask }) {
   const release = detail?.release
   const tasks = detail?.tasks ?? []
   const candidates = state.tasks.filter(task => task.releaseId === '' || task.releaseId === undefined)
-  const releaseStatusOptions = RELEASE_STATUS_ORDER.map(value => ({ value, label: RELEASE_STATUS_LABEL[value] }))
+  /* 发布状态不能手改：下拉只给草稿 / 待发布 / 已审批；已发布 / 已回滚 只做展示，
+     真要发版或回滚走下面的「发布」「回滚」按钮（服务端同样拒绝手写这两个状态）。 */
+  const releaseStatusOptions = RELEASE_STATUS_ORDER
+    .filter(value => !['released', 'rolled_back'].includes(value) || release?.status === value)
+    .map(value => ({ value, label: RELEASE_STATUS_LABEL[value] }))
   const projectOptions = [
     { value: '', label: '不属于任何项目' },
     ...(state.config.projects ?? []).map(item => ({ value: item.id, label: item.name })),

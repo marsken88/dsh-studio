@@ -193,7 +193,10 @@ test('三个建号口都走 nextCodeForTask（建卡 / 换需求 / 老库补号�
   assert.match(indexSource, /code: nextCodeForTask\(store\.snapshot\(\)\.tasks, \{ requirementId, requirementCode, type \}\)/, '建卡入口')
   assert.match(indexSource, /nextCodeForTask\(state\.tasks, \{ requirementId: task\.requirementId, requirementCode: requirementCodeNow, type: task\.type \}\)/, '并发撞号兜底')
   assert.doesNotMatch(indexSource, /\?\.code \?\? nextTaskCode\(store\.snapshot\(\)\.tasks, requirementId, 'REQ'\)/, '不再把需求编号直接当卡编号')
-  assert.match(executorSource, /nextCodeForTask\(others, \{ requirementId: normalized\.requirementId/, '换需求时重新编号')
+  /* 换需求 / 换类型时重新编号：编号按「卡现在的 requirementId + type」算，
+     所以这里断言的是「重算时用的是卡上的现值」。 */
+  assert.match(executorSource, /nextCodeForTask\(others, \{ requirementId: task\.requirementId/, '换需求/换类型时重新编号')
+  assert.match(executorSource, /const typeChanged = normalized\.type !== undefined && normalized\.type !== previousType/, '改类型也算一次重新编号')
   assert.match(storeSource, /nextCodeForTask\(this\.state\.tasks, \{ requirementId: task\.requirementId/, '老库补号')
   assert.match(storeSource, /migrateRequirementTaskCodes\(this\.state\.tasks, this\.state\.requirements\)/, '启动时迁移老需求卡编号')
 })

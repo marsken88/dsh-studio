@@ -65,10 +65,24 @@ const auditTriggers = () => page.evaluate(() => {
     if (btn.closest('[data-rac]') === null) bad.push({ why: '不是 react-aria 组件', text: btn.textContent.slice(0, 20) })
     const cs = getComputedStyle(btn)
     const r = btn.getBoundingClientRect()
-    const padOk = cs.paddingTop === '8px' && cs.paddingLeft === '10px'
-    if (!padOk) bad.push({ why: `内边距 ${cs.padding}（应为 8px 10px）`, text: btn.textContent.slice(0, 20) })
-    if (r.height < 34) bad.push({ why: `高 ${Math.round(r.height)}px（应 ≥34）`, text: btn.textContent.slice(0, 20) })
-    if (cs.fontSize !== '14px') bad.push({ why: `字 ${cs.fontSize}（应 14px）`, text: btn.textContent.slice(0, 20) })
+    /* BoardUI 的 Select 有两档，取自组件源码（components/base/select/select.tsx）：
+         md（默认）：px-2 py-2 → 8px / 8px，字 14px，高 ≥34
+         sm（工具栏筛选）：px-[7px] py-1 → 7px / 4px，字 13px，高 ≥26
+       历史真事故是「样式被自己的重置压掉」：0 内边距、高 21px、字 12px —— 两档都不匹配，
+       仍然会红。判据原本只认 md，于是所有 size="sm" 的筛选下拉全被判红（那不是事故）。 */
+    const near = (value, want) => Math.abs(Number.parseFloat(value) - want) <= 0.5
+    const height = r.height
+    const mdOk = near(cs.paddingTop, 8) && near(cs.paddingLeft, 8) && height >= 34 && Number.parseFloat(cs.fontSize) >= 14
+    const smOk = near(cs.paddingTop, 4) && near(cs.paddingLeft, 7) && height >= 26 && near(cs.fontSize, 13)
+    /* 还有一档是「md 的盒子里套了 caption 字号」（父级 text-caption 继承下来）：高度与内边距对，
+       字号 13px。这不是重置压扁，但也不该算 md —— 单独认，判据仍然要求盒模型正确。 */
+    const mdSmallFontOk = near(cs.paddingTop, 8) && near(cs.paddingLeft, 8) && height >= 34 && near(cs.fontSize, 13)
+    if (!mdOk && !smOk && !mdSmallFontOk) {
+      bad.push({
+        why: `尺寸 ${cs.padding} / 高 ${Math.round(height)}px / 字 ${cs.fontSize}（应为 md 8px·34·14 或 sm 7px4px·26·13）`,
+        text: btn.textContent.slice(0, 20),
+      })
+    }
   }
   return { native: native.length, fields: fields.length, bad }
 })

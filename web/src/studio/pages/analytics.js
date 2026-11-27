@@ -53,6 +53,9 @@ export function AnalyticsPage({ state, onOpenTask, onFixPrices }) {
   const [quality, setQuality] = React.useState(null)
   // 上下文洞察：每个专家的窗口占用峰值 / 回合 / 工具调用 / 重试（读会话日志，不额外花 token）
   const [contexts, setContexts] = React.useState(null)
+  /* 上下文接口失败要单独记：以前被 catch 成空 rows，界面显示「还没有专家会话记录」——
+     把「读不到」说成「没有数据」，排查方向全错。 */
+  const [contextsError, setContextsError] = React.useState(null)
   const [ctxDetail, setCtxDetail] = React.useState(null)
   const [ctxOpen, setCtxOpen] = React.useState('')
   // 折线：每轮 input+cacheRead 的相对高度（0-56 的 viewBox）
@@ -71,30 +74,37 @@ export function AnalyticsPage({ state, onOpenTask, onFixPrices }) {
 
   React.useEffect(() => {
     let alive = true
+    /* 上下文接口挂了不该被说成「还没有会话记录」：错误与空态分开显示。 */
     api('/contexts', {})
-      .then(out => { if (alive) setContexts(out) })
-      .catch(() => { if (alive) setContexts({ rows: [], totals: { experts: 0, sessions: 0, peak: 1 } }) })
+      .then(out => { if (alive) { setContexts(out); setContextsError(null) } })
+      .catch(cause => {
+        if (!alive) return
+        setContexts({ rows: [], totals: { experts: 0, sessions: 0, peak: 1 } })
+        setContextsError(cause instanceof Error ? cause.message : String(cause))
+      })
     return () => { alive = false }
   }, [state.revision])
 
   React.useEffect(() => {
     let alive = true
-    const query = `/analytics?days=${days}${project === '' ? '' : `&project=${encodeURIComponent(project)}`}`
-    api(query)
+    const withProject = path => project === '' ? path : `${path}${path.includes('?') ? '&' : '?'}project=${encodeURIComponent(project)}`
+    api(`/analytics?days=${days}${project === '' ? '' : `&project=${encodeURIComponent(project)}`}`)
       .then(out => { if (alive) { setData(out.analytics); setError(null) } })
       .catch(cause => { if (alive) setError(cause instanceof Error ? cause.message : String(cause)) })
-    const suffix = project === '' ? '' : `&project=${encodeURIComponent(project)}`
     setSecondaryLoading(true)
-    Promise.all([api('/workload'), api(`/burndown?days=14${suffix}`), api('/costs'), api('/quality')])
-      .then(([loadOut, burnOut, costOut, qualityOut]) => {
-        if (!alive) return
-        setLoad(loadOut.workload ?? null)
-        setBurn(burnOut.burndown ?? null)
-        setCosts({ ...(costOut.costs ?? {}), budget: costOut.budget ?? null, usage: costOut.usage ?? null })
-        setQuality(qualityOut.quality ?? null)
-        setSecondaryError(null)
-      })
-      .catch(cause => { if (alive) setSecondaryError(cause instanceof Error ? cause.message : String(cause)) })
+    /* 四个次数据各取各的：以前用 Promise.all，一个接口挂了（例如价目表没配、会话日志读不到）
+       整块负载/燃尽/成本/质量全空。现在分开收，失败的那一块单独说明，其余照常显示。 */
+    const failed = []
+    const settle = (path, apply) => api(path)
+      .then(out => { if (alive) apply(out) })
+      .catch(cause => { failed.push(`${path.split('?')[0]}：${cause instanceof Error ? cause.message : String(cause)}`) })
+    Promise.all([
+      settle(withProject('/workload'), out => setLoad(out.workload ?? null)),
+      settle(withProject('/burndown?days=14'), out => setBurn(out.burndown ?? null)),
+      settle(withProject('/costs'), out => setCosts({ ...(out.costs ?? {}), budget: out.budget ?? null, usage: out.usage ?? null, scope: out.scope ?? null })),
+      settle(withProject('/quality'), out => setQuality(out.quality ?? null)),
+    ])
+      .then(() => { if (alive) setSecondaryError(failed.length === 0 ? null : `${failed.length} 项没取到：${failed.join('；')}`) })
       .finally(() => { if (alive) setSecondaryLoading(false) })
     return () => { alive = false }
   }, [days, project, state.revision])
@@ -222,8 +232,9 @@ export function AnalyticsPage({ state, onOpenTask, onFixPrices }) {
       chip('最高占用', (totals.percent ?? 0) + '%', (totals.percent ?? 0) >= 80),
       chip('工具喂胖', String(totals.alerts ?? 0), (totals.alerts ?? 0) > 0))
     const body = contexts === null ? h('div', { className: HINT }, '正在读会话日志…')
-      : rows.length === 0 ? h('div', { className: HINT }, '还没有专家会话记录。')
-        : h('div', null, kpis, rows.map(renderContextRow))
+      : contextsError !== null ? h('div', { className: 'text-caption-1-regular text-text-error-primary', 'data-contexts-error': '' }, `读不到会话日志：${contextsError}（这不是「没有数据」，是接口或日志读不出来）`)
+        : rows.length === 0 ? h('div', { className: HINT }, '还没有专家会话记录。')
+          : h('div', null, kpis, rows.map(renderContextRow))
     return h('div', { className: `${PANEL} mt-3`, 'data-analytics-panel': 'context' }, head, h('div', { className: PANEL_BODY }, body))
   }
 
@@ -231,6 +242,9 @@ export function AnalyticsPage({ state, onOpenTask, onFixPrices }) {
     secondaryError === null ? null : h('div', { className: 'mb-2 text-caption-1-regular text-text-error-primary' }, `部分数据没加载出来：${secondaryError}（负载 / 燃尽 / 成本 / 质量可能是空的或旧的）`),
     h('div', { className: ROW },
       h('span', { className: HINT }, `统计口径：最近 ${data.days} 天 · ${data.scope.tasks} 张卡（${data.scope.done} 张已完成）`),
+      project === ''
+        ? null
+        : h('span', { className: HINT, 'data-analytics-scope': project }, '（项目筛选对所有分区生效：负载 / 质量 / 成本也只算这个项目）'),
       h(Select, {
         className: 'w-52', value: project, options: projectOptions,
         'aria-label': '按项目筛选',

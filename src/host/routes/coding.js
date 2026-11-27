@@ -10,7 +10,7 @@ import { mergeGateFor } from '../merge-gate.js'
 import { rejectUnknownFields } from '../route-contract.js'
 import { readFile, realpath, stat } from 'node:fs/promises'
 import { resolve, sep } from 'node:path'
-const INJECTED = ["applyConfig","commentTask","deleteProjectFolder","ensureWorktree","getDispatcher","mergeMergeRequest","publicState","publishMergeGate","readJsonBody","removeWorktree","sendJson","serviceOf","upsertById","workProjectOf"]
+const INJECTED = ["applyConfig","commentTask","deleteProjectFolder","ensureWorktree","getDispatcher","mergeMergeRequest","publicState","publishMergeGate","readJsonBody","recordAudit","removeWorktree","sendJson","serviceOf","upsertById","workProjectOf"]
 let host = {
   applyConfig: () => {},
   commentTask: undefined,
@@ -434,7 +434,20 @@ if (method === 'POST' && route === '/task/quality') {
   // 结果写回卡片，准出会按它拦。触发方式：卡片抽屉的「跑一次」，或专家调 studio_task_quality。
   const body = await host.readJsonBody(req)
   const id = String(body.id ?? '')
-  const result = await runTaskQuality(store, id, { by: String(body.by ?? '人').slice(0, 40) })
+  const by = String(body.by ?? '人').slice(0, 40)
+  /* 质量命令默认超时 120s（编译类门禁实测 113s 贴顶），同步跑会把请求线程占住：
+     反代 60s 就断连，面板报错而命令还在跑，用户无从判断到底跑没跑。
+     所以这里改成「提交即返回 202」：后台跑完把结果写回卡（runTaskQuality 本来就会写），
+     前端靠已有的 /state 轮询看到结果。`wait:true` 保留同步语义给脚本/工具用。 */
+  if (body.wait !== true) {
+    host.sendJson(res, 202, { ok: true, queued: true, note: '已提交后台执行：跑完结果会写回这张卡（刷新可见），不用等在这里' })
+    void runTaskQuality(store, id, { by }).catch(error => {
+      /* recordAudit 由 index.js 注入；问号只为兼容不注它的老测试桩，线上不该缺。 */
+      host.recordAudit?.(store, { by, route: '/task/quality', level: 'write', status: 500, ok: false, summary: `质量命令没跑成：${String(error?.message ?? error).slice(0, 120)}` })
+    })
+    return true
+  }
+  const result = await runTaskQuality(store, id, { by })
   const snapshot = store.snapshot()
   host.sendJson(res, 200, {
     ok: true,

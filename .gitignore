@@ -7,3 +7,5 @@ web/tmp-*.cjs
 tmp/
 # 派单 worktree 默认建在仓库内（.agents/worktrees），别让它们进主检出的 git status
 .agents/
+# 探针用的临时会话凭据（换 cookie 用）：绝不入库
+.studio-token*

@@ -7,7 +7,6 @@ import { isAiSignoff } from './intervention.js'
 import { pointAcceptanceGap } from './acceptance.js'
 import { BLOCK_UNTIL, blockUntilMet } from './block-until.js'
 import { reviewGate } from './quality.js'
-import { overrideSummary } from './override.js'
 import { CASE_HTTP_METHODS, ROLE_IDS, STATUS_IDS, STATUSES, nextRequirementCode, normalizePatch, roleIdsOf, sanitizeBaseline, sanitizeCase, sanitizeReqDoc, sanitizeRequirement, sanitizeTestRun, sanitizeUrl, text,
   canonicalAuthor,
   sanitizeCoding,
@@ -23,8 +22,9 @@ import { larkUploadArgs } from './lark-upload.js'
 import { commandArgs } from './cmd-args.js'
 import { runCommand } from './run-command.js'
 import { ensureKindFolder, ensureRequirementFolder } from './drive-sync.js'
-import { isStalled } from './dispatch-state.js'
 import { collectCodingFromWorktree } from './task-diff.js'
+/* 工作台汇总搬到 dashboard.js（2000 行闸门）；override 汇总也跟着过去了。 */
+import { dashboardOf } from './dashboard.js'
 import { RUN_LOG, parseMentions } from './dispatcher.js'
 import { appendTeamMemory } from './team-memory.js'
 import { pickRunner, registerRunner } from './runners.js'
@@ -930,100 +930,20 @@ export function taskExitGate(state, task) {
 
 /**
  * 工作台：一眼看清「哪里着火了」。
- * 只做汇总，不改任何数据；列表最多各给 6 条，点进去看卡片。
+ *
+ * 实现在 dashboard.js（executor 有 2000 行闸门）；这里只把宿主能力注入进去，
+ * 调用方签名不变。停摆的上下文用「活会话表」判，拿不到就退回超时兜底。
  */
-export function buildDashboard(state) {
-  const now = Date.now()
-  const tasks = state.tasks
-  const open = tasks.filter(task => task.status !== 'done')
-  const listOf = (items, limit = 6) => items.slice(0, limit).map(task => ({
-    id: task.id,
-    code: task.code,
-    title: task.title,
-    status: task.status,
-    statusLabel: (STATUSES.find(entry => entry.id === task.status)?.label) ?? task.status,
-    owner: task.owner || '',
-    dueAt: task.dueAt || 0,
-    sla: host.bugSla(task, state.config),
-  }))
-
-  const overdue = open.filter(task => task.dueAt > 0 && task.dueAt < now)
-  const blocked = open.filter(task => task.blocked != null)
-  /* 停摆 = 派单印记还挂在这一列，但会话已经不在跑（崩过 / 被中断）。
-     这种卡不会自己恢复、也不会再被自动派单，界面上却和「排队中」长得一样 —— 必须单独数出来。 */
-  const stalled = open.filter(task => isStalled(task))
-  const slaOverdue = open.filter(task => task.type === 'bug' && host.bugSla(task, state.config).state === 'overdue')
-  // 强制放行是逃生舱，用得越来越顺就该被看一眼：30 天内超过上限算风险。
-  const overrideWindow = overrideSummary(state, { since: Date.now() - 30 * 86_400_000, config: state.config })
-  const overrideMax = Number(state.config?.limits?.overrideMax) || 3
-  const overrideOver = overrideWindow.total > overrideMax ? overrideWindow.total : 0
-  const gateFailed = open.filter(task => {
-    if (task.status !== 'test' && task.status !== 'accept') return false
-    const gate = taskExitGate(state, task)
-    return gate.blockers.length > 0
+export function buildDashboard(state, stalledCtx = {}) {
+  return dashboardOf(state, {
+    taskExitGate,
+    bugSla: host.bugSla,
+    releaseGate: host.releaseGate,
+    healthReport: host.healthReport,
+    activeRunCount: host.activeDispatcher === null || host.activeDispatcher === undefined ? 0 : host.activeDispatcher.running.size,
+    runLog: typeof RUN_LOG !== 'undefined' && Array.isArray(RUN_LOG) ? RUN_LOG : [],
+    stalledCtx,
   })
-  const pipelineFailed = open.filter(task => task.gitlabMR?.pipeline?.status === 'failed')
-
-  const requirementBlocked = state.requirements.filter(item => {
-    const progress = requirementProgress(state, item)
-    return progress.derived !== 'delivered' && progress.derived !== 'closed' && progress.gate.blockers.length > 0
-  })
-  const releaseBlocked = state.releases.filter(item => item.status !== 'released' && item.status !== 'rolled_back' && !host.releaseGate(state, item).ready)
-
-  const done = tasks.filter(task => task.status === 'done')
-  const dayStart = new Date()
-  dayStart.setHours(0, 0, 0, 0)
-  const doneToday = done.filter(task => (task.updatedAt || 0) >= dayStart.getTime())
-  const doneWeek = done.filter(task => (task.updatedAt || 0) >= now - 7 * 24 * 60 * 60 * 1000)
-  const aiRunning = host.activeDispatcher === null ? 0 : host.activeDispatcher.running.size
-  const runs = typeof RUN_LOG !== 'undefined' && Array.isArray(RUN_LOG) ? RUN_LOG : []
-
-  return {
-    at: now,
-    scope: { tasks: tasks.length, open: open.length, requirements: state.requirements.length, releases: state.releases.length },
-    risks: {
-      overdue: overdue.length,
-      blocked: blocked.length,
-      stalled: stalled.length,
-      slaOverdue: slaOverdue.length,
-      gateFailed: gateFailed.length,
-      pipelineFailed: pipelineFailed.length,
-      requirementBlocked: requirementBlocked.length,
-      releaseBlocked: releaseBlocked.length,
-      overrideOver: overrideOver,
-      overrideMax,
-      integrationsBroken: host.healthReport().broken,
-    },
-    flow: {
-      review: tasks.filter(task => task.status === 'review').length,
-      test: tasks.filter(task => task.status === 'test').length,
-      accept: tasks.filter(task => task.status === 'accept').length,
-      doneToday: doneToday.length,
-      doneWeek: doneWeek.length,
-    },
-    ai: { running: aiRunning, todayRuns: runs.filter(item => (item.at || 0) >= dayStart.getTime()).length },
-    list: {
-      overdue: listOf(overdue),
-      blocked: listOf(blocked),
-      stalled: listOf(stalled),
-      slaOverdue: listOf(slaOverdue),
-      gateFailed: listOf(gateFailed),
-      pipelineFailed: listOf(pipelineFailed),
-      overrideOver: overrideWindow.list.slice(0, 6),
-      requirementBlocked: requirementBlocked.slice(0, 6).map(item => ({
-        id: item.id,
-        code: item.code,
-        title: item.title,
-        blockers: requirementProgress(state, item).gate.blockers.slice(0, 3),
-      })),
-      releaseBlocked: releaseBlocked.slice(0, 6).map(item => ({
-        id: item.id,
-        version: item.version,
-        name: item.name,
-        blockers: host.releaseGate(state, item).blockers.slice(0, 3),
-      })),
-    },
-  }
 }
 
 /* 实现搬到 run-command.js（executor 有 2000 行闸门）；这里 re-export，调用方不用改。 */
@@ -1437,7 +1357,12 @@ export async function updateTask(store, id, patch) {
   const override = normalized.override ?? ''
   delete normalized.override
   const blockReason = text(patch.blockedReason, 500)
-  if (normalized.status === 'done' && override === '') {
+  /* 目标列 = 当前列时什么都不该触发：门禁只回答「能不能进这一列」，
+     同列拖放/同列提交不是一次推进。以前拖回原列会重跑设计/评审/准出门禁
+     （弹出「确实要强推就写原因」），还会顺手清掉阻塞标记。 */
+  const statusNow = normalized.status !== undefined ? store.snapshot().tasks.find(entry => entry.id === id) : undefined
+  const sameStatus = statusNow !== undefined && normalized.status === statusNow.status
+  if (normalized.status === 'done' && override === '' && !sameStatus) {
     const current = store.snapshot().tasks.find(entry => entry.id === id)
     if (current !== undefined) {
       const simulated = { ...current, ...normalized, blocked: current.blocked }
@@ -1448,7 +1373,7 @@ export async function updateTask(store, id, patch) {
       }
     }
   }
-  if (normalized.status !== undefined && override === '') {
+  if (normalized.status !== undefined && override === '' && !sameStatus) {
     // 设计闸门：开了开关的项目，进开发列之前设计必须评审通过。
     const current = store.snapshot().tasks.find(entry => entry.id === id)
     if (current !== undefined) {
@@ -1484,6 +1409,7 @@ export async function updateTask(store, id, patch) {
     }
     const previous = task.status
     const previousRequirement = task.requirementId ?? ''
+    const previousType = task.type
     Object.assign(task, normalized)
     // 编辑版本：任何一次成功的 update 都 +1，供调用方下次带 ifVersion 做乐观锁。
     task.version = (Number(task.version) || 0) + 1
@@ -1494,11 +1420,13 @@ export async function updateTask(store, id, patch) {
       if (owner === undefined || !(owner.services ?? []).some(entry => entry.id === task.service)) task.service = ''
     }
     /* 换需求就要换编号：同一需求下 DEV-001 只出现一次；
-       需求卡走「需求编号-NN」（REQ-2026-003-01），换到哪条需求就带上哪条的编号。 */
-    if (normalized.requirementId !== undefined && normalized.requirementId !== previousRequirement) {
+       需求卡走「需求编号-NN」（REQ-2026-003-01），换到哪条需求就带上哪条的编号。
+       改类型同理：DEV-001 变成缺陷卡还叫 DEV-001，界面上「BUG-001」的预期会对不上。 */
+    const typeChanged = normalized.type !== undefined && normalized.type !== previousType
+    if ((normalized.requirementId !== undefined && normalized.requirementId !== previousRequirement) || typeChanged) {
       const others = state.tasks.filter(entry => entry.id !== task.id)
-      const requirementCode = String(state.requirements.find(entry => entry.id === normalized.requirementId)?.code ?? '')
-      task.code = nextCodeForTask(others, { requirementId: normalized.requirementId, requirementCode, type: task.type })
+      const requirementCode = String(state.requirements.find(entry => entry.id === task.requirementId)?.code ?? '')
+      task.code = nextCodeForTask(others, { requirementId: task.requirementId ?? '', requirementCode, type: task.type })
     }
     /* 「已完成」的卡不用标阻塞：它会一直挂在需求准出里（「N 张卡还卡在阻塞」），
        而实际上什么也拦不住（真机 2026-11-26：REQ-2026-001-5 已完成后被 agent 标了阻塞，
@@ -1530,7 +1458,9 @@ export async function updateTask(store, id, patch) {
     }
     // 换列时负责人会被这一列的默认负责人覆盖，团队记忆要用「换列前」的那个人去认团。
     const expertBefore = task.expert
-    if (normalized.status !== undefined) {
+    /* 只有**真的换列**才更新列相关状态：同列提交（拖回原列、只改标题时带上 status）
+       不该清阻塞、不该重置派单印记、也不该写一条假的「推进」历史。 */
+    if (normalized.status !== undefined && previous !== task.status) {
       /* 换列 = 新的一棒：把上一列的派单印记清成「本列还没派过」。
          不清的话，卡被打回原来那一列时 dispatch.status 又等于当前列，
          tick 会当成「这一列已经派过一轮」——永远不动（2026-11-25 反馈的「卡停着」之一）。

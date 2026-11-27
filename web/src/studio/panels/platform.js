@@ -124,6 +124,23 @@ export function LdapPanel({ config, onChanged }) {
     }
   }
 
+  /* 撤销已保存的服务账号密码：密码只能写不能清的话，泄漏时界面撤不掉。
+     单独走一次 /config（clearBindPassword），不并进上面的 save —— 免得「点保存」顺手把密码清了。 */
+  const clearBindPassword = async () => {
+    if (!(await confirmDialog('清掉已保存的服务账号密码？清掉后 LDAP 登录会失败，直到重新填一个。', { title: '清除服务账号密码', danger: true, okText: '清除' }))) return
+    setBusy(true); setNote(null); setError(null)
+    try {
+      await api('/config', { ldap: { clearBindPassword: true } })
+      patch({ bindPassword: '' })
+      setNote('已清除服务账号密码：重新填一个再保存即可恢复')
+      await onChanged()
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause))
+    } finally {
+      setBusy(false)
+    }
+  }
+
   const save = async () => {
     setBusy(true); setNote(null); setError(null)
     try {
@@ -201,6 +218,13 @@ export function LdapPanel({ config, onChanged }) {
             placeholder: ldap.bindPasswordSet === true ? '已保存，留空表示不修改' : '写一次就进密钥文件',
             onChange: event => patch({ bindPassword: event.target.value }),
           }),
+          ldap.bindPasswordSet === true
+            ? h('div', { className: 'flex min-w-0 flex-wrap items-center gap-2' },
+              h(Button, {
+                variant: 'secondary', size: 'sm', 'data-clear-bind-password': '', disabled: busy,
+                onClick: () => void clearBindPassword(),
+              }, '清除已保存的密码'))
+            : null,
         ),
         h('div', { className: FIELD, style: { flex: 1 } },
           h('div', { className: LABEL }, '用户过滤器（{user} 会被替换）'),
@@ -571,26 +595,31 @@ export function BusinessPanel({ config, onChanged }) {
                     ),
                   h(Button, { variant: 'danger', size: 'sm', type: 'button', 'aria-label': `删除第 ${index + 1} 个服务`, onClick: () => dropService(index), 'data-danger': '1' }, '删除'),
                 ),
-                others.length === 0
-                  ? null
-                  : h('div', { className: ROW },
-                    h('span', { className: HINT }, '检查命令'),
-                    h(TextField, {
-                      value: service.qualityCmd ?? '', placeholder: '留空用项目级',
-                      'aria-label': `第 ${index + 1} 个服务的检查命令`,
-                      style: { flex: '0 0 220px' },
-                      onChange: e => setService(index, 'qualityCmd', e.target.value),
-                    }),
-                    h('span', { className: HINT }, '依赖（勾上的服务要先完成，本服务的卡才能收口）'),
-                    others.map(other => h(ChipField, {
-                      key: other.id,
-                      variant: 'gray',
-                      'data-on': (service.dependsOn ?? []).includes(other.id) ? '1' : '0',
-                      title: `依赖 ${other.name || other.id}`,
-                      style: { cursor: 'pointer' },
-                      onClick: () => toggleDep(index, other.id),
-                    }, other.name || other.id)),
-                  ),
+                /* 服务的检查命令与「依赖」分开渲染：只有一个服务时 others 为空，
+                   以前把整行（含检查命令输入框）一起藏了 —— 单服务项目根本配不了服务级命令，
+                   和「留空用项目级」的提示自相矛盾。 */
+                h('div', { className: ROW },
+                  h('span', { className: HINT }, '检查命令'),
+                  h(TextField, {
+                    value: service.qualityCmd ?? '', placeholder: '留空用项目级',
+                    'aria-label': `第 ${index + 1} 个服务的检查命令`,
+                    style: { flex: '0 0 220px' },
+                    onChange: e => setService(index, 'qualityCmd', e.target.value),
+                  }),
+                  others.length === 0
+                    ? h('span', { className: HINT }, '只有一个服务时不用配依赖')
+                    : [
+                      h('span', { key: 'label', className: HINT }, '依赖（勾上的服务要先完成，本服务的卡才能收口）'),
+                      ...others.map(other => h(ChipField, {
+                        key: other.id,
+                        variant: 'gray',
+                        'data-on': (service.dependsOn ?? []).includes(other.id) ? '1' : '0',
+                        title: `依赖 ${other.name || other.id}`,
+                        style: { cursor: 'pointer' },
+                        onClick: () => toggleDep(index, other.id),
+                      }, other.name || other.id)),
+                    ],
+                ),
               )
             }),
           ),

@@ -89,22 +89,34 @@ export function DashboardPage({ state, onOpenTask, onOpenBoard, onOpenCases }) {
     h('div', { className: 'text-title-2-semibold text-text-primary tabular-nums' }, String(value ?? 0)))
   /* 没有内容的区块收成一行：一块 150px 的空面板 × 六七块，首屏全在说「没有」。
      有内容时仍然是完整面板（表格行要空间）。（unslop：首屏每一块都要讲一件事，不拿空白占版面） */
-  const block = (title, rows, empty, hint) => (rows.length === 0
-    ? h('div', {
-      className: 'flex min-w-0 flex-wrap items-center gap-2 rounded-xl border border-separator-border bg-background-secondary-default px-4 py-2',
-      'data-empty-block': title,
-      // 收成一行仍然是「空态」：pages 探针靠 data-empty-state 断言每个空分区都写出了原因。
-      'data-empty-state': '',
-    },
-      h('span', { className: 'text-caption-1-medium text-text-secondary' }, title),
-      h('span', { className: HINT }, empty))
-    : h('div', { className: PANEL },
-      h('div', { className: PANEL_HEAD },
-        h('span', null, title),
-        h('span', { className: HINT }, hint ?? '')),
-      h('div', { className: PANEL_BODY },
-        h('div', { className: 'flex min-w-0 flex-col' }, rows)),
-    ))
+  /* 每类清单后端只给 6 条（首屏放得下），但总数一起下发：
+     以前 KPI 写「逾期 12」、下面只列 6 行，剩下 6 张无从得知。
+     total 多于 rows 时在块头写「还有 N 张」，并给一个带筛选进看板的入口。 */
+  const block = (title, rows, empty, hint, total) => {
+    const rest = Number(total ?? rows.length) - rows.length
+    const more = rest > 0
+      ? h('span', { className: 'ml-auto flex items-center gap-2 text-caption-1-regular text-text-secondary', 'data-more-hint': title },
+        h('span', null, `还有 ${rest} 张`),
+        onOpenBoard === undefined ? null : h(Button, { variant: 'ghost', size: 'xs', onClick: () => onOpenBoard() }, '去看板'))
+      : null
+    return rows.length === 0
+      ? h('div', {
+        className: 'flex min-w-0 flex-wrap items-center gap-2 rounded-xl border border-separator-border bg-background-secondary-default px-4 py-2',
+        'data-empty-block': title,
+        // 收成一行仍然是「空态」：pages 探针靠 data-empty-state 断言每个空分区都写出了原因。
+        'data-empty-state': '',
+      },
+        h('span', { className: 'text-caption-1-medium text-text-secondary' }, title),
+        h('span', { className: HINT }, empty))
+      : h('div', { className: PANEL },
+        h('div', { className: PANEL_HEAD },
+          h('span', null, title),
+          h('span', { className: HINT }, hint ?? ''),
+          more),
+        h('div', { className: PANEL_BODY },
+          h('div', { className: 'flex min-w-0 flex-col' }, rows)),
+      )
+  }
 
   return h('div', { className: PAGE, 'data-insights-page': '' },
     regressionLine,
@@ -147,12 +159,12 @@ export function DashboardPage({ state, onOpenTask, onOpenBoard, onOpenCases }) {
           h(Button, { variant: 'ghost', size: 'sm', onClick: () => onOpenBoard() }, '去看板')),
       ),
     ),
-    block('逾期', (data.list?.overdue ?? []).map(taskRow), '没有逾期的卡。'),
-    block('阻塞', (data.list?.blocked ?? []).map(taskRow), '没有卡在等人决策。'),
-    block('停摆', (data.list?.stalled ?? []).map(taskRow), '没有停摆的卡。'),
-    block('缺陷超时', (data.list?.slaOverdue ?? []).map(taskRow), '缺陷都在时限内。'),
-    block('准出被拦', (data.list?.gateFailed ?? []).map(taskRow), '没有卡被准出规则拦住。', '清单没勾完 / 用例不通过 / 已签过字但被打回'),
-    block('流水线失败', (data.list?.pipelineFailed ?? []).map(taskRow), '没有 CI 失败的卡。'),
+    block('逾期', (data.list?.overdue ?? []).map(taskRow), '没有逾期的卡。', undefined, data.listTotal?.overdue),
+    block('阻塞', (data.list?.blocked ?? []).map(taskRow), '没有卡在等人决策。', undefined, data.listTotal?.blocked),
+    block('停摆', (data.list?.stalled ?? []).map(taskRow), '没有停摆的卡。', undefined, data.listTotal?.stalled),
+    block('缺陷超时', (data.list?.slaOverdue ?? []).map(taskRow), '缺陷都在时限内。', undefined, data.listTotal?.slaOverdue),
+    block('准出被拦', (data.list?.gateFailed ?? []).map(taskRow), '没有卡被准出规则拦住。', '清单没勾完 / 用例不通过 / 已签过字但被打回', data.listTotal?.gateFailed),
+    block('流水线失败', (data.list?.pipelineFailed ?? []).map(taskRow), '没有 CI 失败的卡。', undefined, data.listTotal?.pipelineFailed),
     block('需求与版本卡住', [
       ...(data.list?.requirementBlocked ?? []).map(item => h('div', { key: item.id, className: 'flex min-w-0 items-start justify-between gap-4 border-b border-separator-border py-3 last:border-b-0' },
         h('div', { className: 'flex min-w-0 flex-1 flex-col gap-1' },
@@ -166,7 +178,7 @@ export function DashboardPage({ state, onOpenTask, onOpenBoard, onOpenCases }) {
           h('div', { className: HINT }, `版本：${(item.blockers ?? []).join('；')}`),
         ),
       )),
-    ], '需求与版本都还顺。'),
+    ], '需求与版本都还顺。', undefined, Number(data.listTotal?.requirementBlocked ?? 0) + Number(data.listTotal?.releaseBlocked ?? 0)),
     h('div', { className: HINT }, `统计时间 ${fmtTime(data.at)}，数字随看板变化实时算，不落库。`),
   )
 }

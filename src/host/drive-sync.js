@@ -28,17 +28,20 @@ export async function ensureProjectFolder(store, requirement, larkJson) {
   const project = String(requirement?.project ?? '') === '' ? undefined : projects.find(item => item.id === requirement.project)
   const key = project === undefined ? '__unassigned__' : String(project.id)
   const cached = (state.config.feishu.projectFolders ?? {})[key]
-  if (cached !== undefined && String(cached.token ?? '').trim().length > 0) return { ...cached, project }
+  /* 缓存要记住「建在哪个根目录下」：换了云盘根目录后旧 token 仍指向旧根，
+     新需求会静默落到旧根的项目文件夹里（面板上没有「已迁移」以外的提示）。
+     老缓存没有 root 字段，按未命中处理一次：会按名字在新根下复用或重建，之后写回 root。 */
+  if (cached !== undefined && String(cached.token ?? '').trim().length > 0 && String(cached.root ?? '') === root) return { ...cached, project }
   const name = projectFolderName(project)
   const listed = await larkJson(driveArgs(root), 45000)
   const existing = listed.ok ? findFolder(itemsOf(listed.data), name) : undefined
   let folder
   if (existing !== undefined) {
-    folder = { token: String(existing.token ?? ''), url: String(existing.url ?? ''), name, at: Date.now(), error: '' }
+    folder = { token: String(existing.token ?? ''), url: String(existing.url ?? ''), name, root, at: Date.now(), error: '' }
   } else {
     const created = await larkJson(['drive', '+create-folder', '--folder-token', root, '--name', name], 45000)
     if (!created.ok) throw new Error(created.error)
-    folder = { token: String(created.data.folder_token ?? ''), url: String(created.data.url ?? ''), name, at: Date.now(), error: '' }
+    folder = { token: String(created.data.folder_token ?? ''), url: String(created.data.url ?? ''), name, root, at: Date.now(), error: '' }
   }
   await store.mutate(draft => {
     const folders = { ...(draft.config.feishu.projectFolders ?? {}) }

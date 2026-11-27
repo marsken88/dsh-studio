@@ -74,6 +74,19 @@ export function ReposPanel({ config, onChanged }) {
     try { await api('/repos/save', { project: draft }); setDraft(null); setNote('已保存'); toast('已保存'); await onChanged() }
     catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)) } finally { setBusy(false) }
   }
+  /* 密钥只能写不能清是个真问题：令牌泄漏时界面撤不掉，只能删项目或改库。
+     /repos/save 现在认 clearToken（空 token 仍然是「保留旧的」）。 */
+  const clearToken = async () => {
+    if (draft === null) return
+    if (!(await confirmDialog('清掉这个仓库已保存的令牌？清掉后同步会停，直到重新填一个。', { title: '清除令牌', danger: true, okText: '清除' }))) return
+    setBusy(true); setError(null); setNote(null)
+    try {
+      await api('/repos/save', { project: { ...draft, token: '', clearToken: true } })
+      setDraft({ ...draft, token: '', tokenSet: false })
+      setNote('已清除：重新填一个再保存即可恢复')
+      await onChanged()
+    } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)) } finally { setBusy(false) }
+  }
   const remove = async project => {
     if (!(await confirmDialog(`删除 GitLab 项目「${project.name}」？已同步的卡片会保留。`, { title: '删除 GitLab 项目', danger: true, okText: '删除' }))) return
     setBusy(true); setError(null)
@@ -148,6 +161,11 @@ export function ReposPanel({ config, onChanged }) {
             onChange: e => set('token', e.target.value),
           }),
           '需要 api 权限；只写入磁盘，不回显。'),
+        draft.tokenSet === true
+          ? h('div', { className: 'flex min-w-0 flex-wrap items-center gap-2', 'data-clear-token': '' },
+            h(Button, { variant: 'secondary', size: 'sm', disabled: busy, onClick: () => void clearToken() }, '清除已保存的 Token'),
+            h('span', { className: HINT }, '令牌泄漏时用它撤销：清掉后这个仓库的同步会停，直到重新填一个。'))
+          : null,
         fieldOf(h, '只同步带此标签的 Issue',
           h(TextField, { value: draft.syncLabel, placeholder: '留空则同步全部 open Issue', onChange: e => set('syncLabel', e.target.value) })),
         h(SwitchToggle, {
@@ -183,6 +201,35 @@ export function BotsPanel({ config, onChanged }) {
   const [autoSync, setAutoSync] = React.useState(config.feishu?.autoSyncArtifacts !== false)
   const [driveBusy, setDriveBusy] = React.useState(false)
   const [driveNote, setDriveNote] = React.useState(null)
+  /* 多维表格镜像：卡片 → 飞书表格，一条记录一张卡。以前后端有 /feishu/mirror，
+     但设置页填不了 baseToken / tableId、也没有触发按钮，等于这条能力不存在。 */
+  const [baseToken, setBaseToken] = React.useState(config.feishu?.baseToken ?? '')
+  const [tableId, setTableId] = React.useState(config.feishu?.tableId ?? '')
+  const [mirrorBusy, setMirrorBusy] = React.useState(false)
+  const [mirrorNote, setMirrorNote] = React.useState(null)
+  const saveBitable = async () => {
+    setMirrorBusy(true); setMirrorNote(null)
+    try {
+      await api('/config', { feishu: { baseToken: baseToken.trim(), tableId: tableId.trim() } })
+      setMirrorNote('已保存')
+      await onChanged()
+    } catch (cause) { setMirrorNote(cause instanceof Error ? cause.message : String(cause)) } finally { setMirrorBusy(false) }
+  }
+  const runMirror = async dryRun => {
+    setMirrorBusy(true); setMirrorNote(null)
+    try {
+      const out = await api('/feishu/mirror', { dryRun: dryRun === true })
+      // 返回形状：dryRun → {cards, batches}；真写 → {cards, created, batches}
+      const total = Number(out.cards ?? 0)
+      const written = Number(out.created ?? 0)
+      setMirrorNote(out.ok === true
+        ? (dryRun === true
+          ? `演练完成：共 ${total} 张卡、会分 ${(out.batches ?? []).length || 1} 批写（没有真写）`
+          : `已写入 ${written}/${total} 条`)
+        : `没写成功：${String(out.error ?? '先确认多维表格的 baseToken / tableId，以及 lark-cli 的授权')}`)
+      if (dryRun !== true) await onChanged()
+    } catch (cause) { setMirrorNote(cause instanceof Error ? cause.message : String(cause)) } finally { setMirrorBusy(false) }
+  }
   const saveDrive = async () => {
     setDriveBusy(true); setDriveNote(null)
     try {
@@ -268,6 +315,24 @@ export function BotsPanel({ config, onChanged }) {
         driveNote !== null ? h('div', { className: HINT, role: 'status' }, driveNote) : null,
       ),
     ),
+    h('div', { className: SECTION, 'data-section': 'bitable' },
+      h('div', { className: SECTION_TITLE }, '多维表格镜像（卡片 → 飞书表格）'),
+      fieldOf(h, '多维表格 baseToken / 链接',
+        h(TextField, {
+          value: baseToken, placeholder: 'bascn… 或多维表格链接',
+          onChange: e => setBaseToken(e.target.value),
+        }),
+        '一条记录 = 一张卡，200 条一批串行写。'),
+      fieldOf(h, '数据表 tableId',
+        h(TextField, { value: tableId, placeholder: 'tbl…', onChange: e => setTableId(e.target.value) }),
+        '表里要有「编号/标题/状态/负责人/优先级/需求/更新时间」这几列。'),
+      h('div', { className: ROW },
+        h('Button', { variant: 'primary', size: 'sm', disabled: mirrorBusy, onClick: () => void saveBitable() }, mirrorBusy ? '保存中…' : '保存'),
+        h('Button', { variant: 'secondary', size: 'sm', disabled: mirrorBusy, onClick: () => void runMirror(true) }, '演练'),
+        h('Button', { variant: 'secondary', size: 'sm', disabled: mirrorBusy || baseToken.trim() === '' || tableId.trim() === '', onClick: () => void runMirror(false) }, '镜像到表格'),
+        mirrorNote !== null ? h('div', { className: HINT, role: 'status', 'data-bitable-note': '' }, mirrorNote) : null,
+      ),
+    ),
     draft === null ? null : h(SideDrawer, {
       title: draft.id ? `编辑机器人：${draft.name || draft.id}` : '新增机器人',
       hint: 'Webhook 只写盘不回显，留空表示不修改；一个群建一个机器人即可。',
@@ -287,6 +352,17 @@ export function BotsPanel({ config, onChanged }) {
             onChange: e => set('webhook', e.target.value),
           }),
           '在飞书群里「添加机器人 → 自定义机器人」即可拿到，不需要自建应用。'),
+        draft.webhookSet === true
+          ? h(Button, {
+            variant: 'secondary', size: 'sm', disabled: busy, 'data-clear-webhook': '',
+            onClick: async () => {
+              if (!(await confirmDialog('清掉这个机器人已保存的 Webhook？清掉后这个群收不到通知。', { title: '清除 Webhook', danger: true, okText: '清除' }))) return
+              setBusy(true)
+              try { await api('/bots/save', { bot: { ...draft, webhook: '', clearWebhook: true } }); setDraft({ ...draft, webhook: '', webhookSet: false }); setNote('已清除 Webhook'); await onChanged() }
+              catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)) } finally { setBusy(false) }
+            },
+          }, '清除已保存的 Webhook')
+          : null,
         fieldOf(h, '备注群 chat_id（可选）',
           h(TextField, { value: draft.chatId, placeholder: 'oc_…', onChange: e => set('chatId', e.target.value) })),
         fieldOf(h, '收哪些事件',
@@ -522,6 +598,9 @@ export function DocsSinkPanel({ config, onChanged }) {
   const [addProvider, setAddProvider] = React.useState('feishu')
   const [busy, setBusy] = React.useState(false)
   const [note, setNote] = React.useState(null)
+  /* 探活的状态与保存分开：测试不该改动草稿，也不该被「未保存」影响。 */
+  const [testBusy, setTestBusy] = React.useState(false)
+  const [testNote, setTestNote] = React.useState(null)
   const projectOf = id => projects.find(item => String(item.id ?? '') === id)
   /* 保存后用回读值刷新本地状态（R7）：apiKey 回读恒空，控件回到「留空保持不变」的占位。 */
   const applyReadback = next => {
@@ -630,13 +709,30 @@ export function DocsSinkPanel({ config, onChanged }) {
         h(TextField, { value: baseUrl, placeholder: 'http://kb.example.com/api/v1', onChange: event => setBaseUrl(event.target.value) }),
         '带不带 /api/v1 都行；所有项目共用这一组 WeKnora 连接'),
       fieldOf(h, 'API Key',
-        h(TextField, { value: apiKey, placeholder: weknora.apiKeySet ? '已配置（留空保持不变）' : 'sk-…', onChange: event => setApiKey(event.target.value) }),
+        h(TextField, { type: 'password', autoComplete: 'new-password', 'aria-label': 'WeKnora API Key', value: apiKey, placeholder: weknora.apiKeySet ? '已配置（留空保持不变）' : 'sk-…', onChange: event => setApiKey(event.target.value) }),
         weknora.apiKeySet ? '已保存；留空保持不变，输入新值会覆盖' : '只需要 retrieve 能力；要跑问答再加 chat'),
       fieldOf(h, '租户 ID',
         h(TextField, { value: tenantId, placeholder: '10000', onChange: event => setTenantId(event.target.value) })),
       fieldOf(h, '知识库 ID',
         h(TextField, { value: kb, placeholder: 'deba6be0-…', onChange: event => setKb(event.target.value) }),
         '交付物会以 manual 文档写进这个库，并自动触发 reparse'),
+      /* 探活：以前填错只能等第一次归档交付物才炸；现在能在这里测。 */
+      h('div', { className: ROW },
+        h(Button, {
+          variant: 'secondary', size: 'sm', disabled: busy || testBusy, 'data-docs-test': '',
+          onClick: async () => {
+            setTestBusy(true); setTestNote(null)
+            try {
+              const out = await api('/docs/test', {})
+              setTestNote(out.ok === true
+                ? `连接正常：能看见知识库（共 ${out.count ?? 0} 个）`
+                : `连不上：${String(out.error ?? '检查地址 / Key / 知识库 id')}`)
+            } catch (cause) { setTestNote(cause instanceof Error ? cause.message : String(cause)) } finally { setTestBusy(false) }
+          },
+        }, testBusy ? '测试中…' : '测试连接'),
+        h('span', { className: HINT }, '先保存再测：测的是已保存的连接；结果也会进「集成健康」'),
+        testNote === null ? null : h('span', { className: HINT, role: 'status', 'data-docs-test-note': '' }, testNote),
+      ),
     ),
     h('div', { className: SECTION, 'data-section': 'per-project' },
       h('div', { className: SECTION_TITLE }, '项目级覆盖'),

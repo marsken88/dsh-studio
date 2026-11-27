@@ -51,6 +51,14 @@ export async function handleReleasesRoute({ method, route, req, res, store, url 
       : store.snapshot().releases.find(item => item.id === String(raw.id))
     const incoming = sanitizeRelease(known === undefined ? raw : { ...known, ...raw })
     if (incoming === null) throw new Error('版本至少要填一个版本号或名字')
+    /* 发布状态只能由「发布 / 回滚」动作写入：保存入口接受 released / rolled_back，
+       等于把审批与发布门禁一起绕过去（真机：状态下拉选「已发布」保存后 releasedAt=0、
+       无审批、无部署日志，而「发布」按钮反而变灰）。已发布/已回滚的版本走下面的
+       locked 分支保留原状态，编辑备注仍然可用。 */
+    const lockedNow = known !== undefined && (known.status === 'released' || known.status === 'rolled_back')
+    if (!lockedNow && (incoming.status === 'released' || incoming.status === 'rolled_back')) {
+      throw new Error('「已发布 / 已回滚」只能由「发布」或「回滚」动作写入：保存只能设草稿 / 待发布 / 已审批')
+    }
     let saved = null
     await store.mutate(state => {
       const existing = state.releases.find(item => item.id === incoming.id)

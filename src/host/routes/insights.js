@@ -22,6 +22,17 @@ import { buildQuality } from '../quality.js'
 export function configureInsightsRoutes(services) {
   host = { ...host, ...(services ?? {}) }
 }
+
+/** 按项目筛派单日志：RUN_LOG 里有 taskId，项目从卡上取。
+ *  效能页的项目筛选必须对每个面板口径一致 —— 以前只作用于 /analytics 与 /burndown，
+ *  团队负载 / 按专家质量 / AI 成本仍是全公司数字，紧挨着看出不来差别。 */
+function scopedRuns(store, url) {
+  const project = String(url?.searchParams?.get('project') ?? '').trim()
+  if (project === '') return {}
+  const ids = new Set((store.snapshot().tasks ?? []).filter(task => task.project === project).map(task => String(task.id)))
+  return { taskIds: ids }
+}
+
 export async function handleInsightsRoute({ method, route, req, res, store, url }) {
 if (method === 'POST' && route === '/contexts') {
     // 每个专家会话的上下文洞察：窗口峰值、回合、工具调用、重试
@@ -96,13 +107,20 @@ if (method === 'POST' && route === '/contexts') {
   }
   if (method === 'GET' && route === '/quality') {
     // AI 质量：派单量 / 一次通过率 / 返工率 / 平均耗时；成本见 /costs 的 usage（读会话日志 + 价目表）。
-    host.sendJson(res, 200, { ok: true, quality: buildQuality(store.snapshot(), runSummary()) })
+    // `project` 与 /analytics 同口径：筛选了项目，这张表也只算那个项目的卡。
+    host.sendJson(res, 200, {
+      ok: true,
+      quality: buildQuality(store.snapshot(), runSummary(scopedRuns(store, url)), { project: url.searchParams.get('project') ?? '' }),
+    })
     return true
   }
   if (method === 'GET' && route === '/workload') {
     const dispatcher = host.getDispatcher()
     const running = dispatcher === undefined ? [] : [...dispatcher.running.values()]
-    host.sendJson(res, 200, { ok: true, workload: host.workloadReport(store.snapshot(), running) })
+    host.sendJson(res, 200, {
+      ok: true,
+      workload: host.workloadReport(store.snapshot(), running, { project: url.searchParams.get('project') ?? '' }),
+    })
     return true
   }
   if (method === 'GET' && route === '/burndown') {
@@ -116,7 +134,9 @@ if (method === 'POST' && route === '/contexts') {
     return true
   }
   if (method === 'GET' && route === '/costs') {
-    const summary = runSummary()
+    const project = String(url.searchParams.get('project') ?? '').trim()
+    const only = project === '' ? null : new Set((store.snapshot().tasks ?? []).filter(task => task.project === project).map(task => String(task.id)))
+    const summary = runSummary(only === null ? {} : { taskIds: only })
     const budget = store.snapshot().config.costs
     const runs = summary.total
     const hours = Math.round(((summary.avgMs * summary.finished) / 3600_000) * 10) / 10
@@ -126,11 +146,18 @@ if (method === 'POST' && route === '/contexts') {
       ? 'over'
       : Math.max(runRate, hourRate) >= budget.warnAt ? 'warn' : 'ok'
     // 真实 token 用量：读 studio-* 会话日志，按卡 / 按专家汇总；价目表为空时只给 token。
-    const usage = aggregateUsage(await collectSessionUsage(), store.snapshot().tasks, budget.prices ?? [], costOf)
+    // 选了项目就只算那个项目下的卡（无卡会话仍进总量：它不属于任何项目，抹掉会让人以为钱变少了）。
+    const allTasks = store.snapshot().tasks ?? []
+    const scopedSessions = only === null
+      ? await collectSessionUsage()
+      : (await collectSessionUsage()).filter(session => session.adHoc === true || only.has(String(session.taskId ?? '')))
+    const usage = aggregateUsage(scopedSessions, allTasks, budget.prices ?? [], costOf)
     host.sendJson(res, 200, {
       ok: true,
       costs: summary,
       usage,
+      /* 说清这个面板算的是哪些卡：选了项目却没生效会被一眼看出来。 */
+      scope: { project, cards: only === null ? allTasks.length : only.size },
       budget: {
         ...budget,
         runs,

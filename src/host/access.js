@@ -4,7 +4,27 @@
 import { ACCESS_ROLE_LABEL, ADMIN_ROUTES, LEVEL_RANK, ROLE_LEVEL } from './domain.js'
 
 /** 只是读、但走 POST 的入口（前端只有一处 api() 封装，固定发 POST）。 */
-export const READ_ONLY_POST_ROUTES = new Set(['/task/comments', '/task/parts', '/task/diff', '/task/file', '/cases', '/team/memory', '/suite/list', '/release/get', '/requirement/get', '/requirement/assist', '/requirement/matrix', '/requirement/impact', '/contexts', '/contexts/session', '/agents/policy', '/access/explain', '/workspace/list'])
+export const READ_ONLY_POST_ROUTES = new Set(['/task/comments', '/task/parts', '/task/diff', '/task/file', '/cases', '/team/memory', '/suite/list', '/release/get', '/requirement/get', '/requirement/assist', '/requirement/matrix', '/requirement/impact', '/contexts', '/contexts/session', '/agents/policy', '/access/explain', '/workspace/list', '/task/gate'])
+
+/** 同一个路由，按 body 里的动作判读/写。
+ *
+ *  以前只有一张静态名单，且 `/task/artifact` 的 action 判定发生在解析 body 之前
+ *  （所以永不生效）：只读成员打不开交付物正文，普通用户每展开一次就写一条审计、
+ *  revision +1、所有在线客户端的 ETag 全部失效。判据与各路由自己的分支保持一致。 */
+export function isReadOnlyPost(route, body = {}) {
+  if (READ_ONLY_POST_ROUTES.has(route)) return true
+  const source = body !== null && typeof body === 'object' ? body : {}
+  if (route === '/task/artifact') return String(source.action ?? '') === 'get'
+  if (route === '/task/worktree') return String(source.action ?? '') === 'list'
+  if (route === '/task/design') {
+    const fields = ['link', 'status', 'note', 'diff', 'spec', 'drafts', 'chosenId']
+    const design = source.design !== null && typeof source.design === 'object' ? source.design : null
+    const hasDesign = design !== null && fields.some(key => design[key] !== undefined && design[key] !== null)
+    const hasTop = fields.some(key => source[key] !== undefined && source[key] !== null)
+    return !hasDesign && !hasTop
+  }
+  return false
+}
 
 /** 这个请求需要什么权限：读、写、还是管理员。 */
 export function accessLevelFor(route, method) {
@@ -126,7 +146,7 @@ export function trustOutcomeFor(connection, req, route) {
    的操作只允许服务器本机执行，其余管理操作照旧（否则管理员在自己浏览器里什么都改不了，
    策略就会被绕过）。导出类虽然是 GET，但内容是操作人姓名，同样按敏感处理。 */
 
-export const DANGEROUS_ADMIN_ROUTES = new Set(['/market/install', '/market/uninstall', '/snapshot/restore'])
+export const DANGEROUS_ADMIN_ROUTES = new Set(['/market/install', '/market/uninstall', '/snapshot/restore', '/reset'])
 export const SENSITIVE_EXPORT_ROUTES = new Set(['/audit/export.csv', '/export/dispatch.csv'])
 
 /** 这个请求是否只允许回环来源（未启用登录时）。 */

@@ -242,11 +242,49 @@ export function AccessPanel({ state, config, onChanged }) {
 }
 
 export function ColumnsPanel({ state, onChanged }) {
-  const { h, sessionToken, api, toast, currentUser, confirmDialog, TextField, ChipField, CheckField, SwitchToggle, SelectField , React } = client()
+  const { h, sessionToken, api, toast, currentUser, confirmDialog, TextField, TextAreaField, ChipField, CheckField, SwitchToggle, SelectField , React } = client()
   const config = state.config
   const [error, setError] = React.useState(null)
   const [notice, setNotice] = React.useState(null)
   const [busy, setBusy] = React.useState(false)
+  /* 缺陷 SLA（小时）与默认验收模板：与闸门同一页，因为它们都决定「卡怎么被收口」。 */
+  const [slaDraft, setSlaDraft] = React.useState(() => ({
+    p0: String(config.sla?.p0 ?? 4),
+    p1: String(config.sla?.p1 ?? 24),
+    p2: String(config.sla?.p2 ?? 72),
+    p3: String(config.sla?.p3 ?? 168),
+  }))
+  const [slaNote, setSlaNote] = React.useState(null)
+  const [templateDraft, setTemplateDraft] = React.useState(() => ({
+    dev: (config.templates?.dev ?? []).join('\n'),
+  }))
+  const [templateNote, setTemplateNote] = React.useState(null)
+  const saveSla = async () => {
+    setBusy(true); setError(null); setSlaNote(null)
+    try {
+      const patch = {}
+      for (const level of ['p0', 'p1', 'p2', 'p3']) {
+        const value = Number(slaDraft[level])
+        if (Number.isFinite(value) && value > 0) patch[level] = Math.round(value)
+      }
+      const out = await api('/config', { sla: patch })
+      const saved = out?.state?.config?.sla ?? patch
+      setSlaDraft({ p0: String(saved.p0), p1: String(saved.p1), p2: String(saved.p2), p3: String(saved.p3) })
+      setSlaNote('已保存：超时按新时限算')
+      await onChanged()
+    } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)) } finally { setBusy(false) }
+  }
+  const saveTemplates = async () => {
+    setBusy(true); setError(null); setTemplateNote(null)
+    try {
+      const items = String(templateDraft.dev ?? '').split('\n').map(line => line.trim()).filter(line => line !== '').slice(0, 12)
+      const out = await api('/config', { templates: { ...(config.templates ?? {}), dev: items } })
+      const saved = out?.state?.config?.templates?.dev ?? items
+      setTemplateDraft({ dev: saved.join('\n') })
+      setTemplateNote(`已保存：之后新建开发卡会带 ${saved.length} 条`)
+      await onChanged()
+    } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)) } finally { setBusy(false) }
+  }
   const [openFor, setOpenFor] = React.useState(null)
   const [query, setQuery] = React.useState('')
   const statuses = state.statuses ?? []
@@ -420,6 +458,39 @@ export function ColumnsPanel({ state, onChanged }) {
         }, acceptanceGateEnabled ? '拆卡验收条件闸门：已开启' : '拆卡验收条件闸门：已关闭'),
       ),
       error !== null ? h('div', { className: ERR, role: 'alert' }, error) : null,
+    ),
+    /* 缺陷 SLA 与默认验收模板：后端早就有（config.sla / config.templates），但没入口，
+       想改只能 curl /config。SLA 决定工作台的「缺陷超时」，模板决定新建卡带哪些验收清单。 */
+    h('div', { className: SECTION, 'data-section': 'sla-templates' },
+      h('div', { className: SECTION_TITLE }, '缺陷 SLA 与默认验收清单'),
+      h('div', { className: DESC }, 'SLA = 缺陷应修时限（小时），超时在工作台与卡面标红；默认验收清单是新建开发卡时自动带的条目，一行一条（≤12）。'),
+      h('div', { className: ROW },
+        ['p0', 'p1', 'p2', 'p3'].map(level => h('div', { key: level, className: 'flex min-w-0 flex-col gap-1', style: { flex: '0 1 120px' } },
+          h('label', { className: 'text-caption-2-medium text-text-secondary' }, `${level.toUpperCase()} 小时内修完`),
+          h(TextField, {
+            'aria-label': `${level.toUpperCase()} 缺陷时限（小时）`,
+            type: 'number',
+            value: slaDraft[level],
+            onChange: e => setSlaDraft({ ...slaDraft, [level]: e.target.value }),
+          }),
+        )),
+        h(Button, { variant: 'primary', size: 'sm', disabled: busy, onClick: () => void saveSla() }, '保存 SLA'),
+      ),
+      slaNote === null ? null : h('div', { className: OK, role: 'status', 'data-sla-note': '' }, slaNote),
+      h('div', { className: 'flex min-w-0 flex-col gap-1' },
+        h('label', { className: 'text-caption-2-medium text-text-secondary' }, '开发卡的默认验收清单'),
+        h(TextAreaField, {
+          rows: 3,
+          'aria-label': '开发卡的默认验收清单',
+          placeholder: '一行一条，例如：改动的接口有可执行用例',
+          value: templateDraft.dev,
+          onChange: e => setTemplateDraft({ ...templateDraft, dev: e.target.value }),
+        }),
+        h('div', { className: ROW },
+          h(Button, { variant: 'primary', size: 'sm', disabled: busy, onClick: () => void saveTemplates() }, '保存模板'),
+          templateNote === null ? null : h('div', { className: HINT, role: 'status', 'data-template-note': '' }, templateNote),
+        ),
+      ),
     ),
     notice !== null ? h('div', { className: OK, role: 'status', 'data-column-notice': '1' }, notice) : null,
     h('div', { className: SECTION, 'data-section': 'column-owners' },      h('div', { className: SECTION_HEAD },
@@ -601,7 +672,18 @@ export function HealthPanel({ state, config, onChanged }) {
     try {
       if (channel === 'gitlab') {
         const out = await api('/gitlab/sync', {})
-        setNote(out.report === undefined ? '已触发 GitLab 同步' : `已同步：${(out.report.projects ?? []).map(item => `${item.name} +${item.created}`).join('，') || '无新卡'}`)
+        /* 路由回的是 summary（不是 report）：以前读 out.report 永远是 undefined，
+           于是「同步完了新增了几张卡」从来没显示过。现在把每个项目的结果说清。 */
+        const rows = Array.isArray(out.summary?.projects) ? out.summary.projects : []
+        const created = rows.reduce((sum, item) => sum + (Number(item.created) || 0), 0)
+        const failed = rows.filter(item => item.error !== undefined)
+        const done = rows.filter(item => item.error === undefined)
+        const partial = out.summary?.partial === true
+          ? `；本轮预算内只跑了 ${rows.length} 个，剩下 ${(out.summary.skippedProjects ?? []).join('、')} 下一轮继续`
+          : ''
+        setNote(rows.length === 0
+          ? '没有可同步的项目（先配好地址 / 项目路径 / 令牌）'
+          : `已同步 ${done.length} 个项目，新建 ${created} 张卡${failed.length > 0 ? `；${failed.length} 个失败：${failed.map(item => `${item.name || item.project}（${item.error}）`).join('、')}` : ''}${partial}`)
       } else if (channel === 'drive') {
         if (firstRequirement === undefined) {
           setNote('还没有带云盘文件夹的需求，先建一条需求并归档一次。')
@@ -611,7 +693,21 @@ export function HealthPanel({ state, config, onChanged }) {
         }
       } else if (channel === 'feishu') {
         const out = await api('/feishu/test', {})
-        setNote(out.ok === true ? '测试消息已发出' : `发送失败：${out.result?.error ?? '没配置机器人'}`)
+        /* 路由回的是 results 数组（每台机器人一条）。以前读 out.result?.error（单数），
+           于是配了机器人但发送失败时永远显示「没配置机器人」，真实失败原因看不到。 */
+        const rows = Array.isArray(out.results) ? out.results : []
+        if (rows.length === 0) {
+          setNote('还没有配置飞书机器人：设置 → 飞书机器人里加一个 Webhook')
+        } else {
+          const ok = rows.filter(row => row.ok === true)
+          const bad = rows.filter(row => row.ok !== true)
+          setNote(ok.length > 0
+            ? `测试消息已发出：${ok.map(row => row.name || row.bot).join('、')}${bad.length > 0 ? `；${bad.length} 个失败：${bad.map(row => `${row.name || row.bot}（${row.error ?? '未知原因'}）`).join('、')}` : ''}`
+            : `发送失败：${bad.map(row => `${row.name || row.bot}（${row.error ?? '检查 Webhook'}）`).join('、')}`)
+        }
+      } else if (channel === 'webhook') {
+        /* 出站 webhook 没有「补发」接口，但也不能拿「代码隔离」的文案糊弄人。 */
+        setNote('出站 webhook 不单独重发：下一批事件（卡变动 / 缺陷 / 发布）会自动再投一次；连续失败请检查接收端地址')
       } else {
         setNote('代码隔离没有独立的重试入口，下一张卡派单时会自动重试。')
       }

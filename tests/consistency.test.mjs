@@ -119,3 +119,53 @@ test('#18 幂等并发闸：同一 key 同时只放一个请求进去，释放�
   assert.equal(gate.claim('route:k1'), true, '释放后同一个 key 可以再来（正常重试）')
   assert.equal(gate.claim(''), true, '空 scope 不参与抢锁')
 })
+
+test('抽屉反馈接线：toast 递给 createDrawer，推进按钮走带 override 的 advanceTo', () => {
+  const drawer = source('web/src/studio/drawer.js')
+  const client = source('client.src.js')
+  assert.match(drawer, /export function createDrawer\(\{[^}]*MentionPicker, toast \}\)/, 'createDrawer 要接 toast')
+  assert.match(drawer, /if \(typeof toast === 'function'\) toast\(String\(error\), 'error'\)/, '失败要有可见轻提示')
+  assert.match(drawer, /const advanceTo = async/, '推进要有独立入口')
+  assert.match(drawer, /advanceTo\(forward\.id, forward\.role\)/, '主推进按钮要能强推')
+  assert.match(drawer, /advanceTo\(target\.id, target\.role\)/, '其它状态推进也要能强推')
+  assert.match(client, /MentionPicker, toast \}\)/, '组合根要真的把 toast 传进去')
+})
+
+test('只读路由判定接在请求管线的权限判定之前（否则 action=get 永不生效）', () => {
+  const index = source('index.js')
+  assert.match(index, /import \{[^}]*isReadOnlyPost[^}]*\} from '\.\/src\/host\/access\.js'/)
+  assert.match(index, /const readOnlyPost = isReadOnlyPost\(route, req\.__studioBody \?\? \{\}\)/)
+  const order = index.indexOf('req.__studioBody = await readJsonBody(req)')
+  const levelAt = index.indexOf('const level = route.startsWith')
+  assert.ok(order > 0 && levelAt > order, 'body 必须先解析再算权限档位')
+})
+
+test('需求页：功能点 id 不撞号、验收条件合并保留证据、交付物有清单、写后刷新', () => {
+  const page = source('web/src/studio/pages/requirements.js')
+  assert.match(page, /const nextPointId = \(\) =>/, '功能点 id 要用最大编号 + 1')
+  assert.match(page, /const mergeAcceptance = \(texts, previous = \[\]\) =>/, '验收条件要按文本对齐旧条件')
+  assert.match(page, /data-req-artifacts/, '交付物页签要列清单')
+  assert.match(page, /if \(typeof onChanged === 'function'\) await onChanged\(\)/, '写操作后要刷新父级 state')
+  assert.ok(!/p\$\(current\.points \?\? \[\]\)\.length \+ 1\)/.test(page), '不能再用「条数 + 1」生成 id')
+})
+
+test('@ 名单与弹层一致；派单没起来要如实说', () => {
+  const drawer = source('web/src/studio/drawer.js')
+  assert.match(drawer, /filterRoster\(roster, picker\.query\)\.filter\(item => item\.group !== '角色位'\)/, '输入框回车要用与弹层同一份名单')
+  assert.match(drawer, /派单没起来/, 'dispatched 里的 failed 要显示出来')
+})
+
+test('项目「看这些卡」带着筛选项进看板', () => {
+  const client = source('client.src.js')
+  const board = source('web/src/studio/board.js')
+  assert.match(client, /initialProject: boardProject/)
+  assert.match(client, /onOpenBoard: project => \{ setBoardProject/)
+  assert.match(board, /initialProject = ''/)
+})
+
+test('用例库：浏览器用例有自己的类型文案（不再显示「无断言」）', () => {
+  const host = source('src/host/cases.js')
+  const page = source('web/src/studio/pages/cases.js')
+  assert.match(host, /browser: item\.browser !== null && item\.browser !== undefined/)
+  assert.match(page, /row\.browser[\s\S]{0,60}'浏览器'/)
+})

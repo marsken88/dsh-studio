@@ -26,6 +26,8 @@ const CHANNELS = {
   feishu: { label: '飞书群通知', hint: '卡片状态变化往群里发消息的 webhook' },
   gitlab: { label: 'GitLab', hint: '拉 Issue、回写评论、对 MR' },
   drive: { label: '飞书云盘归档', hint: '需求文件夹与产物文档（lark-cli）' },
+  /* WeKnora 出口以前不进健康面板：填错了只能等第一次归档才炸，面板上永远是绿的。 */
+  weknora: { label: 'WeKnora 知识库', hint: '交付物投递到知识库（retrieve 能力）' },
   worktree: { label: '代码隔离', hint: 'git worktree 的创建与回收' },
   webhook: { label: '出站 webhook', hint: '卡片流转/用例失败/门禁/回归结果推给外部系统' },
 }
@@ -561,13 +563,20 @@ export async function mergeMergeRequest(store, taskId, { by = 'agent' } = {}) {
   return { iid, state: String(mr?.state ?? 'merged'), sha: mergedSha, task: store.snapshot().tasks.find(entry => entry.id === taskId) }
 }
 
-export async function gitlabSync(store, projectId) {
+export async function gitlabSync(store, projectId, options = {}) {
   const config = store.snapshot().config
+  /* 整轮预算：每个项目一次 Issue 拉取 + 一次 MR 对账，项目一多就会超过反向代理的 60s，
+     结果是「面板报错、服务端还在跑」。超预算就收尾并如实标 partial（已同步的项目结果照旧返回），
+     剩下的留给下一轮 —— 定时器每轮都会再跑，不会漏。 */
+  const budgetMs = Math.max(5000, Math.min(Number(options.budgetMs) || 45000, 120000))
+  const startedAt = Date.now()
   const projects = (config.gitlab.projects ?? []).filter(project => projectId === undefined || project.id === projectId)
   const ready = projects.filter(project => projectReady(config, project))
   if (ready.length === 0) throw new Error('GitLab 未配置：请先在设置里添加至少一个项目（地址 / 项目路径 / 访问令牌）')
   const summary = []
+  const skippedProjects = []
   for (const project of ready) {
+    if (Date.now() - startedAt > budgetMs) { skippedProjects.push(project.name || project.id); continue }
     const params = new URLSearchParams({ state: 'opened', per_page: '50', order_by: 'updated_at' })
     if (project.syncLabel.length > 0) params.set('labels', project.syncLabel)
     try {
@@ -648,7 +657,14 @@ export async function gitlabSync(store, projectId) {
   }
   const firstError = summary.find(entry => entry.error !== undefined)
   INTEGRATION.lastSyncError = firstError?.error ?? ''
-  return { projects: summary }
+  return {
+    projects: summary,
+    /* 超预算没跑到的项目 + 用时：面板据此写「本轮只同步了 K/N 个，剩下的下一轮继续」，不假装全同步了。 */
+    elapsedMs: Date.now() - startedAt,
+    budgetMs,
+    partial: skippedProjects.length > 0,
+    skippedProjects,
+  }
 }
 
 /** Post one text message through one Feishu custom-bot webhook. */

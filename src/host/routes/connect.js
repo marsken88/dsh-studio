@@ -1,5 +1,7 @@
-import { INTEGRATION, feishuPush, gitlabReady, gitlabRequest, gitlabSync, healthReport, projectReady } from '../integrations.js'
+import { INTEGRATION, feishuPush, gitlabReady, gitlabRequest, gitlabSync, healthReport, markHealth, projectReady } from '../integrations.js'
 import { cleanId } from '../domain.js'
+import { sanitizeWeKnoraSink } from '../doc-sink.js'
+import { probeWeknora } from '../weknora-sink.js'
 const INJECTED = ['mirrorCardsToBitable', "applyConfig","installedPackages","publicState","readJsonBody","resolvePackageName","runPluginCli","sendJson","getSyncTimer","upsertById"]
 let host = {
   mirrorCardsToBitable: () => ({ ok: false, error: '未注入' }),
@@ -74,13 +76,18 @@ if (method === 'GET' && route === '/integrations') {
   })
   return true
 }
+
 if (method === 'GET' && route === '/integrations/health') {
   host.sendJson(res, 200, { ok: true, ...healthReport() })
   return true
 }
 if (method === 'POST' && route === '/gitlab/sync') {
   const body = await host.readJsonBody(req).catch(() => ({}))
-  const summary = await gitlabSync(store, body.project === undefined ? undefined : String(body.project))
+  /* budgetMs 可传（默认 45s）：项目多时一轮会超过反代的 60s，超预算就返回 partial，
+     剩下的下一轮定时同步继续，面板据此如实说「只同步了 K/N 个」。 */
+  const summary = await gitlabSync(store, body.project === undefined ? undefined : String(body.project), {
+    budgetMs: Number(body.budgetMs) || undefined,
+  })
   host.sendJson(res, 200, { ok: true, summary, state: host.publicState(store) })
   return true
 }
@@ -97,9 +104,11 @@ if (method === 'POST' && route === '/repos/save') {
   const merged = {
     ...incoming,
     id: wantedId,
-    // An empty token field means "keep the one already stored".
-    token: String(incoming.token ?? '').trim() || (saved?.token ?? ''),
+    /* 空 token = 「保留已存的」；要**撤销**就得显式 clearToken（令牌泄漏时界面得能撤掉，
+       以前只能删项目或改库）。 */
+    token: incoming.clearToken === true ? '' : (String(incoming.token ?? '').trim() || (saved?.token ?? '')),
   }
+  delete merged.clearToken
   await host.applyConfig(store, { gitlab: { projects: host.upsertById(existing, merged) } })
   // 只回公开视图：token 不能出现在响应里。
   const state = host.publicState(store)
@@ -133,9 +142,10 @@ if (method === 'POST' && route === '/bots/save') {
   const merged = {
     ...incoming,
     id: wantedId,
-    // An empty webhook field means "keep the one already stored".
-    webhook: String(incoming.webhook ?? '').trim() || (saved?.webhook ?? ''),
+    /* 空 webhook = 「保留已存的」；要撤销用 clearWebhook（机器人被删/换群时省得删了重建）。 */
+    webhook: incoming.clearWebhook === true ? '' : (String(incoming.webhook ?? '').trim() || (saved?.webhook ?? '')),
   }
+  delete merged.clearWebhook
   await host.applyConfig(store, { feishu: { bots: host.upsertById(existing, merged) } })
   const state = host.publicState(store)
   host.sendJson(res, 200, { ok: true, bots: state.config.feishu.bots, state })
@@ -170,6 +180,17 @@ if (method === 'POST' && route === '/feishu/test') {
     }
   }
   host.sendJson(res, 200, { ok: results.some(entry => entry.ok === true), results })
+  return true
+}
+if (method === 'POST' && route === '/docs/test') {
+  /* 文档出口探活：只读一次知识库列表，确认地址 / API Key / 知识库 id 三件事能对上。
+     以前填错只能等第一次归档交付物才炸，面板与集成健康都没有任何提示。 */
+  const config = store.snapshot().config
+  const sink = sanitizeWeKnoraSink(config.docs?.weknora)
+  const result = await probeWeknora({ sink, timeoutMs: 8000 })
+  const healthy = result.ok === true && result.knowledgeBaseFound === true
+  markHealth('weknora', healthy ? 'ok' : 'fail', String(result.error ?? (healthy ? '知识库可达' : '连接失败')).slice(0, 160))
+  host.sendJson(res, 200, { ok: healthy, ...result })
   return true
 }
 if (method === 'POST' && route === '/reset') {

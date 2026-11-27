@@ -20,6 +20,8 @@ window.__ModuleLoader__.load({
     // shadcn/ui 基础组件（由打包后的 main.jsx 注入）；单文件版本里保持 null，
     // 所有用到它的地方都带 legacy 兜底，所以两种产物行为一致。
     let UIKIT = null
+    /* 宿主侧把 BoardUI 那套组件注进来（见 web/src/main.jsx 的 useUIKit 调用）。
+       这个名字是被外部消费的公共 API，不是本地死代码 —— 删掉会让整个面板退回原生控件。 */
     function useUIKit(next) { UIKIT = next ?? null }
     function kit(name) { return UIKIT === null ? null : (UIKIT[name] ?? null) }
 
@@ -354,7 +356,12 @@ window.__ModuleLoader__.load({
       let payload = {}
       try { payload = await response.json() } catch { /* non-JSON error page */ }
       if (!response.ok || payload.ok === false) {
-        throw new Error(payload.error ?? `请求失败（HTTP ${response.status}）`)
+        /* 带上状态码与业务 code：409 版本冲突要能就地刷新重做，不能只靠文案匹配。 */
+        const failure = new Error(payload.error ?? `请求失败（HTTP ${response.status}）`)
+        failure.status = response.status
+        failure.code = payload.code ?? ''
+        failure.payload = payload
+        throw failure
       }
       const etag = response.headers.get('etag')
       return etag === null ? payload : { ...payload, etag }
@@ -834,7 +841,7 @@ html[data-dsh-theme="light"] [class*="rightbarCol"] { background: #fafafa !impor
 
     /** @ 选择器：一列可搜的名单，代替原来平铺的一堆按钮。 */
     const MentionPicker = createMentionPicker({ h, React, TextField, SearchField })
-    const Drawer = createDrawer({ h, React, api, kit, currentUser, renderMarkdown, tipOf, tipLabel, confirmDialog, promptDialog, TextField, TextAreaField, ChipField, CheckField, SelectField, MdField, MentionPicker })
+    const Drawer = createDrawer({ h, React, api, kit, currentUser, renderMarkdown, tipOf, tipLabel, confirmDialog, promptDialog, TextField, TextAreaField, ChipField, CheckField, SelectField, MdField, MentionPicker, toast })
     const Palette = createPalette({ h, React, TextField })
     const RunTray = createRunTray({ h, React, api })
     const ProjectsOverview = createProjectsPage({ h, React, api })
@@ -1004,22 +1011,44 @@ html[data-dsh-theme="light"] [class*="rightbarCol"] { background: #fafafa !impor
         agentsGrouping: config.agents?.workspaceGrouping === 'requirement' ? 'requirement' : 'card',
         agentsWorktreeRoot: config.agents?.worktreeRoot ?? '',
         agentsCleanup: config.agents?.cleanupWorktree ?? 'manual',
+        /* 自动重试三件套（以前只能 curl /config 改）：次数 / 首次冷却 / 倍率。 */
+        agentsRetryMax: String(config.agents?.retry?.max ?? 2),
+        agentsRetryBase: String(Math.round((Number(config.agents?.retry?.baseMs ?? 60000) || 60000) / 1000)),
+        agentsRetryFactor: String(config.agents?.retry?.factor ?? 2),
         agentsAuto: Array.isArray(config.agents?.autoStatuses) ? config.agents.autoStatuses : ['clarify', 'design', 'dev_ready', 'dev', 'review', 'test', 'accept'],
       })
       const [status, setStatus] = React.useState(null)
       const [error, setError] = React.useState(null)
       const [busy, setBusy] = React.useState(false)
-      /* 未保存提醒：设置页有 17 个分区，一大半是「改完点保存」。这里只跟踪**文本输入**
-         （下拉/开关在好几块里是即时保存的，不能算脏），保存按钮点过就清掉。
-         切分区时如果还脏，先确认再切，别让一页改动静默丢掉。 */
+      /* 未保存提醒：设置页有 17 个分区，一大半是「改完点保存」。
+         判据分两种输入形态：
+           · 原生 input/textarea/select：看 tagName；
+           · BoardUI 的 Select 是 Radix 触发器，onChange 只发 { target: { value } }，没有 tagName ——
+             以前一律被当成「不是表单字段」，改了下拉不显示「未保存」，切走就静默丢掉。
+         哪些块算草稿由容器上的 data-draft-form="1" 声明（权限/测试那类即时保存的不算），
+         没声明就只在文本输入时算脏。 */
       const [dirty, setDirty] = React.useState(false)
+      const inDraftScope = event => {
+        const node = event?.currentTarget
+        if (node === null || node === undefined || typeof node.closest !== 'function') return false
+        return node.closest('[data-draft-form="1"]') !== null
+      }
       const markDirty = event => {
-        const target = event.target
+        const target = event?.target
         const tag = target?.tagName
-        /* 下拉在大多数面板是即时保存的（权限、测试开关），不能一概算脏；
+        const draft = inDraftScope(event)
+        /* 一改就清掉「已保存」：否则保存后再改一个字段，底部会同时写着「已保存」和「未保存」，
+           两块状态自相矛盾。 */
+        setStatus(null)
+        // BoardUI Select：没有 tagName，只带 target.value；只在草稿块里算脏（即时保存的面板不算）
+        if (tag === undefined || tag === null) {
+          if (draft && target !== undefined && target !== null && Object.prototype.hasOwnProperty.call(target, 'value')) setDirty(true)
+          return
+        }
+        /* 原生下拉在大多数面板是即时保存的（权限、测试开关），不能一概算脏；
            但「看板外观 / 自动派单」这两块是草稿 + 保存条，改了下拉也要提示。 */
         if (tag === 'SELECT') {
-          if (event.currentTarget?.getAttribute?.('data-draft-form') === '1') setDirty(true)
+          if (draft) setDirty(true)
           return
         }
         if (tag !== 'INPUT' && tag !== 'TEXTAREA') return
@@ -1053,6 +1082,16 @@ html[data-dsh-theme="light"] [class*="rightbarCol"] { background: #fafafa !impor
               worktreeRoot: form.agentsWorktreeRoot,
               cleanupWorktree: form.agentsCleanup,
               autoStatuses: form.agentsAuto,
+              /* 重试三件套：秒 → 毫秒；非数字就别发，免得把已有配置改成 NaN。 */
+              ...(Number.isFinite(Number(form.agentsRetryMax)) || Number.isFinite(Number(form.agentsRetryBase)) || Number.isFinite(Number(form.agentsRetryFactor))
+                ? {
+                  retry: {
+                    ...(Number.isFinite(Number(form.agentsRetryMax)) ? { max: Number(form.agentsRetryMax) } : {}),
+                    ...(Number.isFinite(Number(form.agentsRetryBase)) ? { baseMs: Math.round(Number(form.agentsRetryBase) * 1000) } : {}),
+                    ...(Number.isFinite(Number(form.agentsRetryFactor)) ? { factor: Number(form.agentsRetryFactor) } : {}),
+                  },
+                }
+                : {}),
             },
           })
           setStatus('已保存')
@@ -1540,6 +1579,8 @@ function installKeyboardActivation() {
       const [costSuggest, setCostSuggest] = React.useState([])
       const [openId, setOpenId] = React.useState(null)
       const [creating, setCreating] = React.useState(false)
+      /* 项目页「看这些卡」带过来的筛选：以前跳过来只切页签，看板仍是全部卡。 */
+      const [boardProject, setBoardProject] = React.useState('')
       /** 命令面板里「先选动作、再选卡」的动作真正落地（逻辑在 palette.js，这里只执行副作用）。 */
       async function applyPaletteAction(item) {
         const effect = await runPaletteAction(item, { api, state, confirm: confirmDialog, prompt: promptDialog, notify: toast })
@@ -1639,16 +1680,24 @@ function installKeyboardActivation() {
       /* 推卡被门禁拦住时，人可以直接写理由强推（override 有入口了；以前只能走 API/工具）。
          原因会记进 task.override 与效能页的「强制放行」统计。 */
       const moveTask = async (id, status) => {
+        /* 拖拽也要带乐观锁：人和 AI 同时改一张卡时，后保存的不能静默覆盖对方。 */
+        const version = Number((state.tasks.find(task => task.id === id) ?? {}).version)
+        const guard = Number.isInteger(version) ? { ifVersion: version } : {}
         try {
-          await api('/task/update', { id, status })
+          await api('/task/update', { id, status, ...guard })
           await reload()
         } catch (cause) {
+          if (cause?.code === 'version_conflict') {
+            toast('这张卡刚被改过（你看到的是旧版本）：已刷新，请重新拖动', 'warn')
+            await reload(true)
+            return
+          }
           const message = cause instanceof Error ? cause.message : String(cause)
           if (!/准出没过|进开发被拦|进测试被拦/.test(message)) { toast(message, 'error'); return }
           const reason = await promptDialog(`${message}\n\n确实要强推就写原因（会计入 override 统计）：`, { title: '绕过门禁', okText: '强推' })
           if (reason === null || String(reason).trim() === '') return
           try {
-            await api('/task/update', { id, status, override: String(reason).trim() })
+            await api('/task/update', { id, status, override: String(reason).trim(), ...guard })
             await reload()
             toast('已强推，原因已记录', 'warn')
           } catch (again) {
@@ -1671,7 +1720,7 @@ function installKeyboardActivation() {
               ),
             ),
             h('div', { className: TOPBAR_ACTIONS, 'data-head-actions': '' },
-              h(RunTray, { state }),
+              h(RunTray, { state, onOpenTask: id => setOpenId(id) }),
               authUser() === null
                 ? h(ChipField, {
                     variant: 'lime',
@@ -1825,7 +1874,7 @@ function installKeyboardActivation() {
           : null,
         tab === 'board'
           ? h('div', { className: 'flex min-h-0 flex-1 flex-col', 'data-board-page': '' },
-              h(Board, { state, onWip: async (status, current) => { const raw = await promptDialog(`这一列的 WIP 上限（0 = 不限，最多 50）`, { title: 'WIP 上限', defaultValue: String(current) }); if (raw === null) return; const value = Math.min(50, Math.max(0, Math.trunc(Number(String(raw).trim()) || 0))); try { await api('/columns/wip', { status, wip: value }); toast(value === 0 ? '已取消 WIP 上限' : `WIP 上限设为 ${value}`); await reload() } catch (cause) { toast(cause instanceof Error ? cause.message : String(cause), 'error') } }, onCreate: () => setCreating(true), onMove: moveTask, onOpen: setOpenId }),
+              h(Board, { state, initialProject: boardProject, onWip: async (status, current) => { const raw = await promptDialog(`这一列的 WIP 上限（0 = 不限，最多 50）`, { title: 'WIP 上限', defaultValue: String(current) }); if (raw === null) return; const value = Math.min(50, Math.max(0, Math.trunc(Number(String(raw).trim()) || 0))); try { await api('/columns/wip', { status, wip: value }); toast(value === 0 ? '已取消 WIP 上限' : `WIP 上限设为 ${value}`); await reload() } catch (cause) { toast(cause instanceof Error ? cause.message : String(cause), 'error') } }, onCreate: () => setCreating(true), onMove: moveTask, onOpen: setOpenId }),
             )
           : tab === 'dashboard'
             ? h(DashboardPage, { state, onOpenTask: setOpenId, onOpenBoard: () => setTab('board'), onOpenCases: () => setTab('cases') })
@@ -1836,7 +1885,7 @@ function installKeyboardActivation() {
             : tab === 'releases'
               ? h(ReleasesPage, { state, onOpenTask: setOpenId })
             : tab === 'projects'
-              ? h(ProjectsOverview, { state, onOpenBoard: () => setTab('board'), onOpenSettings: () => { setSettingsSection('projects'); setTab('settings') } })
+              ? h(ProjectsOverview, { state, onOpenBoard: project => { setBoardProject(String(project ?? '')); setTab('board') }, onOpenSettings: () => { setSettingsSection('projects'); setTab('settings') } })
               : tab === 'analytics'
                 ? h(AnalyticsPage, { state, onOpenTask: setOpenId, onFixPrices: models => { setCostSuggest(Array.isArray(models) ? models : []); setSettingsSection('costs'); setTab('settings') } })
               : tab === 'market'

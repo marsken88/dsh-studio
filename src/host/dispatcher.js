@@ -440,14 +440,18 @@ export function settleRun(sessionId) {
   if (changed) flushRunLog()
 }
 
-export function runSummary() {
+/** 派单日志汇总。`options.taskIds`（Set）用来按项目筛：效能页的项目筛选要对每个面板同口径，
+ *  否则「按专家看质量 / AI 成本」还是全公司数字，和旁边的图表对不上。 */
+export function runSummary(options = {}) {
   const byExpert = new Map()
   const byModel = new Map()
   const byPrompt = new Map()
   const byDay = new Map()
   let finished = 0
   let totalMs = 0
-  for (const run of RUN_LOG) {
+  const only = options?.taskIds instanceof Set ? options.taskIds : null
+  const runs = only === null ? RUN_LOG : RUN_LOG.filter(run => only.has(String(run.taskId ?? '')))
+  for (const run of runs) {
     const bump = (map, key) => {
       const current = map.get(key) ?? { key, runs: 0, ms: 0 }
       current.runs += 1
@@ -468,7 +472,7 @@ export function runSummary() {
   }
   const sort = map => [...map.values()].sort((a, b) => b.runs - a.runs)
   return {
-    total: RUN_LOG.length,
+    total: runs.length,
     finished,
     avgMs: finished > 0 ? Math.round(totalMs / finished) : 0,
     byExpert: sort(byExpert),

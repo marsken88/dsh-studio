@@ -4,7 +4,7 @@ import { readFileSync } from 'node:fs'
 import test from 'node:test'
 
 import { ADMIN_ROUTES, LEVEL_RANK, ROLE_LEVEL } from '../src/host/domain.js'
-import { accessLevelFor, checkAccess, DESTRUCTIVE_ROUTES, READ_ONLY_POST_ROUTES } from '../src/host/access.js'
+import { accessLevelFor, checkAccess, DESTRUCTIVE_ROUTES, isReadOnlyPost, READ_ONLY_POST_ROUTES } from '../src/host/access.js'
 import { toolLevel } from '../src/host/tool-access.js'
 import { INTAKE_HTML, MINE_HTML, STATUS_HTML } from '../src/host/intake-pages.js'
 
@@ -25,6 +25,24 @@ test('access: 配置类与破坏性路由升到 admin 档', () => {
   }
   assert.equal(accessLevelFor('/task/comment', 'POST'), 'write', '普通写操作仍是 write')
   assert.equal(toolLevel('studio_project_save'), 'admin', '工具层与路由层保持一致')
+})
+
+test('access: 凭证与可执行内容只有管理员能改（改仓库 URL 会带着旧 token 发请求）', () => {
+  for (const route of ['/repos/save', '/bots/save', '/skills/save', '/skills/sync', '/team/memory/clear', '/suite/delete']) {
+    assert.ok(ADMIN_ROUTES.has(route), `${route} 应该是 admin 路由`)
+    assert.equal(accessLevelFor(route, 'POST'), 'admin', `${route} 的 POST 档位`)
+  }
+})
+
+test('access: 只读 POST 按动作判定（取交付物正文 / worktree list / 设计只读 / 准出）', () => {
+  assert.equal(isReadOnlyPost('/task/artifact', { id: 't-1', action: 'get' }), true, '取正文是读')
+  assert.equal(isReadOnlyPost('/task/artifact', { id: 't-1', action: 'add' }), false, '登记交付物是写')
+  assert.equal(isReadOnlyPost('/task/worktree', { id: 't-1', action: 'list' }), true, '列 worktree 是读')
+  assert.equal(isReadOnlyPost('/task/worktree', { id: 't-1', action: 'remove' }), false, '回收 worktree 是写')
+  assert.equal(isReadOnlyPost('/task/design', { id: 't-1' }), true, '只带 id = 读设计')
+  assert.equal(isReadOnlyPost('/task/design', { id: 't-1', design: { status: 'approved' } }), false, '带设计变更 = 写')
+  assert.equal(isReadOnlyPost('/task/gate', { id: 't-1' }), true, '算准出是读')
+  assert.equal(isReadOnlyPost('/task/update', { id: 't-1', status: 'done' }), false, '推进是写')
 })
 
 test('access: 同一工具的动作可以更严——merge 是 admin，publish 仍是 write', () => {

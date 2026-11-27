@@ -275,11 +275,14 @@ export async function runPaletteAction(item, ctx) {
   const statusLabel = (id) => statuses.find((entry) => entry.id === id)?.label ?? id
   const card = (state?.tasks ?? []).find((entry) => entry.id === item.cardId)
   const cardName = card === undefined ? item.cardId : ((card.code ?? '') + ' ' + card.title).trim()
+  /* 推进也带乐观锁（与看板拖拽、抽屉同一口径）：卡在这期间被 AI/同事改过就 409，
+     宁可报「已被改过」再刷新，也不要把对方的改动静默覆盖掉。 */
+  const guard = Number.isInteger(Number(card?.version)) ? { ifVersion: Number(card.version) } : {}
   try {
     if (item.action === 'card-advance') {
       const next = nextStatusOf(state, item.cardId)
       if (next === null) { notify('这张卡已经在最后一列了', 'error'); return {} }
-      await api('/task/update', { id: item.cardId, status: next })
+      await api('/task/update', { id: item.cardId, status: next, ...guard })
       notify('已把「' + cardName + '」推进到「' + statusLabel(next) + '」')
       return { refresh: true, open: item.cardId }
     }
@@ -289,7 +292,7 @@ export async function runPaletteAction(item, ctx) {
       const note = await prompt('推进「' + cardName + '」到「' + statusLabel(next) + '」并留一句话', { title: '推进并留言', placeholder: '例如：评审通过，转测试' })
       if (note === null || String(note).trim() === '') return {}
       await api('/task/comment', { id: item.cardId, body: String(note).trim() })
-      await api('/task/update', { id: item.cardId, status: next })
+      await api('/task/update', { id: item.cardId, status: next, ...guard })
       notify('已推进到「' + statusLabel(next) + '」并留言')
       return { refresh: true, open: item.cardId }
     }
@@ -338,7 +341,11 @@ export async function advanceColumn({ api, state, columnId, confirm }) {
   const failed = []
   for (const id of plan.ids) {
     try {
-      await api('/task/update', { id, status: plan.next.id })
+      const task = (state.tasks ?? []).find((entry) => entry.id === id)
+      /* 整列推进也逐张带 ifVersion：某张卡在批量期间被改过的，跳过并报出来，
+         不会因为「一次性推 N 张」把别人的改动盖掉。 */
+      const guard = Number.isInteger(Number(task?.version)) ? { ifVersion: Number(task.version) } : {}
+      await api('/task/update', { id, status: plan.next.id, ...guard })
       moved += 1
     } catch (cause) {
       const task = (state.tasks ?? []).find((entry) => entry.id === id)
