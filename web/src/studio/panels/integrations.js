@@ -630,7 +630,7 @@ export function DocsSinkPanel({ config, onChanged }) {
         h(TextField, { value: baseUrl, placeholder: 'http://kb.example.com/api/v1', onChange: event => setBaseUrl(event.target.value) }),
         '带不带 /api/v1 都行；所有项目共用这一组 WeKnora 连接'),
       fieldOf(h, 'API Key',
-        h(TextField, { value: apiKey, placeholder: weknora.apiKeySet ? '已配置（留空保持不变）' : 'sk-…', onChange: event => setApiKey(event.target.value) }),
+        h(TextField, { type: 'password', autoComplete: 'new-password', 'aria-label': 'WeKnora API Key', value: apiKey, placeholder: weknora.apiKeySet ? '已配置（留空保持不变）' : 'sk-…', onChange: event => setApiKey(event.target.value) }),
         weknora.apiKeySet ? '已保存；留空保持不变，输入新值会覆盖' : '只需要 retrieve 能力；要跑问答再加 chat'),
       fieldOf(h, '租户 ID',
         h(TextField, { value: tenantId, placeholder: '10000', onChange: event => setTenantId(event.target.value) })),

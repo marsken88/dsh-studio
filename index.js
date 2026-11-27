@@ -29,6 +29,7 @@ export const inject = ['tools', 'systemPrompt']
 
 import { assertConfigKeys, sanitizeProjectFolders, ACCESS_ROLE_LABEL, ACCESS_ROLES, ADMIN_ROUTES, ARTIFACT_KINDS, ARTIFACT_STATUS, CASE_HTTP_METHODS, CASE_PRIORITIES, CASE_RESULTS, CASE_TYPE_LABEL, CASE_TYPES, cleanId, CODING_FILE_CHANGES, CODING_REVIEW_STATUS, codingSummary, COLUMN_STRATEGIES, DEFAULT_ROLES, defaultColumns, defaultConfig, defaultDeployEnvs, defaultTemplates, DEPLOY_ENV_KINDS, FALLBACK_AGENT_MODEL, hashLocalPassword, ISOLATION_MODES, LEGACY_BLOCKED_STATUS, LEVEL_RANK, LOCAL_DEFAULT_PASSWORD, mergeCoding, mergeConfig, mergeSection, nextRequirementCode, normalizePatch, normalizeStrategy, publicArtifact, publicCases, publicChecklist, publicComments, PRIORITIES, ROLE_LABELS, roleIdsOf, rolesInColumns, canonicalAuthor, RELEASE_STATUSES, RELEASE_STATUS_LABEL, REQ_DOC_KIND_LABEL, REQ_DOC_KINDS, REQ_DOC_STATUS, REQ_REVIEW_LABEL, REQ_REVIEW_STATUS, REQ_STATUS_LABEL, REQ_STATUSES, ROLE_IDS, ROLE_LEVEL, SANDBOX_MODES, sanitizeAccess, sanitizeAllowHosts, sanitizeArtifact, sanitizeArtifacts, sanitizeBaseline, sanitizeBots, sanitizeBugSource, sanitizeCase, sanitizeCaseHttp, sanitizeCaseRun, sanitizeCases, sanitizeChangedFile, sanitizeChangedFiles, sanitizeChecklist, sanitizeChecklistItem, sanitizeCaseGate, sanitizeCoding, sanitizeColumns, sanitizeCommit, sanitizeCommits, sanitizeCosts, sanitizeDeployEnvs, sanitizeEnvs, sanitizeExperts, sanitizeIterations, sanitizeLdap, sanitizeLocalAuth, sanitizeProjects, sanitizeReqDoc, sanitizeReqDocs, sanitizeRelease, sanitizeRequirement, sanitizeRequirementChange, sanitizeRequirementGate, sanitizeRequirementHistory, sanitizeRequirementPoint, sanitizeRequirementPoints, sanitizeRequirementPool, sanitizeRequirementQuestions, sanitizeRequirementReview, sanitizeRequirements, sanitizeReviewGate, sanitizeServices, sanitizeSla, sanitizeRoles, sanitizeTeams, sanitizeTemplates, sanitizeTesting, sanitizeTestRun, sanitizeTestRuns, sanitizeUsers, sanitizeWorkProjects, seedExperts, SEVERITIES, STATUS_IDS, STATUS_SET, STATUSES, TASK_TYPES, text, verifyLocalPassword, worktreeRoot } from './src/host/domain.js'
 import { withClarifyHistoryItem } from './src/host/acceptance.js'
+import { auditSummary, sanitizeAuditEntry } from './src/host/audit.js'
 import { nextCodeForTask } from './src/host/task-code.js'
 import { accessLevelFor, checkAccess, isCrossSiteRequest, isLoopbackRequest, isReadOnlyPost, needsConfirm, needsLocalSource, trustOutcomeFor } from './src/host/access.js'
 import { Dispatcher, RUN_LOG, attachRunLog, claimDispatchLock, clearAgentFailure, configureDispatcher, noteAgentFailure, parseMentions, runSummary } from './src/host/dispatcher.js'
@@ -1246,7 +1247,12 @@ async function createTask(store, input) {
     handoff: patch.handoff ?? null,
     status: initialStatus,
     role: initialRole,
-    priority: patch.priority ?? (patch.type === 'bug' && (patch.severity ?? '') === 'p0' ? 'urgent' : 'normal'),
+    /* P0 缺陷一律 urgent：面板的建卡对话框总会带上 priority（默认 normal），
+       于是以前这里 `patch.priority ?? …` 的兜底永远轮不到，P0 缺陷躺着当普通优先级。
+       规则改为「P0 优先于用户选的优先级」，其余仍按用户选的来。 */
+    priority: patch.type === 'bug' && (patch.severity ?? '') === 'p0'
+      ? 'urgent'
+      : (patch.priority ?? 'normal'),
     severity: (patch.type ?? 'requirement') === 'bug' ? (patch.severity ?? 'p2') : '',
     requirement: patch.requirement ?? '',
     expert: patch.expert ?? '',
@@ -2082,20 +2088,6 @@ function checkToolAccess(config, operator, toolName, args = null) {
   } catch {
     /* 审计写不进去不能挡住业务 */
   }
-}
-
-/** 审计摘要：只留几个识别字段，不搬正文、不搬 token。 */
-function auditSummary(body) {
-  if (body === null || typeof body !== 'object') return ''
-  const parts = []
-  for (const key of ['id', 'taskId', 'name', 'title', 'version', 'status', 'action', 'reason', 'project', 'requirementId', 'releaseId', 'expertId']) {
-    const value = body[key]
-    if (typeof value === 'string' && value.trim() !== '') parts.push(`${key}=${value.trim().slice(0, 40)}`)
-  }
-  for (const key of ['taskIds', 'caseIds', 'members']) {
-    if (Array.isArray(body[key]) && body[key].length > 0) parts.push(`${key}=${body[key].length}`)
-  }
-  return parts.join(' ').slice(0, 200)
 }
 
 /** Register the /studio-api routes. Returns a disposer. */

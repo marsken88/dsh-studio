@@ -7,7 +7,6 @@ import { isAiSignoff } from './intervention.js'
 import { pointAcceptanceGap } from './acceptance.js'
 import { BLOCK_UNTIL, blockUntilMet } from './block-until.js'
 import { reviewGate } from './quality.js'
-import { overrideSummary } from './override.js'
 import { CASE_HTTP_METHODS, ROLE_IDS, STATUS_IDS, STATUSES, nextRequirementCode, normalizePatch, roleIdsOf, sanitizeBaseline, sanitizeCase, sanitizeReqDoc, sanitizeRequirement, sanitizeTestRun, sanitizeUrl, text,
   canonicalAuthor,
   sanitizeCoding,
@@ -23,8 +22,9 @@ import { larkUploadArgs } from './lark-upload.js'
 import { commandArgs } from './cmd-args.js'
 import { runCommand } from './run-command.js'
 import { ensureKindFolder, ensureRequirementFolder } from './drive-sync.js'
-import { isStalled } from './dispatch-state.js'
 import { collectCodingFromWorktree } from './task-diff.js'
+/* 工作台汇总搬到 dashboard.js（2000 行闸门）；override 汇总也跟着过去了。 */
+import { dashboardOf } from './dashboard.js'
 import { RUN_LOG, parseMentions } from './dispatcher.js'
 import { appendTeamMemory } from './team-memory.js'
 import { pickRunner, registerRunner } from './runners.js'
@@ -930,100 +930,20 @@ export function taskExitGate(state, task) {
 
 /**
  * 工作台：一眼看清「哪里着火了」。
- * 只做汇总，不改任何数据；列表最多各给 6 条，点进去看卡片。
+ *
+ * 实现在 dashboard.js（executor 有 2000 行闸门）；这里只把宿主能力注入进去，
+ * 调用方签名不变。停摆的上下文用「活会话表」判，拿不到就退回超时兜底。
  */
-export function buildDashboard(state) {
-  const now = Date.now()
-  const tasks = state.tasks
-  const open = tasks.filter(task => task.status !== 'done')
-  const listOf = (items, limit = 6) => items.slice(0, limit).map(task => ({
-    id: task.id,
-    code: task.code,
-    title: task.title,
-    status: task.status,
-    statusLabel: (STATUSES.find(entry => entry.id === task.status)?.label) ?? task.status,
-    owner: task.owner || '',
-    dueAt: task.dueAt || 0,
-    sla: host.bugSla(task, state.config),
-  }))
-
-  const overdue = open.filter(task => task.dueAt > 0 && task.dueAt < now)
-  const blocked = open.filter(task => task.blocked != null)
-  /* 停摆 = 派单印记还挂在这一列，但会话已经不在跑（崩过 / 被中断）。
-     这种卡不会自己恢复、也不会再被自动派单，界面上却和「排队中」长得一样 —— 必须单独数出来。 */
-  const stalled = open.filter(task => isStalled(task))
-  const slaOverdue = open.filter(task => task.type === 'bug' && host.bugSla(task, state.config).state === 'overdue')
-  // 强制放行是逃生舱，用得越来越顺就该被看一眼：30 天内超过上限算风险。
-  const overrideWindow = overrideSummary(state, { since: Date.now() - 30 * 86_400_000, config: state.config })
-  const overrideMax = Number(state.config?.limits?.overrideMax) || 3
-  const overrideOver = overrideWindow.total > overrideMax ? overrideWindow.total : 0
-  const gateFailed = open.filter(task => {
-    if (task.status !== 'test' && task.status !== 'accept') return false
-    const gate = taskExitGate(state, task)
-    return gate.blockers.length > 0
+export function buildDashboard(state, stalledCtx = {}) {
+  return dashboardOf(state, {
+    taskExitGate,
+    bugSla: host.bugSla,
+    releaseGate: host.releaseGate,
+    healthReport: host.healthReport,
+    activeRunCount: host.activeDispatcher === null || host.activeDispatcher === undefined ? 0 : host.activeDispatcher.running.size,
+    runLog: typeof RUN_LOG !== 'undefined' && Array.isArray(RUN_LOG) ? RUN_LOG : [],
+    stalledCtx,
   })
-  const pipelineFailed = open.filter(task => task.gitlabMR?.pipeline?.status === 'failed')
-
-  const requirementBlocked = state.requirements.filter(item => {
-    const progress = requirementProgress(state, item)
-    return progress.derived !== 'delivered' && progress.derived !== 'closed' && progress.gate.blockers.length > 0
-  })
-  const releaseBlocked = state.releases.filter(item => item.status !== 'released' && item.status !== 'rolled_back' && !host.releaseGate(state, item).ready)
-
-  const done = tasks.filter(task => task.status === 'done')
-  const dayStart = new Date()
-  dayStart.setHours(0, 0, 0, 0)
-  const doneToday = done.filter(task => (task.updatedAt || 0) >= dayStart.getTime())
-  const doneWeek = done.filter(task => (task.updatedAt || 0) >= now - 7 * 24 * 60 * 60 * 1000)
-  const aiRunning = host.activeDispatcher === null ? 0 : host.activeDispatcher.running.size
-  const runs = typeof RUN_LOG !== 'undefined' && Array.isArray(RUN_LOG) ? RUN_LOG : []
-
-  return {
-    at: now,
-    scope: { tasks: tasks.length, open: open.length, requirements: state.requirements.length, releases: state.releases.length },
-    risks: {
-      overdue: overdue.length,
-      blocked: blocked.length,
-      stalled: stalled.length,
-      slaOverdue: slaOverdue.length,
-      gateFailed: gateFailed.length,
-      pipelineFailed: pipelineFailed.length,
-      requirementBlocked: requirementBlocked.length,
-      releaseBlocked: releaseBlocked.length,
-      overrideOver: overrideOver,
-      overrideMax,
-      integrationsBroken: host.healthReport().broken,
-    },
-    flow: {
-      review: tasks.filter(task => task.status === 'review').length,
-      test: tasks.filter(task => task.status === 'test').length,
-      accept: tasks.filter(task => task.status === 'accept').length,
-      doneToday: doneToday.length,
-      doneWeek: doneWeek.length,
-    },
-    ai: { running: aiRunning, todayRuns: runs.filter(item => (item.at || 0) >= dayStart.getTime()).length },
-    list: {
-      overdue: listOf(overdue),
-      blocked: listOf(blocked),
-      stalled: listOf(stalled),
-      slaOverdue: listOf(slaOverdue),
-      gateFailed: listOf(gateFailed),
-      pipelineFailed: listOf(pipelineFailed),
-      overrideOver: overrideWindow.list.slice(0, 6),
-      requirementBlocked: requirementBlocked.slice(0, 6).map(item => ({
-        id: item.id,
-        code: item.code,
-        title: item.title,
-        blockers: requirementProgress(state, item).gate.blockers.slice(0, 3),
-      })),
-      releaseBlocked: releaseBlocked.slice(0, 6).map(item => ({
-        id: item.id,
-        version: item.version,
-        name: item.name,
-        blockers: host.releaseGate(state, item).blockers.slice(0, 3),
-      })),
-    },
-  }
 }
 
 /* 实现搬到 run-command.js（executor 有 2000 行闸门）；这里 re-export，调用方不用改。 */
