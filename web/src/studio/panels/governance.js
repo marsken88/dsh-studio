@@ -642,7 +642,17 @@ export function HealthPanel({ state, config, onChanged }) {
   const [busy, setBusy] = React.useState('')
   const [note, setNote] = React.useState(null)
   const firstRequirement = (state.requirements ?? []).find(item => (item.folder?.token ?? '') !== '')
-  const agents = state.agents ?? {}
+  /* 派单锁与派单日志在 GET /agents（dispatcher.status()）里，**不在 /state**。
+     以前这里读 state.agents，永远是 undefined —— 于是锁信息不显示、日志区永远写着
+     「还没有派单日志」。改成挂载时拉一次，并给一个手动刷新入口。 */
+  const [agents, setAgents] = React.useState({})
+  const loadAgents = React.useCallback(async () => {
+    try {
+      const out = await api('/agents')
+      setAgents(out.ok === false ? {} : out)
+    } catch { setAgents({}) }
+  }, [api])
+  React.useEffect(() => { void loadAgents() }, [loadAgents])
   const lock = agents.lock ?? null
   const lockAge = lock === null ? 0 : Math.max(0, Date.now() - (Number(lock.at) || 0))
   const [logQuery, setLogQuery] = React.useState('')
@@ -748,6 +758,7 @@ export function HealthPanel({ state, config, onChanged }) {
             onChange: event => setLogQuery(event.target.value),
           }),
           h(CheckField, { checked: logFailed, onChange: event => setLogFailed(event.target.checked) }, '只看失败'),
+          h(Button, { variant: 'ghost', size: 'sm', 'data-agent-log-refresh': '', onClick: () => void loadAgents() }, '刷新日志'),
           h(Button, {
             variant: 'ghost', size: 'sm', disabled: logRows.length === 0, onClick: exportLogCsv,
             title: '把当前筛选结果导出为 CSV',
