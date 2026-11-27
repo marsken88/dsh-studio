@@ -3,7 +3,7 @@
 import { fmtTime, fmtDate } from '../format.js'
 import { Table, TableHeader, TableColumn, TableBody, TableRow, TableCell } from '../../components/base/table/table'
 import { client } from '../context.js'
-import { REQ_STATUS_LABEL, REQ_STATUS_ORDER, DOC_KIND_LABEL, DOC_KIND_ORDER, DOC_STATUS_LABEL } from '../labels.js'
+import { REQ_STATUS_LABEL, REQ_STATUS_ORDER, DOC_KIND_LABEL, DOC_KIND_ORDER, DOC_STATUS_LABEL, ARTIFACT_KIND_LABEL, ARTIFACT_STATUS_LABEL } from '../labels.js'
 import { caseSummaryOf, checkSummaryOf } from '../roster.js'
 import { diffLines, diffSummary } from '../diff.js'
 import { Button, Select, Chip } from '../../boardui/index'
@@ -269,6 +269,8 @@ export     function RequirementsPage({ state, onOpenTask, onChanged, createSigna
         try {
           await api('/requirement/save', { requirement: { ...current, links: current.links ?? {}, points } })
           await loadMatrix(current.id)
+          /* 左栏的计数与排序也读这份需求：不刷新就会出现「功能点已保存，但列表还是旧数字」。 */
+          if (typeof onChanged === 'function') await onChanged()
           setMatrixNote('功能点已保存')
           setPointForm(null)
         } catch (err) {
@@ -278,17 +280,48 @@ export     function RequirementsPage({ state, onOpenTask, onChanged, createSigna
 
       const blankPoint = () => ({ title: '', description: '', priority: 'normal', status: 'draft', acceptance: [] })
 
+      /* 功能点 id 不能拿「现有条数 + 1」：删过中间的点、或两次新增之间还没刷新，
+         id 会撞上已有的点，保存时按 id 过滤就把前一个静默覆盖掉（连挂在上面的卡/用例
+         都会指到另一段文字）。改成「最大编号 + 1」并再兜底查重。 */
+      const nextPointId = () => {
+        const used = new Set((current?.points ?? []).map(item => String(item.id ?? '')))
+        const nums = [...used].map(id => Number(String(id).replace(/^p/, ''))).filter(value => Number.isInteger(value) && value > 0)
+        let next = (nums.length === 0 ? 0 : Math.max(...nums)) + 1
+        while (used.has(`p${next}`)) next += 1
+        return `p${next}`
+      }
+
+      /* 验收条件按文本对齐旧条件：文本没变的保留 id / done / evidence（证据型条件的唯一凭据），
+         文本变了的只复用位置上的 id（让挂在它上面的用例不至于全变「未挂条件」），证据不沿用。 */
+      const mergeAcceptance = (texts, previous = []) => {
+        const pool = (Array.isArray(previous) ? previous : []).map(item => ({ ...item }))
+        const oldIds = pool.map(item => item.id)
+        const used = new Set()
+        return texts.map((line, index) => {
+          const same = pool.find(item => !used.has(item.id) && String(item.text ?? '').trim() === line)
+          if (same !== undefined) { used.add(same.id); return { ...same, text: line } }
+          let fallbackId = oldIds[index] !== undefined && !used.has(oldIds[index]) ? oldIds[index] : `a${index + 1}`
+          let bump = index + 1
+          while (used.has(fallbackId)) { bump += 1; fallbackId = `a${bump}` }
+          used.add(fallbackId)
+          return { id: fallbackId, text: line, done: false }
+        })
+      }
+
       const savePoint = async () => {
         if (pointForm === null || current === null) return
         if (String(pointForm.title ?? '').trim() === '') { setMatrixNote('功能点要有标题'); return }
         const acceptance = String(pointForm.acceptanceText ?? '').split('\n').map(line => line.trim()).filter(line => line !== '')
+        const previous = pointForm.acceptance
+          ?? (current.points ?? []).find(item => item.id === pointForm.id)?.acceptance
+          ?? []
         const entry = {
-          id: pointForm.id ?? `p${(current.points ?? []).length + 1}`,
+          id: pointForm.id ?? nextPointId(),
           title: pointForm.title,
           description: pointForm.description ?? '',
           priority: pointForm.priority ?? 'normal',
           status: pointForm.status ?? 'draft',
-          acceptance: acceptance.map((line, index) => ({ id: `a${index + 1}`, text: line, done: false })),
+          acceptance: mergeAcceptance(acceptance, previous),
         }
         const existing = (current.points ?? []).filter(item => item.id !== entry.id)
         await savePoints([...existing, entry])
@@ -317,8 +350,10 @@ export     function RequirementsPage({ state, onOpenTask, onChanged, createSigna
         if (!(await confirmDialog(`用这 ${texts.length} 条验收条件替换所选 ${ids.size} 个功能点的全部条件？已挂在这些条件下的用例会变成「未挂条件」。`, { title: '批量设置验收条件', danger: true, okText: '替换' }))) return
         const next = (current.points ?? []).map(point => {
           if (!ids.has(point.id)) return point
-          const oldIds = (point.acceptance ?? []).map(item => item.id)
-          return { ...point, acceptance: texts.map((text, index) => ({ id: oldIds[index] ?? `a${index + 1}`, text, done: false })) }
+          /* 文本没变的条件原样保留（id / done / evidence）；文本变了只按位置复用 id，
+             不把旧条件的证据带过去 —— 证据是给那条断言作证的。 */
+          const previous = point.acceptance ?? []
+          return { ...point, acceptance: mergeAcceptance(texts, previous) }
         })
         await savePoints(next)
         setSelectedPointIds(new Set())
@@ -477,6 +512,9 @@ export     function RequirementsPage({ state, onOpenTask, onChanged, createSigna
           fromChatRef.current = false
           setForm(null)
           setError(null)
+          /* 左栏列表来自父级 state：不刷新的话，新建后会在列表里「消失」到下一次 15 秒轮询，
+             人容易以为没建成再建一条。 */
+          if (typeof onChanged === 'function') await onChanged()
           toast((payload.created === true ? '需求已创建' : '需求已保存') + docNote)
         } catch (err) {
           setError(err.message)
@@ -489,6 +527,7 @@ export     function RequirementsPage({ state, onOpenTask, onChanged, createSigna
         if (current === null) return
         try {
           await api('/requirement/save', { requirement: { ...current, links: current.links ?? {}, status } })
+          if (typeof onChanged === 'function') await onChanged()
           toast('需求状态已更新')
         } catch (err) {
           setError(err.message)
@@ -500,6 +539,7 @@ export     function RequirementsPage({ state, onOpenTask, onChanged, createSigna
         try {
           await api('/requirement/delete', { id })
           setSelected(null)
+          if (typeof onChanged === 'function') await onChanged()
         } catch (err) {
           setError(err.message)
         }
@@ -622,6 +662,7 @@ export     function RequirementsPage({ state, onOpenTask, onChanged, createSigna
           })
           setDocForm(null)
           setDocNote(null)
+          if (typeof onChanged === 'function') await onChanged()
           void json
         } catch (err) {
           setDocNote(err.message)
@@ -647,6 +688,7 @@ export     function RequirementsPage({ state, onOpenTask, onChanged, createSigna
       }
       const baselineDoc = async (docId) => {        try {
           await api('/requirement/doc', { id: current.id, action: 'baseline', docId, by: '人' })
+          if (typeof onChanged === 'function') await onChanged()
           setDocNote('这一版已生效，之后新建的卡都会记下它。')
         } catch (err) {
           setDocNote(err.message)
@@ -667,6 +709,7 @@ export     function RequirementsPage({ state, onOpenTask, onChanged, createSigna
       const clearBaseline = async () => {
         try {
           await api('/requirement/doc', { id: current.id, action: 'clear-baseline' })
+          if (typeof onChanged === 'function') await onChanged()
           setDocNote('基线已取消，需求回到「评审中」。')
         } catch (err) {
           setDocNote(err.message)
@@ -676,6 +719,8 @@ export     function RequirementsPage({ state, onOpenTask, onChanged, createSigna
         if (!(await confirmDialog('删除这份文档？', { title: '删除文档', danger: true, okText: '删除' }))) return
         try {
           await api('/requirement/doc', { id: current.id, action: 'remove', docId })
+          if (typeof onChanged === 'function') await onChanged()
+          setDocNote('文档已删除。')
         } catch (err) {
           setDocNote(err.message)
         }
@@ -1228,6 +1273,23 @@ export     function RequirementsPage({ state, onOpenTask, onChanged, createSigna
             ? `文件夹：${folder.name || folder.token}　已归档 ${artifacts.filter(item => item.doc?.url).length}/${artifacts.length} 件交付物`
             : (folder.error ? `上次创建失败：${folder.error}` : '还没有云盘文件夹；建好后，这条需求下每件交付物都会写成文件夹里的一份 Markdown 文档。')),
           driveNote ? h('div', { className: HINT }, driveNote) : null,
+          /* 交付物清单：以前这个页签只有计数和「归档」按钮，看不到是哪几件、也点不开，
+             只能回看板逐张卡翻。 */
+          h('div', { className: SECTION, 'data-req-artifacts': '' }, `交付物清单（${artifacts.length}）`,
+            artifacts.length === 0
+              ? h('div', { className: HINT }, '这条需求下还没有交付物：到卡的「交付物」页登记，回来这里就能统一归档。')
+              : h('div', { className: 'flex min-w-0 flex-col' },
+                artifacts.map(item => h('div', { key: `${item.task.id}:${item.id}`, className: LISTROW, 'data-req-artifact': item.id },
+                  h('div', { className: LISTROW_MAIN },
+                    h('div', { className: 'flex min-w-0 flex-wrap items-center gap-2' },
+                      h('b', { className: 'text-body-2-medium text-text-primary' }, item.title || '（未命名交付物）'),
+                      h(Chip, { color: 'soft' }, ARTIFACT_KIND_LABEL[item.kind] ?? item.kind ?? '其它'),
+                      h(Chip, { color: item.doc?.url ? 'lime' : 'gray' }, item.doc?.url ? '已归档' : (ARTIFACT_STATUS_LABEL[item.status] ?? item.status ?? '草稿')),
+                    ),
+                    h('div', { className: HINT }, `${item.task.code || item.task.id} · ${item.task.title}${item.ref ? ` · ${item.ref}` : ''}`),
+                  ),
+                  h(Button, { variant: 'ghost', size: 'sm', onClick: () => onOpenTask(item.task.id) }, '打开卡'),
+                )))),
           h('div', { className: SECTION }, '文档与基线',
             h(Button, { variant: 'ghost', size: 'sm', onClick: () => void openDoc(null) }, '＋ 添加文档'),
           ),

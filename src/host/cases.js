@@ -51,7 +51,10 @@ export function collectCases(state) {
         http: item.http !== null && item.http !== undefined,
     shell: item.shell !== null && item.shell !== undefined,
     db: item.db !== null && item.db !== undefined,
-    // 能跑的三种：接口 / shell / 数据库。以前界面只认 http，另外两种建得出来却跑不了。
+    /* 浏览器用例也要下发类型：面板的类型列以前只认 http/shell/db，
+       浏览器用例被显示成「无断言」（跑不了、不计覆盖率），却又被「全选可跑」选中真跑。 */
+    browser: item.browser !== null && item.browser !== undefined,
+    // 能跑的四种：接口 / shell / 数据库 / 浏览器。以前界面只认 http，另外几种建得出来却跑不了。
     runnable: item.http != null || item.shell != null || item.db != null || item.browser != null,
     // 草稿 = 生成器留下的、没有可执行断言的用例。旧数据没有这个标记，前端退一步按「无断言」显示。
     draft: item.draft === true,

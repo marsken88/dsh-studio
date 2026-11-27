@@ -56,13 +56,13 @@ const ROLE_ACCENT = {
 }
 
 export function createBoard({ h, React, Card, TextField, SearchField, SelectField, CheckField, toast }) {
-function Board({ state, onOpen, onMove, onWip, onCreate }) {
+function Board({ state, onOpen, onMove, onWip, onCreate, initialProject = '' }) {
   const config = state.config ?? {}
   const experts = config.experts ?? []
   const [query, setQuery] = React.useState('')
   const [expertFilter, setExpertFilter] = React.useState('')
   const [typeFilter, setTypeFilter] = React.useState('')
-  const [projectFilter, setProjectFilter] = React.useState('')
+  const [projectFilter, setProjectFilter] = React.useState(initialProject)
   const [iterationFilter, setIterationFilter] = React.useState('')
   const [serviceFilter, setServiceFilter] = React.useState('')
   const [requirementFilter, setRequirementFilter] = React.useState('')

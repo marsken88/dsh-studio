@@ -1540,6 +1540,8 @@ function installKeyboardActivation() {
       const [costSuggest, setCostSuggest] = React.useState([])
       const [openId, setOpenId] = React.useState(null)
       const [creating, setCreating] = React.useState(false)
+      /* 项目页「看这些卡」带过来的筛选：以前跳过来只切页签，看板仍是全部卡。 */
+      const [boardProject, setBoardProject] = React.useState('')
       /** 命令面板里「先选动作、再选卡」的动作真正落地（逻辑在 palette.js，这里只执行副作用）。 */
       async function applyPaletteAction(item) {
         const effect = await runPaletteAction(item, { api, state, confirm: confirmDialog, prompt: promptDialog, notify: toast })
@@ -1825,7 +1827,7 @@ function installKeyboardActivation() {
           : null,
         tab === 'board'
           ? h('div', { className: 'flex min-h-0 flex-1 flex-col', 'data-board-page': '' },
-              h(Board, { state, onWip: async (status, current) => { const raw = await promptDialog(`这一列的 WIP 上限（0 = 不限，最多 50）`, { title: 'WIP 上限', defaultValue: String(current) }); if (raw === null) return; const value = Math.min(50, Math.max(0, Math.trunc(Number(String(raw).trim()) || 0))); try { await api('/columns/wip', { status, wip: value }); toast(value === 0 ? '已取消 WIP 上限' : `WIP 上限设为 ${value}`); await reload() } catch (cause) { toast(cause instanceof Error ? cause.message : String(cause), 'error') } }, onCreate: () => setCreating(true), onMove: moveTask, onOpen: setOpenId }),
+              h(Board, { state, initialProject: boardProject, onWip: async (status, current) => { const raw = await promptDialog(`这一列的 WIP 上限（0 = 不限，最多 50）`, { title: 'WIP 上限', defaultValue: String(current) }); if (raw === null) return; const value = Math.min(50, Math.max(0, Math.trunc(Number(String(raw).trim()) || 0))); try { await api('/columns/wip', { status, wip: value }); toast(value === 0 ? '已取消 WIP 上限' : `WIP 上限设为 ${value}`); await reload() } catch (cause) { toast(cause instanceof Error ? cause.message : String(cause), 'error') } }, onCreate: () => setCreating(true), onMove: moveTask, onOpen: setOpenId }),
             )
           : tab === 'dashboard'
             ? h(DashboardPage, { state, onOpenTask: setOpenId, onOpenBoard: () => setTab('board'), onOpenCases: () => setTab('cases') })
@@ -1836,7 +1838,7 @@ function installKeyboardActivation() {
             : tab === 'releases'
               ? h(ReleasesPage, { state, onOpenTask: setOpenId })
             : tab === 'projects'
-              ? h(ProjectsOverview, { state, onOpenBoard: () => setTab('board'), onOpenSettings: () => { setSettingsSection('projects'); setTab('settings') } })
+              ? h(ProjectsOverview, { state, onOpenBoard: project => { setBoardProject(String(project ?? '')); setTab('board') }, onOpenSettings: () => { setSettingsSection('projects'); setTab('settings') } })
               : tab === 'analytics'
                 ? h(AnalyticsPage, { state, onOpenTask: setOpenId, onFixPrices: models => { setCostSuggest(Array.isArray(models) ? models : []); setSettingsSection('costs'); setTab('settings') } })
               : tab === 'market'

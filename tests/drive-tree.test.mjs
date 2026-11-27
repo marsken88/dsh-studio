@@ -103,6 +103,41 @@ test('同名目录复用：列出来已经有了就不重复建', async () => {
   })
 })
 
+test('换云盘根目录后项目文件夹缓存失效：不会把新需求建到旧根下', async () => {
+  await withStore(async store => {
+    /* 老缓存没有 root 字段（升级前的数据）：必须按未命中处理，否则永远指向旧根。 */
+    await store.mutate(state => {
+      state.config.feishu.projectFolders = { ord: { token: 'OLD_PROJ', url: '', name: 'ORD 订单中心', at: 1, error: '' } }
+    })
+    const { fn, calls } = stubLark([
+      { ok: true, data: { items: [] } },                                      // 列新根：没有同名项目目录
+      { ok: true, data: { folder_token: 'NEW_PROJ', url: 'https://x/new' } }, // 在新根下建项目目录
+      { ok: true, data: { items: [] } },                                      // 列项目：没有同名需求目录
+      { ok: true, data: { folder_token: 'REQ', url: 'https://x/req' } },
+    ])
+    const folder = await ensureRequirementFolder(store, 'req-1', fn)
+    assert.equal(folder.parentToken, 'NEW_PROJ')
+    assert.ok(calls.some(call => call.includes('--folder-token ROOT')), '新根下要重新找/建项目目录：' + calls.join(' | '))
+    const cache = store.snapshot().config.feishu.projectFolders.ord
+    assert.equal(cache.token, 'NEW_PROJ')
+    assert.equal(cache.root, 'ROOT', '缓存要记住根目录，换根后自动失效')
+  })
+})
+
+test('同一根目录下项目文件夹缓存直接复用（不重复列根目录）', async () => {
+  await withStore(async store => {
+    await store.mutate(state => {
+      state.config.feishu.projectFolders = { ord: { token: 'PROJ', url: '', name: 'ORD 订单中心', root: 'ROOT', at: 1, error: '' } }
+    })
+    const { fn, calls } = stubLark([
+      { ok: true, data: { items: [{ name: 'REQ-2026-001 积分抵扣', token: 'REQ', type: 'folder' }] } },
+    ])
+    const folder = await ensureRequirementFolder(store, 'req-1', fn)
+    assert.equal(folder.parentToken, 'PROJ')
+    assert.ok(!calls.some(call => call.includes('--folder-token ROOT')), '缓存命中时不该再列根目录：' + calls.join(' | '))
+  })
+})
+
 test('产物子文件夹：按类型建在需求目录下，并缓存', async () => {
   await withStore(async store => {
     await store.mutate(state => {

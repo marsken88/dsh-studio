@@ -105,7 +105,7 @@ export function NewTaskDialog({ state, onClose, onCreated }) {
           requirements.length === 0
             ? h('div', { className: HINT }, '还没有需求。到「需求」页先建一条，这张卡就能拿到 DEV-001 这样的编号。')
             : h(SelectField, { 'aria-label': '挂在哪个需求下', value: requirementId, onChange: e => setRequirementId(e.target.value) },
-              h('option', { value: '' }, '暂不挂需求（编号留空）'),
+              h('option', { value: '' }, isBug ? '暂不挂需求（缺陷可以不挂）' : (requirements.length === 0 ? '还没有需求：先到「需求」页建一条' : '请选择需求（必填）')),
               requirements.map(item => h('option', { key: item.id, value: item.id }, `${item.code || item.id} · ${item.title}`)),
             ),
         ),
@@ -147,7 +147,7 @@ export function NewTaskDialog({ state, onClose, onCreated }) {
         error !== null ? h('span', { className: 'text-caption-1-regular text-text-error-primary' }, error) : null,
         h('div', { className: 'flex-1' }),
         h(Button, { variant: 'secondary', size: 'sm', 'data-action': 'cancel', onClick: onClose }, '取消'),
-        h(Button, { variant: 'primary', size: 'sm', 'data-action': 'submit', disabled: busy || title.trim() === '', onClick: () => void submit() },
+        h(Button, { variant: 'primary', size: 'sm', 'data-action': 'submit', disabled: busy || title.trim() === '' || (!isBug && requirementId === ''), onClick: () => void submit() },
           busy ? '创建中…' : (isBug ? '登记缺陷' : '创建')),
       ),
     ),

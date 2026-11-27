@@ -352,7 +352,9 @@ export function CasesPage({ state, onOpenTask, onOpenBoard }) {
                         ? 'shell'
                         : row.db
                           ? '数据库'
-                          : h('span', { className: HINT, title: '没有可执行断言：跑不了，也不计入可执行覆盖率' }, row.draft ? '草稿' : '无断言')),
+                          : row.browser
+                            ? '浏览器'
+                            : h('span', { className: HINT, title: '没有可执行断言：跑不了，也不计入可执行覆盖率' }, row.draft ? '草稿' : '无断言')),
                     h(TableCell, null, row.priority),
                     h(TableCell, null, row.lastRunAt > 0 ? fmtTime(row.lastRunAt) : '没跑过'),
                     h(TableCell, null,

@@ -526,9 +526,15 @@ function Drawer({ task, state, onClose, onChanged, onOpenTask = null }) {
     try {
       const out = await api('/task/comment', { id: task.id, body: comment, author: currentUser(), kind: 'human' })
       const told = (out.mentions ?? []).map(mention => mention.label ?? mention.id)
+      /* 点了名不等于派上了：并发已满、专家停用、团里没成员都会在 dispatched 里带 failed。
+         以前只报「已通知」，看上去像已经开工。 */
+      const failed = (Array.isArray(out.dispatched) ? out.dispatched : [])
+        .map(item => String(item))
+        .filter(item => item.includes('failed:'))
+        .map(item => item.split('failed:').slice(1).join('failed:').trim())
       setComment('')
-      if (told.length > 0) setError(null)
-      setNotice(told.length > 0 ? `已通知 ${told.join('、')}` : null)
+      if (told.length > 0) setNotice(`已通知 ${told.join('、')}`)
+      if (failed.length > 0) setError(`评论已发出，但派单没起来：${failed.join('；')}`)
       await onChanged()
     } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)) } finally { setBusy(false) }
   }
@@ -557,7 +563,10 @@ function Drawer({ task, state, onClose, onChanged, onOpenTask = null }) {
   const [picker, setPicker] = React.useState(null)
   const [active, setActive] = React.useState(0)
   const roster = React.useMemo(() => buildRoster(state.config), [state.config])
-  const hits = picker === null ? [] : filterRoster(roster, picker.query)
+  /* 与 @ 弹层用同一份名单：弹层只显示专家 / 专家团（角色位是给 AI 按角色派单的兜底），
+     输入框里的回车也必须按同一份算。以前这里用的是全量 roster，角色位排在最前，
+     打「@」直接回车会插入「角色 · 产品经理」—— 文本发出去谁也不会被派单。 */
+  const hits = picker === null ? [] : filterRoster(roster, picker.query).filter(item => item.group !== '角色位')
   const refreshPicker = (value, caret) => {
     const head = value.slice(0, caret)
     const hit = /@([^\s@]{0,24})$/.exec(head)

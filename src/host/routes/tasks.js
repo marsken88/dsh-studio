@@ -449,6 +449,12 @@ export async function handleTaskRoute({ method, route, req, res, store, url }) {
     if (String(rawSuite?.name ?? '').trim() === '') throw new Error('套件名称不能为空')
     const incoming = sanitizeSuite({ ...rawSuite, at: Date.now(), by: String(body.by ?? '人').slice(0, 40) })
     const index = list.findIndex(item => item.id === incoming.id)
+    /* 「设为默认」要真的换过去：同一时刻只允许一个默认套件，
+       所以新设的默认必须把其它套件的 isDefault 清掉。以前只写自己这一条，
+       而 saveSuites 保留的是**数组里第一个**默认 —— 目标排在旧默认后面时就永远设不上。 */
+    if (incoming.isDefault === true) {
+      for (const item of list) if (item.id !== incoming.id) item.isDefault = false
+    }
     if (index >= 0) list[index] = incoming
     else list.push(incoming)
     const saved = await saveSuites(store, list)
