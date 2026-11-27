@@ -1534,3 +1534,18 @@ header id ... and cwd identify ".../studio-t-5d1d2ad4-architect/..."` —— 宿
   两条断言真正跑起来（真机实测契约能落库），panel-probe 从 96 项变 **98 项**。
 - 手册 §8.1 补三条脚本专用路由（`/task/verify-coding`、`/suite/list`、`/workspace/list|delete`），
   并纠正一处口径（用例页的套件读的是 `/cases`，不是 `/state`）。
+
+### 同日晚（体检第五轮）：worktree 残留工具 + 四处「量了，没问题」
+
+- **新增 `npm run worktree:gc`**：`.agents/worktrees` 下 19 个目录 / 494 MB 只有 1 个在
+  `git worktree list` 里 —— 判据只有一条「不在名单里 = 孤儿」，默认只体检、只清 7 天以上，
+  `--apply` 才删；Windows 上删前先摘 `node_modules` 联接（不摘会顺着联接删主仓库依赖）。
+  本机实跑清掉 16 个，占用 494 MB → 4 KB。
+- **会话目录**：`~/.dsh/sessions` 447 MB，但 studio 会话只占 30.5 MB（35 个，无一个超 7 天没动），
+  大头是其它工作区的人机会话 —— 不是我们该动的；幽灵卡清理已有 `npm run gc:sessions`。
+- **/state 耗时与 ETag**：冷请求 38 ms / 1.05 MB；带 `if-none-match` 的 304 平均 **10 ms**，
+  不带的 200 平均 32 ms —— 客户端确实在发 ETag（`client.src.js` 的 `if-none-match`），轮询不冤。
+- **公开页窄屏**：375px 下三页均无横向溢出（`scrollWidth == clientWidth`）、按钮在视口内、有 viewport meta。
+- **「前端读的字段后端到底给不给」扫描器**：按调用点近似配对，报了 17 条，逐条核对**全是假阳性**
+  （注释里出现的 `out.report`、nesting 让键提取截断）。结论：这类配对太容易误判，**不纳入测试**；
+  真正可守的是「前端调用的路由后端必须存在」（第三轮已加）。
