@@ -15,6 +15,8 @@ import { productChainRow } from './collab-chain.js'
    小节是圆角卡片，说明文字是 caption-1，字段是「标签 + 控件」两行。
    常量集中在这里，改一处全抽屉一致；探针靠 data-drawer-* 钩子定位，不拿样式类名当判据。 */
 const HINT = 'text-caption-1-regular text-text-tertiary'
+/* 评审结论的语义色：通过=绿、要求修改=红、待评审=黄。 */
+const REVIEW_CHIP_VARIANT = { approved: 'lime', changes_requested: 'rose', pending: 'yellow' }
 const GROW = 'min-w-0 flex-1'
 const ROW = 'flex min-w-0 flex-wrap items-center gap-2'
 const FIELD = 'flex min-w-0 flex-col gap-1'
@@ -1052,11 +1054,7 @@ function Drawer({ task, state, onClose, onChanged, onOpenTask = null }) {
     try { await api('/task/coding', { id: task.id, action: 'review', status, note: reviewNote.trim(), by: currentUser() }); setReviewNote(''); await onChanged() }
     catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)) } finally { setBusy(false) }
   }
-  const mergeCoding = async () => {
-    setBusy(true); setError(null)
-    try { await api('/task/coding', { id: task.id, action: 'merge' }); await onChanged() }
-    catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)) } finally { setBusy(false) }
-  }
+  /* 手动「标记已合并」已移除：它只写 mergedAt（自报），真合并走「合并门禁 → 合并 MR」。 */
   // 核对代码事实：拿 worktree 里的 git 记录，比 agent 自报的提交/文件/分支。
   const verifyCoding = async () => {
     setVerify({ busy: true, line: '', ok: null })
@@ -2327,13 +2325,35 @@ function Drawer({ task, state, onClose, onChanged, onOpenTask = null }) {
             ? h(EmptyState, { title: '还没有执行记录。', hint: '改代码要留记录：谁、什么模型、改了什么。' })
             : h('div', { className: PANEL },
               h('div', { className: PANEL_HEAD },
-                h(ChipField, { variant: 'gray', 'data-review': coding.review.status }, CODING_REVIEW_LABEL[coding.review.status] ?? coding.review.status),
+                /* 语义上色：通过=绿、要求修改=红、待评审=黄。以前恒为 gray，只能靠读字分辨。 */
+                h(ChipField, { variant: REVIEW_CHIP_VARIANT[coding.review.status] ?? 'gray', 'data-review': coding.review.status }, CODING_REVIEW_LABEL[coding.review.status] ?? coding.review.status),
+                /* 结论行：谁在什么时候给的结论 + 合并门禁还差什么（评审的下一棒就是合并）。 */
+                (() => {
+                  const blockers = Array.isArray(task.mergeGate?.blockers) ? task.mergeGate.blockers : []
+                  const who = coding.review.by === '' ? '未记评审人' : coding.review.by
+                  const when = coding.review.at > 0 ? fmtTime(coding.review.at) : '—'
+                  return h("div", { className: HINT, 'data-review-conclusion': coding.review.status },
+                    `${who} · ${when}${blockers.length === 0 ? " · 合并门禁：已通过" : ` · 还差 ${blockers.length} 项：${blockers.slice(0, 2).join("；")}${blockers.length > 2 ? " 等" : ""}`}`)
+                })(),
                 h('div', { className: GROW },
                   h('div', { className: PANEL_LINE }, [coding.agent || '未登记 agent', coding.model, coding.branch].filter(Boolean).join(' · ')),
                   coding.context === '' ? null : h('div', { className: HINT }, coding.context),
                 ),
-                h('span', { className: HINT }, coding.unitTests.total > 0 ? `单测 ${coding.unitTests.passed}/${coding.unitTests.total}` : '无单测'),
-                worktree === null ? null : tipOf(
+                (() => {
+                  const unit = coding.unitTests ?? {}
+                  const total = Number(unit.total) || 0
+                  const passed = Number(unit.passed) || 0
+                  const failed = Math.max(0, total - passed)
+                  if (total === 0) return h(ChipField, { variant: 'gray', title: '这次执行没有自报单测' }, '无单测')
+                  return h(ChipField, {
+                    variant: failed > 0 ? 'rose' : 'lime',
+                    title: '这次执行自报的单测结果（不是平台跑的）',
+                  }, `单测 ${passed}/${total}${failed > 0 ? ` · 失败 ${failed}` : ''}`)
+                })(),
+                worktree === null
+                  ? tipOf('这张卡还没有 worktree：先去「执行记录 → 工作树」建一个，或让研发登记分支',
+                    h(Button, { variant: 'ghost', size: 'sm', disabled: true }, '核对代码事实'))
+                  : tipOf(
                   '拿 worktree 里的 git 记录，比执行记录里自报的提交 / 文件 / 分支',
                   h(Button, {
                     variant: 'ghost', size: 'sm', disabled: busy || verify.busy,
@@ -2396,11 +2416,11 @@ function Drawer({ task, state, onClose, onChanged, onOpenTask = null }) {
                   style: { flex: 1 }, value: reviewNote, placeholder: '评审意见（可选，写清文件/行为什么/怎么改）',
                   onChange: event => setReviewNote(event.target.value),
                 }),
-                h(Button, { variant: 'secondary', size: 'sm', disabled: busy, onClick: () => void reviewCoding('approved') }, '评审通过'),
+                h(Button, { variant: 'primary', size: 'sm', disabled: busy, onClick: () => void reviewCoding('approved') }, '评审通过'),
                 h(Button, { variant: 'secondary', size: 'sm', disabled: busy, onClick: () => void reviewCoding('changes_requested') }, '要求修改'),
-                coding.mergedAt > 0
-                  ? h('span', { className: HINT }, `已合并 · ${coding.mergedBy || '—'}`)
-                  : h(Button, { variant: 'ghost', size: 'sm', disabled: busy, onClick: () => void mergeCoding() }, '标记已合并'),
+                /* 「标记已合并」删掉了：它只写 mergedAt（自报），并不真的合并，和「合并门禁 → 合并 MR」
+                   容易混成同义词。真合并留在合并门禁；这里只在已合并时显示一行事实。 */
+                coding.mergedAt > 0 ? h('span', { className: HINT }, `已合并 · ${coding.mergedBy || '—'}`) : null,
               ),
             ),
           codingDraft === null
