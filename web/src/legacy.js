@@ -1072,6 +1072,9 @@ html[data-dsh-theme="light"] [class*="rightbarCol"] { background: #fafafa !impor
         const target = event?.target
         const tag = target?.tagName
         const draft = inDraftScope(event)
+        /* 一改就清掉「已保存」：否则保存后再改一个字段，底部会同时写着「已保存」和「未保存」，
+           两块状态自相矛盾。 */
+        setStatus(null)
         // BoardUI Select：没有 tagName，只带 target.value；只在草稿块里算脏（即时保存的面板不算）
         if (tag === undefined || tag === null) {
           if (draft && target !== undefined && target !== null && Object.prototype.hasOwnProperty.call(target, 'value')) setDirty(true)

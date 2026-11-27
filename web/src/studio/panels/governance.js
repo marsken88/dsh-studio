@@ -682,7 +682,21 @@ export function HealthPanel({ state, config, onChanged }) {
         }
       } else if (channel === 'feishu') {
         const out = await api('/feishu/test', {})
-        setNote(out.ok === true ? '测试消息已发出' : `发送失败：${out.result?.error ?? '没配置机器人'}`)
+        /* 路由回的是 results 数组（每台机器人一条）。以前读 out.result?.error（单数），
+           于是配了机器人但发送失败时永远显示「没配置机器人」，真实失败原因看不到。 */
+        const rows = Array.isArray(out.results) ? out.results : []
+        if (rows.length === 0) {
+          setNote('还没有配置飞书机器人：设置 → 飞书机器人里加一个 Webhook')
+        } else {
+          const ok = rows.filter(row => row.ok === true)
+          const bad = rows.filter(row => row.ok !== true)
+          setNote(ok.length > 0
+            ? `测试消息已发出：${ok.map(row => row.name || row.bot).join('、')}${bad.length > 0 ? `；${bad.length} 个失败：${bad.map(row => `${row.name || row.bot}（${row.error ?? '未知原因'}）`).join('、')}` : ''}`
+            : `发送失败：${bad.map(row => `${row.name || row.bot}（${row.error ?? '检查 Webhook'}）`).join('、')}`)
+        }
+      } else if (channel === 'webhook') {
+        /* 出站 webhook 没有「补发」接口，但也不能拿「代码隔离」的文案糊弄人。 */
+        setNote('出站 webhook 不单独重发：下一批事件（卡变动 / 缺陷 / 发布）会自动再投一次；连续失败请检查接收端地址')
       } else {
         setNote('代码隔离没有独立的重试入口，下一张卡派单时会自动重试。')
       }

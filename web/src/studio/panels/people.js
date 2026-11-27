@@ -771,14 +771,15 @@ export function EnvironmentsPanel({ config, onChanged }) {
   const [note, setNote] = React.useState(null)
   const [error, setError] = React.useState(null)
   const [rulesNote, setRulesNote] = React.useState(null)
+  /* 发布准入：成功/失败要分开显示 —— 以前失败也写进绿色那行，看起来像保存成功了。 */
   const saveRules = async patch => {
     setRulesNote(null)
     try {
       await api('/config', { releaseRules: patch })
-      setRulesNote('发布准入已更新')
+      setRulesNote({ ok: true, text: '发布准入已更新' })
       await onChanged()
     } catch (cause) {
-      setRulesNote(cause instanceof Error ? cause.message : String(cause))
+      setRulesNote({ ok: false, text: cause instanceof Error ? cause.message : String(cause) })
     }
   }
   const addRow = () => setRows(list => (list.length >= 12 ? list : [...list, { id: '', name: '', kind: 'other', note: '' }]))
@@ -857,7 +858,7 @@ export function EnvironmentsPanel({ config, onChanged }) {
           onChange: event => void saveRules({ requireRequirementSignoff: event.target.checked }),
         }, '关联需求必须都签过验收字'),
         h('div', { className: HINT }, '两条默认都不勾：不勾的时候发布只看门禁，不看你上没上过预发、需不需要签字。'),
-        rulesNote === null ? null : h('div', { className: OK, role: 'status' }, rulesNote),
+        rulesNote === null ? null : h('div', { className: rulesNote.ok === true ? OK : ERR, role: rulesNote.ok === true ? 'status' : 'alert', 'data-release-rules-note': rulesNote.ok === true ? 'ok' : 'error' }, rulesNote.text),
       ),
     ),
   )
