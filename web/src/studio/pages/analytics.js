@@ -8,6 +8,7 @@ import { TaskList, TaskRow } from '../../boardui/task-list'
 import { Button, Select } from '../../boardui/index'
 import { EmptyState } from '../../boardui/empty-state'
 import { Meter } from '../../components/base/meter/meter'
+import { PAGE, PANEL, PANEL_HEAD, PANEL_BODY, STICKY } from './layout.js'
 
 /* 分类色只用 BoardUI 的 chart token（浅/深主题各自一套），不再写死 hex。 */
 const CTX_COLORS = ['var(--color-chart-1)', 'var(--color-chart-2)', 'var(--color-chart-3)', 'var(--color-chart-4)', 'var(--color-chart-5)']
@@ -21,10 +22,6 @@ const CTX_CHIP = 'flex min-w-[84px] flex-col gap-1 rounded-lg border border-sepa
 /* 页面级样式：全部走 BoardUI token + Tailwind 工具类（4px 档位）。 */
 /* [&>*]:shrink-0 —— 纵向 flex 默认会压缩子项：内容高于视口时每个分区被压扁，
    而分区自己 overflow-hidden，里面的内容就被裁掉（工作台出现「空条」的根因）。 */
-const PAGE = 'flex min-w-0 flex-col gap-4 overflow-auto p-4 [&>*]:shrink-0'
-const PANEL = 'flex min-w-0 flex-col overflow-hidden rounded-xl border border-separator-border bg-background-primary-default shadow-xs'
-const PANEL_HEAD = 'flex flex-wrap items-center gap-2 border-b border-separator-border px-4 py-3 text-body-2-medium text-text-primary'
-const PANEL_BODY = 'flex min-w-0 flex-col gap-3 p-4'
 /* 正文用 text-secondary：text-tertiary 在浅色只有 2.58:1、深色 1.94:1，正文读不清（UI 评审 P0-2）。 */
 const HINT = 'text-caption-1-regular text-text-secondary'
 const SECTION = 'mt-4 flex flex-wrap items-baseline gap-2 border-t border-neutral-200 pt-3 text-body-2-medium text-text-secondary dark:border-neutral-600'
@@ -245,7 +242,7 @@ export function AnalyticsPage({ state, onOpenTask, onFixPrices }) {
 
   return h('div', { className: PAGE, 'data-analytics-page': '', 'data-analytics-pane': pane, ref: pageRef },
     secondaryError === null ? null : h('div', { className: 'mb-2 text-caption-1-regular text-text-error-primary' }, `部分数据没加载出来：${secondaryError}（负载 / 燃尽 / 成本 / 质量可能是空的或旧的）`),
-    h('div', { className: ROW },
+    h('div', { className: ROW + ' ' + STICKY },
       h('span', { className: HINT }, `统计口径：最近 ${data.days} 天 · ${data.scope.tasks} 张卡（${data.scope.done} 张已完成）`),
       project === ''
         ? null
@@ -288,7 +285,7 @@ export function AnalyticsPage({ state, onOpenTask, onFixPrices }) {
         { id: 'cost', label: '成本' },
         { id: 'context', label: '上下文' },
       ]
-      return h('div', { className: 'flex flex-wrap items-center gap-1 border-b border-separator-border pb-2', role: 'group', 'aria-label': '效能分区' },
+      return h('div', { className: STICKY + ' gap-1', role: 'group', 'aria-label': '效能分区' },
         tabs.map(tab => h(Button, {
           key: tab.id, 'aria-pressed': pane === tab.id ? 'true' : 'false', 'data-analytics-tab': tab.id,
           variant: pane === tab.id ? 'secondary' : 'ghost', size: 'sm',

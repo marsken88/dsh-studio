@@ -6,14 +6,11 @@ import { client } from '../context.js'
 import { RELEASE_STATUS_ORDER, RELEASE_STATUS_LABEL, REQ_STATUS_LABEL } from '../labels.js'
 import { Button, Select, Chip } from '../../boardui/index'
 import { EmptyState } from '../../boardui/empty-state'
+import { PAGE, PANEL, PANEL_HEAD, PANEL_BODY } from './layout.js'
 
 /* 整页 BoardUI：面板/表单/列表/动作全部走 token + Tailwind（4px 档位），不再写手写类。 */
 /* [&>*]:shrink-0 —— 纵向 flex 默认会压缩子项：内容高于视口时每个分区被压扁，
    而分区自己 overflow-hidden，里面的内容就被裁掉（工作台出现「空条」的根因）。 */
-const PAGE = 'flex min-w-0 flex-col gap-4 overflow-auto p-4 [&>*]:shrink-0'
-const PANEL = 'flex min-w-0 flex-col overflow-hidden rounded-xl border border-separator-border bg-background-primary-default'
-const PANEL_HEAD = 'flex flex-wrap items-center gap-2 border-b border-separator-border px-4 py-3 text-body-2-medium text-text-primary'
-const PANEL_BODY = 'flex min-w-0 flex-col gap-3 p-4'
 const HINT = 'text-caption-1-regular text-text-tertiary'
 const LABEL = 'text-caption-1-medium text-text-secondary'
 const FIELD = 'flex min-w-0 flex-col gap-1'
