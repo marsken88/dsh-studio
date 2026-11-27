@@ -152,7 +152,21 @@ export function buildDocsConfig(currentDocs, patchDocs) {
 
   const provider = patchDocs.provider === undefined ? undefined : readProvider(patchDocs.provider, 'provider', invalid)
   const perProject = patchDocs.perProject === undefined ? undefined : readPerProject(patchDocs.perProject, invalid)
-  const weknora = patchDocs.weknora === undefined ? undefined : readWeKnora(patchDocs.weknora, invalid)
+  /* clearApiKey 是「撤销」通道，不是字段值：Key 泄漏时只能覆盖、不能清除，等于撤不掉。
+     它必须先摘出来——否则会被当成未知字段 400，也不能混进 sink（sink 里留空语义是「不修改」）。 */
+  let clearApiKey = false
+  let weknoraInput = patchDocs.weknora
+  if (isPlainObject(weknoraInput) && Object.prototype.hasOwnProperty.call(weknoraInput, 'clearApiKey')) {
+    if (typeof weknoraInput.clearApiKey !== 'boolean') {
+      invalid.push({ key: 'weknora.clearApiKey', value: invalidValue('weknora.clearApiKey', weknoraInput.clearApiKey, 'not-boolean'), reason: 'not-boolean' })
+    } else {
+      clearApiKey = weknoraInput.clearApiKey
+    }
+    const rest = { ...weknoraInput }
+    delete rest.clearApiKey
+    weknoraInput = rest
+  }
+  const weknora = weknoraInput === undefined ? undefined : readWeKnora(weknoraInput, invalid)
 
   if (invalid.length > 0) {
     throw new DocsConfigError(`文档出口配置非法：${invalid.map(item => item.key + '（' + item.reason + '）').join('、')}`, { invalid })
@@ -165,6 +179,8 @@ export function buildDocsConfig(currentDocs, patchDocs) {
     weknora: weknora === undefined ? current.weknora : { ...current.weknora, ...weknora },
   }
   const next = sanitizeDocsConfig(merged, current)
+  /* sanitizeDocsConfig 的规则是「留空 = 保留原值」，所以撤销必须发生在它之后。 */
+  if (clearApiKey) next.weknora.apiKey = ''
 
   const scopes = weknoraScopes(next)
   if (scopes.length > 0) {

@@ -96,6 +96,16 @@ function Card({ task, onOpen, config, requirements, onPickRequirement, onPickPro
     'data-blocked': blocked === null ? '0' : '1',
     'data-nobody': noBody > 0 ? '1' : '0',
     onClick: () => onOpen(task.id),
+    /* 键盘可达（WCAG 2.1.1）：卡片以前只有 onClick，Tab 停不到、回车打不开，
+       键盘用户在看板上根本进不去抽屉。role=button + Enter/Space 与鼠标点击等价。 */
+    role: 'button',
+    tabIndex: 0,
+    'aria-label': `打开卡片 ${task.code || task.id}：${task.title}`,
+    onKeyDown: event => {
+      if (event.key !== 'Enter' && event.key !== ' ') return
+      event.preventDefault()
+      onOpen(task.id)
+    },
     title: blocked === null ? (task.requirement || task.title) : `阻塞：${blocked.reason || '未填写原因'}`,
   },
     h('div', { className: TITLE }, task.title),

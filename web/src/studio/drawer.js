@@ -1039,7 +1039,7 @@ function Drawer({ task, state, onClose, onChanged, onOpenTask = null }) {
   }
   const reviewCoding = async (status) => {
     setBusy(true); setError(null)
-    try { await api('/task/coding', { id: task.id, action: 'review', status, note: reviewNote.trim() }); setReviewNote(''); await onChanged() }
+    try { await api('/task/coding', { id: task.id, action: 'review', status, note: reviewNote.trim(), by: currentUser() }); setReviewNote(''); await onChanged() }
     catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)) } finally { setBusy(false) }
   }
   const mergeCoding = async () => {
@@ -1066,7 +1066,7 @@ function Drawer({ task, state, onClose, onChanged, onOpenTask = null }) {
   const runQuality = async () => {
     setQualityRun({ busy: true, line: '' })
     try {
-      const result = await api('/task/quality', { id: task.id, by: '人' })
+      const result = await api('/task/quality', { id: task.id, by: currentUser() })
       if (result.queued === true) {
         setQualityRun({ busy: false, line: '已提交后台执行：跑完会写回这张卡（不用等在这里）' })
         return
@@ -1101,7 +1101,7 @@ function Drawer({ task, state, onClose, onChanged, onOpenTask = null }) {
   const syncMergeGate = async () => {
     setMergeRun({ busy: true, line: '' })
     try {
-      const result = await api('/task/merge-gate', { id: task.id, by: '人' })
+      const result = await api('/task/merge-gate', { id: task.id, by: currentUser() })
       const status = result.mergeGate ?? {}
       setMergeRun({
         busy: false,
@@ -1196,7 +1196,7 @@ function Drawer({ task, state, onClose, onChanged, onOpenTask = null }) {
     if (!(await confirmDialog('真的去 GitLab 合并这个 MR？合并后会删除源分支，且无法撤销。', { title: '合并 MR', danger: true, okText: '合并' }))) return
     setMergeRun({ busy: true, line: '' })
     try {
-      const result = await api('/task/merge', { id: task.id, by: '人' })
+      const result = await api('/task/merge', { id: task.id, by: currentUser() })
       const merge = result.merge ?? {}
       setMergeRun({ busy: false, line: `已合并 MR !${merge.iid}${merge.sha ? `（merge commit ${String(merge.sha).slice(0, 8)}）` : ''}` })
       await onChanged()
@@ -1899,10 +1899,18 @@ function Drawer({ task, state, onClose, onChanged, onOpenTask = null }) {
             ),
             h('div', { className: FIELD, style: { flex: 1 } },
               h('div', { className: LABEL }, '期望完成'),
+              /* 以前是自由文本：随便打「下周」会被 fromDateInput 静默算成 0（等于没填）。
+                 现在当场校验——打得不对就红字提示，不再悄悄丢掉。 */
               h(TextField, {
                 value: plan.due,
+                placeholder: 'YYYY-MM-DD，留空表示不设',
+                'aria-label': '期望完成日期',
+                'aria-invalid': plan.due.trim() !== '' && fromDateInput(plan.due) === 0 ? 'true' : undefined,
                 onChange: event => setPlan({ ...plan, due: event.target.value }),
               }),
+              plan.due.trim() !== '' && fromDateInput(plan.due) === 0
+                ? h('div', { className: 'text-caption-1-regular text-text-error-primary', role: 'status', 'data-due-invalid': '' }, '日期看不懂，请用 YYYY-MM-DD（例：2026-12-01）')
+                : null,
             ),
           ),
           h('div', { className: ROW },

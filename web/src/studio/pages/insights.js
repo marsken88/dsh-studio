@@ -77,7 +77,23 @@ export function DashboardPage({ state, onOpenTask, onOpenBoard, onOpenCases }) {
   const flow = data.flow ?? {}
   const ai = data.ai ?? {}
   // KPI 与任务行都是 BoardUI 的实现：与效能页共用同一套壳，不再和手写 KPI 卡混排。
-  const kpi = (label, value, hint, warn) => h(StatCard, { label, value: String(value ?? 0), hint, warn: warn === true })
+  /* KPI 卡以前点了没反应（数字很刺眼但进不去）。现在整块可点、可键盘触发，落到看板。 */
+  const kpi = (label, value, hint, warn) => onOpenBoard === undefined
+    ? h(StatCard, { key: label, label, value: String(value ?? 0), hint, warn: warn === true })
+    : h('div', {
+      key: label,
+      role: 'button',
+      tabIndex: 0,
+      'data-kpi-link': label,
+      'aria-label': `${label}：${value}，点开看板`,
+      className: 'min-w-0 cursor-pointer rounded-2xl outline-none focus-visible:ring-2 focus-visible:ring-border-focus-ring',
+      onClick: () => onOpenBoard(),
+      onKeyDown: event => {
+        if (event.key !== 'Enter' && event.key !== ' ') return
+        event.preventDefault()
+        onOpenBoard()
+      },
+    }, h(StatCard, { label, value: String(value ?? 0), hint, warn: warn === true }))
   const taskRow = (item) => h(TaskRow, {
     key: item.id,
     title: `${item.code || item.id} · ${item.title}`,
