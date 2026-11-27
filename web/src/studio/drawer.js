@@ -17,6 +17,8 @@ import { productChainRow } from './collab-chain.js'
 const HINT = 'text-caption-1-regular text-text-tertiary'
 /* 评审结论的语义色：通过=绿、要求修改=红、待评审=黄。 */
 const REVIEW_CHIP_VARIANT = { approved: 'lime', changes_requested: 'rose', pending: 'yellow' }
+/* 行内代码块：以前 <code> 没有容器、字号跑出字阶（13px 混在 12px 里），与文件 chip 的语言不一致。 */
+const CODE_CHIP = 'shrink-0 rounded bg-background-secondary-default px-1 font-mono text-caption-1-regular text-text-secondary'
 const GROW = 'min-w-0 flex-1'
 const ROW = 'flex min-w-0 flex-wrap items-center gap-2'
 const FIELD = 'flex min-w-0 flex-col gap-1'
@@ -2322,7 +2324,7 @@ function Drawer({ task, state, onClose, onChanged, onOpenTask = null }) {
           h('span', { className: HINT }, coding === null ? '改代码要留记录：谁、什么模型、改了什么' : '研发 agent 登记，人也可以补录或评审')),
         h('div', { className: SECTION_BODY },
           coding === null
-            ? h(EmptyState, { title: '还没有执行记录。', hint: '改代码要留记录：谁、什么模型、改了什么。' })
+            ? h(EmptyState, { title: '还没有执行记录。', hint: '让研发 agent 登记，或点下面的「手动补录执行记录」自己填：agent / 模型 / 分支 / 单测数' })
             : h('div', { className: PANEL },
               h('div', { className: PANEL_HEAD },
                 /* 语义上色：通过=绿、要求修改=红、待评审=黄。以前恒为 gray，只能靠读字分辨。 */
@@ -2385,25 +2387,30 @@ function Drawer({ task, state, onClose, onChanged, onOpenTask = null }) {
                         ? ' · CI 单测 ' + coding.gitlab.ci.passed + '/' + coding.gitlab.ci.total + (coding.gitlab.ci.failed > 0 ? `（失败 ${coding.gitlab.ci.failed}）` : '')
                         : ' · CI 任务 ' + coding.gitlab.ci.passed + '/' + coding.gitlab.ci.total + ' 成功' + (coding.gitlab.ci.failed > 0 ? `（失败 ${coding.gitlab.ci.failed}）` : '')) +
                     ((coding.gitlab.mismatches ?? []).length === 0 ? ' · 一致' : ' · ' + coding.gitlab.mismatches.join('；'))),
-                  (coding.gitlab.commitList ?? []).length === 0 ? null : h('div', { className: 'flex min-w-0 flex-col gap-1' },
-                    coding.gitlab.commitList.slice(0, 6).map(item => h('div', { key: 'gl-' + item.id, className: LIST_LINE },
-                      h('code', null, String(item.sha ?? '').slice(0, 8)),
-                      h('span', { className: GROW }, item.title || '(无提交说明)'),
-                      h('span', { className: HINT }, item.author || 'GitLab'),
+                  (coding.gitlab.commitList ?? []).length === 0 ? null : h('details', { 'data-gitlab-commits': '' },
+                    h('summary', { className: 'cursor-pointer text-caption-1-regular text-text-secondary' }, `MR 里 ${coding.gitlab.commitList.length} 次提交`),
+                    h('div', { className: 'mt-1 flex max-h-56 min-w-0 flex-col gap-1 overflow-auto pr-1' },
+                      coding.gitlab.commitList.slice(0, 20).map(item => h('div', { key: 'gl-' + item.id, className: LIST_LINE },
+                        h('code', { className: CODE_CHIP }, String(item.sha ?? '').slice(0, 8)),
+                        h('span', { className: GROW }, item.title || '(无提交说明)'),
+                        h('span', { className: HINT }, item.author || 'GitLab'),
+                      )),
+                      coding.gitlab.commitList.length > 20 ? h('div', { className: HINT }, `MR 里还有 ${coding.gitlab.commitList.length - 20} 次提交`) : null,
                     )),
-                    coding.gitlab.commitList.length > 6 ? h('div', { className: HINT }, `MR 里还有 ${coding.gitlab.commitList.length - 6} 次提交`) : null,
-                  ),
                   (coding.gitlab.missingCommits ?? []).length === 0 ? null : h('div', { className: HINT, 'data-warn': '1' },
                     '这些自报提交在 MR 里找不到：' + coding.gitlab.missingCommits.map(sha => String(sha).slice(0, 8)).join('、')),
                 ),
-              (coding.commits ?? []).length === 0 ? null : h('div', { className: 'flex min-w-0 flex-col gap-1' },
-                coding.commits.slice(0, 6).map(item => h('div', { key: item.id, className: LIST_LINE },
-                  h('code', null, item.sha.slice(0, 8)),
-                  h('span', { className: GROW }, item.message || '(无提交说明)'),
-                  h('span', { className: HINT }, `${item.files} 文件`),
+              /* 提交明细默认折叠：有数据时能再叠 400px 上下，而「几次提交」在统计行里已经有了。 */
+              (coding.commits ?? []).length === 0 ? null : h('details', { 'data-coding-commits': '' },
+                h('summary', { className: 'cursor-pointer text-caption-1-regular text-text-secondary' }, `提交 ${coding.commits.length} 次`),
+                h('div', { className: 'mt-1 flex max-h-56 min-w-0 flex-col gap-1 overflow-auto pr-1' },
+                  coding.commits.slice(0, 20).map(item => h('div', { key: item.id, className: LIST_LINE },
+                    h('code', { className: CODE_CHIP }, item.sha.slice(0, 8)),
+                    h('span', { className: GROW }, item.message || '(无提交说明)'),
+                    h('span', { className: HINT }, `${item.files} 文件`),
+                  )),
+                  coding.commits.length > 20 ? h('div', { className: HINT }, `还有 ${coding.commits.length - 20} 次提交`) : null,
                 )),
-                coding.commits.length > 6 ? h('div', { className: HINT }, `还有 ${coding.commits.length - 6} 次提交`) : null,
-              ),
               /* 12 个文件以前铺成 4 行 chip（占全块 30% 高度），且「12 个文件 · +1563 −2」这个结论在界面上根本不存在。
                  现在：一行统计（增/删带色）+ 按改动量 Top3 + 展开全部（限高内滚）。 */
               (() => {
@@ -2449,7 +2456,7 @@ function Drawer({ task, state, onClose, onChanged, onOpenTask = null }) {
                   style: { flex: 1 }, value: reviewNote, placeholder: '评审意见（可选，写清文件/行为什么/怎么改）',
                   onChange: event => setReviewNote(event.target.value),
                 }),
-                h(Button, { variant: 'primary', size: 'sm', disabled: busy, onClick: () => void reviewCoding('approved') }, '评审通过'),
+                h(Button, { variant: 'primary', size: 'sm', disabled: busy, onClick: () => void reviewCoding('approved') }, busy ? '提交中…' : '评审通过'),
                 h(Button, { variant: 'secondary', size: 'sm', disabled: busy, onClick: () => void reviewCoding('changes_requested') }, '要求修改'),
                 /* 「标记已合并」删掉了：它只写 mergedAt（自报），并不真的合并，和「合并门禁 → 合并 MR」
                    容易混成同义词。真合并留在合并门禁；这里只在已合并时显示一行事实。 */
