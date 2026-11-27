@@ -1570,3 +1570,21 @@ header id ... and cwd identify ".../studio-t-5d1d2ad4-architect/..."` —— 宿
   是**全公司口径**（UX 实测 5 处不跟项目），现在文案照实说。
 - 切分区时内容区滚回顶部（页签会滚出视野，不滚回像「点了没反应」）。
 - 探针补 `⑥d2`：有强制放行记录时断言「聚合 + 样本 ≤5 + 行可点」，无记录则明说跳过（99 项）。
+
+### 同日晚（效能页第三批 B：口径）：项目筛选现在**真的**对全部指标生效
+
+第三批提案里的 B（UX 逐项核出 5 处「不跟项目」）：
+
+- **派单周活** `dispatchWeekly(state.tasks)` → `dispatchWeekly(inScope)`；
+- **需求交付时长** → `requirementDelivery(scopedRequirements)`；
+- **自动化率** → 用项目内的需求 id；
+- **强制放行** `overrideSummary` 新增 `project`：卡看 `task.project`、需求看 `requirement.project`，
+  两边都取不到归「未归属」（全公司口径里算，单选项目时不出现）；
+- **上下文洞察** `/contexts` 现在读 `project` + `days`：按卡 id 过滤派单会话，无卡会话（`/agents/chat`）不进项目口径。
+
+页面上那句「项目筛选对全部指标生效」这次是真的了（上一批为了不误导，曾改成「部分是全公司口径」）。
+
+218 实测（近 30 天）：`tasks 75 → 18`、`delivery 7 → null`（该项目没有签字需求）、
+`automation 8 → null`、`overrides 39 → null`（39 次都在未归属的卡上）、上下文会话 `285 → 37`。
+
+**注意**：切到某个项目后这些数会比以前小 —— 以前的「项目筛选」只是看起来生效。
