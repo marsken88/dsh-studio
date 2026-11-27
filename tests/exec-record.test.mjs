@@ -42,3 +42,20 @@ test('评审主行动唯一：评审通过 = primary，要求修改 = secondary'
   assert.match(s, /variant: 'primary', size: 'sm', disabled: busy, onClick: \(\) => void reviewCoding\('approved'\)/, '评审通过要是主行动')
   assert.match(s, /variant: 'secondary', size: 'sm', disabled: busy, onClick: \(\) => void reviewCoding\('changes_requested'\)/)
 })
+
+test('文件清单：一行统计（含增删合计）+ Top3 + 展开其余', () => {
+  const s = drawer()
+  const block = s.slice(s.indexOf("'data-coding-files': ''"), s.indexOf("'data-coding-files': ''") + 2000)
+  assert.match(block, /个文件/, '要有「N 个文件」')
+  assert.match(block, /tabular-nums text-state-success-text/, '+ 行数要带色且等宽对齐')
+  assert.match(block, /tabular-nums text-text-error-primary/, '− 行数同理')
+  assert.match(s, /const top = byWeight\.slice\(0, 3\)/, '默认只列 Top3')
+  assert.match(block, /data-coding-files-rest/, '其余要能展开')
+})
+
+test('上下文与评审意见默认折叠（600 字 note 不再整段铺开）', () => {
+  const s = drawer()
+  assert.match(s, /'data-coding-context': ''/, '上下文要折叠')
+  assert.match(s, /'data-review-note-full': ''/, '评审意见要折叠')
+  assert.match(s, /text-caption-1-medium text-text-secondary' \},\s*`评审意见/, 'label（谁·何时）与正文要分开')
+})
