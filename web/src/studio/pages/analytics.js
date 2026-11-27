@@ -24,7 +24,8 @@ const CTX_CHIP = 'flex min-w-[84px] flex-col gap-1 rounded-lg border border-sepa
    而分区自己 overflow-hidden，里面的内容就被裁掉（工作台出现「空条」的根因）。 */
 /* 正文用 text-secondary：text-tertiary 在浅色只有 2.58:1、深色 1.94:1，正文读不清（UI 评审 P0-2）。 */
 const HINT = 'text-caption-1-regular text-text-secondary'
-const SECTION = 'mt-4 flex flex-wrap items-baseline gap-2 border-t border-neutral-200 pt-3 text-body-2-medium text-text-secondary dark:border-neutral-600'
+/* px-4：面板标题与正文都在 16px 处，分区标题以前贴边，每个分区都错一格左轨。 */
+const SECTION = 'mt-4 flex flex-wrap items-baseline gap-2 border-t border-separator-border px-4 pt-3 text-body-2-medium text-text-secondary'
 const FOOT = 'mt-2 border-t border-neutral-200 pt-2 text-caption-1-regular text-text-secondary dark:border-neutral-600'
 const KV = 'flex items-baseline justify-between gap-3 border-b border-neutral-200 py-1 text-body-2-regular last:border-b-0 dark:border-neutral-700'
 const ROW = 'flex min-w-0 flex-wrap items-center gap-2'
@@ -54,6 +55,8 @@ function alarmHit(value, rule) {
   return false
 }
 const KPI_GRID = 'grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-5'
+/* 四张卡就别用五列：以前右侧空出一整格（面板宽 20%），看着像少渲染了一张。 */
+const KPI_GRID_4 = 'grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4'
 
 export function AnalyticsPage({ state, onOpenTask, onFixPrices }) {
   const { h, React, api, ChipField } = client()
@@ -358,13 +361,13 @@ export function AnalyticsPage({ state, onOpenTask, onFixPrices }) {
           },
             h('span', { className: 'font-mono text-caption-1-medium text-text-secondary' }, row.code || row.id),
             h('span', { className: 'min-w-0 flex-1 truncate text-body-2-medium text-text-primary' }, row.title),
-            h('span', { className: HINT }, `${row.missing}/${row.total} 条待补`),
+              h('span', { className: 'shrink-0 text-end tabular-nums text-caption-1-regular text-text-secondary', style: { minWidth: 84 } }, `${row.missing}/${row.total} 待补`),
           )),
         ),
       )
     })(),
     h('div', { className: SECTION, 'data-analytics-panel': 'overview' }, h('span', {}, '其它读数（不进门槛，供参考）')),
-    h('div', { className: KPI_GRID, 'data-analytics-panel': 'overview' },
+    h('div', { className: KPI_GRID_4, 'data-analytics-panel': 'overview' },
       kpi('一次通过率', pct(data.rework.firstPassRate), '完成的卡里，从没被退回过的比例', data.rework.firstPassRate < 0.6),
       kpi('返工率', pct(data.rework.rate), `${data.rework.reworked}/${data.rework.moved} 张卡倒退过`, data.rework.rate > 0.3),
       kpi('中位周期', fmtSpan(data.cycle.medianDays), `平均 ${fmtSpan(data.cycle.avgDays)} · P90 ${fmtSpan(data.cycle.p90Days)}`),
