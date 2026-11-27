@@ -2453,6 +2453,7 @@ function Drawer({ task, state, onClose, onChanged, onOpenTask = null }) {
                       h('div', { className: 'mt-1 whitespace-pre-wrap break-words' }, coding.review.note))),
               h('div', { className: ROW },
                 h(TextField, {
+                  size: 'small',
                   style: { flex: 1 }, value: reviewNote, placeholder: '评审意见（可选，写清文件/行为什么/怎么改）',
                   onChange: event => setReviewNote(event.target.value),
                 }),
