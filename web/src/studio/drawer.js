@@ -2337,7 +2337,9 @@ function Drawer({ task, state, onClose, onChanged, onOpenTask = null }) {
                 })(),
                 h('div', { className: GROW },
                   h('div', { className: PANEL_LINE }, [coding.agent || '未登记 agent', coding.model, coding.branch].filter(Boolean).join(' · ')),
-                  coding.context === '' ? null : h('div', { className: HINT }, coding.context),
+                  coding.context === '' ? null : h('details', { 'data-coding-context': '' },
+                    h('summary', { className: HINT + ' cursor-pointer', title: coding.context }, coding.context.length > 80 ? coding.context.slice(0, 80) + '…' : coding.context),
+                    h('div', { className: HINT + ' mt-1 whitespace-pre-wrap break-words' }, coding.context)),
                 ),
                 (() => {
                   const unit = coding.unitTests ?? {}
@@ -2402,15 +2404,46 @@ function Drawer({ task, state, onClose, onChanged, onOpenTask = null }) {
                 )),
                 coding.commits.length > 6 ? h('div', { className: HINT }, `还有 ${coding.commits.length - 6} 次提交`) : null,
               ),
-              (coding.files ?? []).length === 0 ? null : h('div', { className: 'flex flex-wrap gap-1' },
-                coding.files.slice(0, 12).map(item => h('span', { key: item.id, className: 'rounded-md bg-background-secondary-default px-2 py-1 font-mono text-caption-1-regular text-text-secondary', 'data-change': item.change },
-                  `${item.path}${item.additions > 0 ? ` +${item.additions}` : ''}${item.deletions > 0 ? ` -${item.deletions}` : ''}`)),
-                coding.files.length > 12 ? h('span', { className: HINT }, `还有 ${coding.files.length - 12} 个`) : null,
-              ),
+              /* 12 个文件以前铺成 4 行 chip（占全块 30% 高度），且「12 个文件 · +1563 −2」这个结论在界面上根本不存在。
+                 现在：一行统计（增/删带色）+ 按改动量 Top3 + 展开全部（限高内滚）。 */
+              (() => {
+                const files = coding.files ?? []
+                if (files.length === 0) return null
+                const totals = files.reduce((acc, item) => ({
+                  add: acc.add + (Number(item.additions) || 0),
+                  del: acc.del + (Number(item.deletions) || 0),
+                }), { add: 0, del: 0 })
+                const byWeight = [...files].sort((a, b) => ((Number(b.additions) || 0) + (Number(b.deletions) || 0)) - ((Number(a.additions) || 0) + (Number(a.deletions) || 0)))
+                const top = byWeight.slice(0, 3)
+                const rowOf = item => h('div', { key: item.id, className: 'flex min-w-0 items-baseline gap-2' },
+                  h('span', { className: 'min-w-0 truncate font-mono text-caption-1-regular text-text-primary', title: item.path }, item.path),
+                  Number(item.additions) > 0 ? h('span', { className: 'shrink-0 tabular-nums text-caption-1-regular text-state-success-text' }, `+${item.additions}`) : null,
+                  Number(item.deletions) > 0 ? h('span', { className: 'shrink-0 tabular-nums text-caption-1-regular text-text-error-primary' }, `−${item.deletions}`) : null,
+                )
+                return h('div', { className: 'flex min-w-0 flex-col gap-1', 'data-coding-files': '' },
+                  h('div', { className: 'flex min-w-0 flex-wrap items-baseline gap-2 text-caption-1-regular' },
+                    h('span', { className: 'text-text-secondary' }, `${files.length} 个文件`),
+                    totals.add > 0 ? h('span', { className: 'tabular-nums text-state-success-text' }, `+${totals.add}`) : null,
+                    totals.del > 0 ? h('span', { className: 'tabular-nums text-text-error-primary' }, `−${totals.del}`) : null,
+                  ),
+                  h('div', { className: 'flex min-w-0 flex-col gap-0.5' }, top.map(rowOf)),
+                  files.length > top.length
+                    ? h('details', { 'data-coding-files-rest': '' },
+                      h('summary', { className: 'cursor-pointer text-caption-1-regular text-text-secondary' }, `展开其余 ${files.length - top.length} 个`),
+                      h('div', { className: 'mt-1 flex max-h-56 min-w-0 flex-col gap-0.5 overflow-auto pr-1' }, byWeight.slice(3).map(rowOf)))
+                    : null,
+                )
+              })(),
               coding.review.note === '' && coding.review.status === 'pending'
                 ? null
-                : h('div', { className: NOTE_BOX, 'data-review-note': coding.review.status },
-                  `评审意见${coding.review.by === '' ? '' : `（${coding.review.by}${coding.review.at > 0 ? ` · ${fmtTime(coding.review.at)}` : ''}）`}：${coding.review.note === '' ? '（没有填写意见）' : coding.review.note}`),
+                : h('div', { className: NOTE_BOX + ' text-text-primary', 'data-review-note': coding.review.status },
+                  h('div', { className: 'text-caption-1-medium text-text-secondary' },
+                    `评审意见${coding.review.by === '' ? '' : ` · ${coding.review.by}${coding.review.at > 0 ? ` · ${fmtTime(coding.review.at)}` : ''}`}`),
+                  coding.review.note === ''
+                    ? h('div', null, '（没有填写意见）')
+                    : h('details', { 'data-review-note-full': '' },
+                      h('summary', { className: 'cursor-pointer break-words' }, coding.review.note.length > 90 ? coding.review.note.slice(0, 90) + '…' : coding.review.note),
+                      h('div', { className: 'mt-1 whitespace-pre-wrap break-words' }, coding.review.note))),
               h('div', { className: ROW },
                 h(TextField, {
                   style: { flex: 1 }, value: reviewNote, placeholder: '评审意见（可选，写清文件/行为什么/怎么改）',
