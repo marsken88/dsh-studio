@@ -6,12 +6,12 @@
 
 | 项 | 值 |
 | --- | --- |
-| dsh-studio | `package.json` `version: 0.18.4` |
+| dsh-studio | `package.json` `version: 0.19.0` |
 | DeepSeek Harness | `0.2.2-rc.1`（`dsh --version`） |
 | Node | `v24.22.2`（Linux 目标机）；本机 Windows `v24.19.0` |
 | 目标系统 | Ubuntu 24.04，`dsh web` 监听 `18080`，nginx `:80` 反代并注入 `dsh-auth-*` cookie |
 | 插件安装方式 | npm：`dsh plugin --profile web add @marsken/dsh-studio`；本地开发：`add link:~/dsh-studio`（profile `web`） |
-| 验证范围 | 0.18.4：需求卡编号改成「需求编号-NN」（`REQ-2026-003-01`）+ `module-audit` 查重口径改成「同一需求内」。`npm test` 700 条 / 699 通过 / 0 失败（`TZ=UTC` 同）、PR CI 绿（`45858863171`）、`release:check` 7 项、产物 `cmp` 一致、`verify:pages` 52/52；真库副本迁移通过（3 需求 / 10 卡 → `REQ-2026-003-01..03`、`REQ-2026-001-01..03`，缺陷卡不动，二次启动幂等），本机 desktop 实例重启后活库已按新编号显示。**目标机部署与本轮 `release:preflight` 未跑**（只在本机实例验证）。0.18.2：只含「会随 npm 包发出去的内网地址/个人路径」清理（面板占位符 `kb.example.com`、docs 与源码注释改用 `192.0.2.10` / `<user>`）。`npm run check` 693 通过、`release:check` 7 项通过、产物 `cmp` 一致；其余验证沿用 0.18.0/0.18.1（全量 `release:preflight --probes`：panel 96/96、pages 52、toast 7、drawer 15、cases 8、tiers 32、a11y、empty 11、smoke、sweep） |
+| 验证范围 | 0.19.0：一轮完整交互审计后的收口（PR #170 的 12 个提交 + PR #171 的 1 个）。`npm test` 768 条 / 767 通过 / 1 跳过（`TZ=UTC` 同）；`verify:pages` 56、`verify:drawer` 15、`verify:tdz` 44 文件、`release:check` 7 项、产物 `cmp` 一致（1,513,713 B）；**目标机 192.168.120.218 真机**：panel 96/96、modules 41/41、a11y 29 模块 0 违规、cases 8、tiers 32、empty 11、toast 7、fields 21、selects 通过、e2e 1/1（70s）、selfcheck 3/3（215s）、smoke 通过；真机行为抽查 13/13（版本状态 400、乐观锁 409、同列不清阻塞、WeKnora 探活如实报缺项、读操作不推 revision）。0.18.4 及更早的验证记录见 git 历史。 |
 | 兼容声明 | `engines.dsh: ">=0.2.2-rc.1"`、`dsh.compatibility.dshReleases: { "0.2.2-rc.1+": "compatible" }` |
 
 > 结论：只在 **0.2.2-rc.1** 上做过端到端验证。0.2.2 正式版、以及 `<0.2.2` 均未验证。
