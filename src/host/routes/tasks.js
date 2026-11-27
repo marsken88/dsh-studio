@@ -532,6 +532,9 @@ export async function handleTaskRoute({ method, route, req, res, store, url }) {
       ok: true,
       docUpdatedAt,
       staleCount: decoratedCases.filter(item => item.stale === true).length,
+      /* /state 只带最近 12 条历史，抽屉点「查看全部」时从这里取全文。 */
+      history: task.history ?? [],
+      historyTotal: (task.history ?? []).length,
       cases: decoratedCases,
       checklist: task.checklist ?? [],
       /* 执行批次只给摘要（最近 5 次）：抽屉只显示「什么时候、过了几条」，

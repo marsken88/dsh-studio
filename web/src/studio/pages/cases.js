@@ -23,7 +23,7 @@ const HINT = 'text-caption-1-regular text-text-tertiary'
 const ROW = 'flex min-w-0 flex-wrap items-center gap-2'
 
 export function CasesPage({ state, onOpenTask, onOpenBoard }) {
-  const { h, React, api, toast, confirmDialog, promptDialog } = client()
+  const { h, React, api, toast, confirmDialog, promptDialog, currentUser } = client()
   const [rows, setRows] = React.useState(null)
   const [error, setError] = React.useState(null)
   const [query, setQuery] = React.useState('')
@@ -173,7 +173,7 @@ export function CasesPage({ state, onOpenTask, onOpenBoard }) {
           keys: [],
           isDefault: suites.length === 0,
         },
-        by: '人',
+        by: currentUser(),
       })
       toast('已保存套件')
       await refresh()
@@ -183,7 +183,7 @@ export function CasesPage({ state, onOpenTask, onOpenBoard }) {
   }
   const makeDefault = async suite => {
     try {
-      await api('/suite/save', { suite: { ...suite, isDefault: true }, by: '人' })
+      await api('/suite/save', { suite: { ...suite, isDefault: true }, by: currentUser() })
       toast(`夜间回归改跑「${suite.name}」`)
       await refresh()
     } catch (cause) {

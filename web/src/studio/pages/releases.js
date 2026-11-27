@@ -25,7 +25,7 @@ const STATBOX = 'flex min-w-0 flex-col gap-1 rounded-lg border border-separator-
 const STATVALUE = 'text-title-2-semibold text-text-primary tabular-nums'
 
 export function ReleasesPage({ state, onOpenTask }) {
-  const { h, React, api, toast, confirmDialog, promptDialog, tipOf, TextField, CheckField, MdField } = client()
+  const { h, React, api, toast, confirmDialog, promptDialog, tipOf, TextField, CheckField, MdField, currentUser } = client()
   const [items, setItems] = React.useState([])
   const [selected, setSelected] = React.useState(null)
   const [detail, setDetail] = React.useState(null)
@@ -267,7 +267,7 @@ export function ReleasesPage({ state, onOpenTask }) {
                     title: '撤销后要重新审批才能发布',
                     onClick: async () => {
                       if (await confirmDialog(`撤销「${release.version || release.name || '这个版本'}」的审批？撤销后要重新审批才能发布。`, { title: '撤销审批', danger: true, okText: '撤销' })) {
-                        void act('/release/approve', { id: form.id, by: '人', action: 'revoke' }, '已撤销审批')
+                        void act('/release/approve', { id: form.id, by: currentUser(), action: 'revoke' }, '已撤销审批')
                       }
                     },
                   }, '撤销审批')
@@ -275,7 +275,7 @@ export function ReleasesPage({ state, onOpenTask }) {
                     variant: 'secondary', size: 'sm',
                     disabled: busy || gate?.approvable !== true,
                     title: gate?.approvable === true ? '把审批结论记到版本上（发布还要求卡 / 用例 / 冒烟都过）' : `先把其它门禁清掉再审批：${(gate?.blockers ?? []).filter(item => item !== '还没有发布审批：先在版本上点「审批通过」并写结论').slice(0, 3).join('；') || '门禁数据还没加载'}`,
-                    onClick: () => void act('/release/approve', { id: form.id, by: '人' }, '已审批，可以发布了'),
+                    onClick: () => void act('/release/approve', { id: form.id, by: currentUser() }, '已审批，可以发布了'),
                   }, '审批通过'),
               ),
               h('div', { className: ACTIONS },
@@ -286,7 +286,7 @@ export function ReleasesPage({ state, onOpenTask }) {
                   const label = release.version || release.name || '这个版本'
                   const ok = await confirmDialog(`发布「${label}」？发布后状态变成已发布，版本号不能再改；这一步会写进部署日志。`, { title: '发布版本', okText: '发布' })
                   if (!ok) return
-                  void act('/release/publish', { id: form.id, by: '人' }, '已发布')
+                  void act('/release/publish', { id: form.id, by: currentUser() }, '已发布')
                 },
               }, release.status === 'released' ? '已发布' : '发布'),
               tipOf('发布准入（预发部署 / 需求签字）没过时也要发：必须写原因，会记进部署日志', h(Button, {
@@ -297,7 +297,7 @@ export function ReleasesPage({ state, onOpenTask }) {
                   const reason = await promptDialog('强制发布的原因（会记进部署日志，便于复盘）：', { title: '强制发布', okText: '强制发布', placeholder: '为什么不等预发部署 / 需求签字？' })
                   if (reason === null) return
                   if (String(reason).trim() === '') { setNotice('强制发布必须写原因'); return }
-                  void act('/release/publish', { id: form.id, by: '人', force: true, forceNote: String(reason).trim() }, '已强制发布（原因已记入部署日志）')
+                  void act('/release/publish', { id: form.id, by: currentUser(), force: true, forceNote: String(reason).trim() }, '已强制发布（原因已记入部署日志）')
                 },
               }, '强制发布')),
               release.status === 'released'
@@ -326,7 +326,7 @@ export function ReleasesPage({ state, onOpenTask }) {
             (release.smoke ?? []).map(item => h('div', { key: item.id, className: LISTROW },
               h('label', { className: 'flex min-w-0 flex-1 cursor-pointer items-center gap-2' },
                 h(CheckField, { 'aria-label': item.text, checked: item.done === true,
-                  onChange: () => void act('/release/smoke', { id: form.id, action: 'toggle', itemId: item.id, done: item.done !== true, by: '人' }, item.done ? '已取消' : '冒烟项已过'),
+                  onChange: () => void act('/release/smoke', { id: form.id, action: 'toggle', itemId: item.id, done: item.done !== true, by: currentUser() }, item.done ? '已取消' : '冒烟项已过'),
                 }),
                 h('span', { className: item.done ? 'text-text-tertiary line-through' : 'text-body-2-regular text-text-primary' }, item.text),
               ),
@@ -374,15 +374,15 @@ export function ReleasesPage({ state, onOpenTask }) {
                   h('div', { className: HINT }, `${({ pending: '待开始', running: '灰度中', passed: '已通过', rolled_back: '已回滚' })[item.status] ?? item.status}${item.note === '' ? '' : ` · ${item.note}`}`),
                 ),
                 h('div', { className: ACTIONS },
-                  item.status === 'pending' ? h(Button, { variant: 'ghost', size: 'sm', disabled: busy, onClick: () => void act('/release/gray', { id: form.id, action: 'start', batchId: item.id, by: '人' }, '已开始灰度') }, '开始') : null,
-                  item.status === 'running' ? h(Button, { variant: 'ghost', size: 'sm', disabled: busy, onClick: () => void act('/release/gray', { id: form.id, action: 'advance', batchId: item.id, by: '人' }, '这一批已通过') }, '通过') : null,
+                  item.status === 'pending' ? h(Button, { variant: 'ghost', size: 'sm', disabled: busy, onClick: () => void act('/release/gray', { id: form.id, action: 'start', batchId: item.id, by: currentUser() }, '已开始灰度') }, '开始') : null,
+                  item.status === 'running' ? h(Button, { variant: 'ghost', size: 'sm', disabled: busy, onClick: () => void act('/release/gray', { id: form.id, action: 'advance', batchId: item.id, by: currentUser() }, '这一批已通过') }, '通过') : null,
                   item.status === 'running' || item.status === 'passed'
                     ? h(Button, {
                       variant: 'destructive', size: 'sm', disabled: busy,
                       onClick: async () => {
                         const ok = await confirmDialog(`回滚灰度「${item.name}」？会把这个版本整体回滚，之后要重新发布。`, { title: '回滚灰度', danger: true, okText: '回滚' })
                         if (!ok) return
-                        void act('/release/gray', { id: form.id, action: 'rollback', batchId: item.id, by: '人', note: '人工回滚' }, '已回滚')
+                        void act('/release/gray', { id: form.id, action: 'rollback', batchId: item.id, by: currentUser(), note: '人工回滚' }, '已回滚')
                       },
                     }, '回滚')
                     : null,
@@ -403,7 +403,7 @@ export function ReleasesPage({ state, onOpenTask }) {
               h(Button, {
                 variant: 'secondary', size: 'sm', disabled: busy || Number(grayPercent) <= 0,
                 onClick: async () => {
-                  await act('/release/gray', { id: form.id, action: 'add', name: grayName, percent: Number(grayPercent), by: '人' }, '已加一批灰度')
+                  await act('/release/gray', { id: form.id, action: 'add', name: grayName, percent: Number(grayPercent), by: currentUser() }, '已加一批灰度')
                   setGrayName('')
                   setGrayPercent('10')
                 },
@@ -435,7 +435,7 @@ export function ReleasesPage({ state, onOpenTask }) {
               h(Button, {
                 variant: 'secondary', size: 'sm', disabled: busy || deployEnv === '',
                 onClick: async () => {
-                  await act('/release/deploy', { id: form.id, env: deployEnv, note: deployNote, by: '人' }, '已登记部署（没有触发任何部署）')
+                  await act('/release/deploy', { id: form.id, env: deployEnv, note: deployNote, by: currentUser() }, '已登记部署（没有触发任何部署）')
                   setDeployNote('')
                 },
               }, '登记部署'),

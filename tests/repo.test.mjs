@@ -1283,7 +1283,9 @@ test('tooling: registry 查询的 URL 编码（scoped 包的 / 必须编成 %2F�
 
 test('state: 计数用原对象算，不许传给剥掉数组的 rest（issue #10 回归）', () => {
   const source = read('index.js')
-  assert.match(source, /const \{ comments, checklist, cases, \.\.\.rest \} = task/, '应该先留原对象、再解构出 rest')
+  assert.match(source, /const { comments, checklist, cases(, history)?, ...rest } = task/, '应该先留原对象、再解构出 rest')
+  /* 历史也在轮到里剥掉：全量下发时 75 张卡的 /state 是 1.34 MB，其中 383 KB 是历史里的长备注。 */
+  assert.match(source, /historyTotal: \(history \?\? \[\]\)\.length/, '历史要单独给总数（否则抽屉显示最近 12 条却写着 12）')
   assert.match(source, /\.\.\.publicComments\(task\)/, 'publicComments 要拿原对象')
   assert.ok(!/\.\.\.publicComments\(rest\)/.test(source), '不能把 rest 传给统计函数')
   assert.ok(!/\.\.\.publicChecklist\(rest\)/.test(source), '不能把 rest 传给统计函数')
