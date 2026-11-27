@@ -170,6 +170,9 @@ let taskCode = ''
 /* ⑥e/⑥f 会临时改 test 列负责人与角色白名单：跑完必须恢复（探针可能对着真实看板跑）。 */
 let restoreColumns = null
 let restoreRoles = null
+/* 目标机开着自动派单时，派单器会把探针造的卡接走（改状态、加评论、abort 会话），
+   同一套判据会时红时绿（每次红的还不是同一条）。跑探针期间临时停用，结束时恢复。 */
+let restoreAgents = null
 const PROBE_ROLE = 'probe-role'
 const saveTestColumn = async owner => {
   if (owner === null || owner === undefined) return
@@ -191,6 +194,17 @@ try {
   })
   requirementId = requirement.json.requirement?.id ?? ''
   await api('/requirement/doc', { id: requirementId, action: 'add', doc: { kind: 'prd', title: '（探针）PRD', content: '探针正文', at: Date.now() } })
+  /* 停用自动派单再开始造数据：218 上派单器把探针卡接走过，表现是「②z 子卡」「⑥c 拖拽」
+     这类判据时红时绿。停用后同一套判据稳定 96/96。 */
+  try {
+    const liveConfig = (await api('/state')).json?.state?.config ?? {}
+    const liveAgents = liveConfig.agents ?? {}
+    if (liveAgents.enabled === true) {
+      restoreAgents = { enabled: true }
+      await api('/config', { agents: { ...liveAgents, enabled: false } })
+      console.log('ℹ 已临时停用自动派单（探针造的卡不该被派单器接走），结束时恢复')
+    }
+  } catch { /* 读不到就当没开自动派单，继续跑 */ }
   const card = await api('/task/create', { title: '（探针）看板卡片', type: 'dev', role: 'dev', status: 'dev', requirementId, pointId: 'p1' })
   taskId = card.json.task?.id ?? ''
   taskCode = card.json.task?.code ?? ''
@@ -220,7 +234,9 @@ try {
   await page.setViewport({ width: viewportWidth, height: viewportHeight })
   const errors = []
   page.on('pageerror', error => errors.push('pageerror: ' + String(error?.message ?? error)))
-  page.on('console', message => { if (message.type() === 'error' && !/favicon|404/.test(message.text())) errors.push('console: ' + message.text().slice(0, 140)) })
+  /* 409 = 乐观锁冲突（界面上是「这张卡刚被改过」的提示 + 刷新），是设计内的结果；
+     favicon/404 是宿主静态资源的噪音。除此之外的 console error 一律算失败。 */
+  page.on('console', message => { if (message.type() === 'error' && !/favicon|404|409 \(Conflict\)/.test(message.text())) errors.push('console: ' + message.text().slice(0, 140)) })
 
   const clickExact = async label => {
     const hit = await page.evaluate(target => {
@@ -473,7 +489,20 @@ try {
     button.click()
     return true
   })
-  await new Promise(resolve => setTimeout(resolve, 500))
+  /* 确认框是异步挂载的：固定 500ms 在负载高的机器上会抢跑，判成「删除没确认」的假红
+     （2026-11-27 在 218 上真踩过一次：连跑两次，一次 95/96 一次 96/96）。改成等它出现，
+     等不到就再点一次删除按钮——只影响等待方式，判据不变。 */
+  const waitDialog = async () => page.waitForFunction(
+    () => [...document.querySelectorAll('[role="dialog"], [role="alertdialog"]')].some(node => String(node.textContent ?? '').includes('删除评论')),
+    { timeout: 3000 },
+  ).then(() => true).catch(() => false)
+  if (!(await waitDialog())) {
+    await page.evaluate(() => {
+      const row = [...document.querySelectorAll('[data-drawer-comment]')].find(node => String(node.textContent ?? '').includes('评论已编辑'))
+      row?.querySelector('[data-comment-delete]')?.click()
+    })
+    await waitDialog()
+  }
   const deleteConfirmed = await page.evaluate(() => {
     const dialog = [...document.querySelectorAll('[role="dialog"], [role="alertdialog"]')].find(node => String(node.textContent ?? '').includes('删除评论'))
     const button = dialog === undefined ? undefined : [...dialog.querySelectorAll('button')].find(node => String(node.textContent ?? '').trim() === '删除')
@@ -481,8 +510,13 @@ try {
     button.click()
     return true
   })
-  await new Promise(resolve => setTimeout(resolve, 900))
-  const gone = await page.evaluate(() => !(document.querySelector('[data-drawer-comments]')?.textContent?.includes('评论已编辑') ?? false))
+  /* 删完要等抽屉重新拉一次评论列表：目标机的卡上可能有一百多条评论（218 上就是 110 条），
+     固定 900ms 经常不够，会判成「没删掉」的假红（2026-11-27 连跑三次里红两次）。
+     判据不变，只把「等固定时长」换成「等这段文字真的消失」。 */
+  const gone = await page.waitForFunction(
+    () => !(document.querySelector('[data-drawer-comments]')?.textContent?.includes('评论已编辑') ?? false),
+    { timeout: 8000 },
+  ).then(() => true).catch(() => false)
   check('②c2 评论能删除（先确认）', deleteClicked === true && deleteConfirmed === true && gone === true)
 
   // ②b 交接契约：从抽屉写入 → 回读 /task/get（能创建的东西必须有能用的路径）
@@ -505,21 +539,15 @@ try {
     return true
   })
   await new Promise(resolve => setTimeout(resolve, 1200))
-  const gotHandoff = (await api('/task/get', { id: taskId })).json.task?.handoff ?? null
+  /* 回读走 /state：/task/get 这个路由不存在（一直是 404），以前的「旧后端没接受 handoff」
+     提示把探针自己的错掩盖了 —— 交接契约其实早就能落库（2026-11-27 用 /state 回读确认）。 */
+  const gotHandoff = ((await state())?.tasks ?? []).find(item => item.id === taskId)?.handoff ?? null
   check('②b 交接契约面板有五段且能提交', filled === true && saved === true, filled === true ? '' : '没找到 [data-handoff-field="decision"] textarea')
-  /* 回读要目标机已经是这批代码。还没部署时后端会忽略 handoff（200 但不落库），
-     这里只提示、不判红；部署后同一个探针会自动变成真正的端到端断言。 */
-  if (gotHandoff?.decision === '探针决策：先写契约再交接') {
-    check('②b 契约写入后能从 /task/get 回读', true)
-  } else {
-    console.log('ℹ ②b 回读跳过：目标机后端还没接受 handoff（部署这批后会自动断言）')
-  }
-  if (gotHandoff === null) {
-    console.log('ℹ ②b 页签的 ✓ 标记跳过：契约还没落库（旧后端），部署后才有')
-  } else {
-    check('②b 交接页签有已填写标记', await page.evaluate(() => [...document.querySelectorAll('[role="tab"]')]
-      .some(node => (node.textContent ?? '').includes('交接') && (node.textContent ?? '').includes('✓'))))
-  }
+  check('②b 契约写入后能从 /state 回读', gotHandoff?.decision === '探针决策：先写契约再交接', JSON.stringify(gotHandoff))
+  /* ✓ 标记：契约非空时页签上要出现勾。这条以前被包在「gotHandoff === null」的 else 里，
+     而那个条件永远不会成立（/task/get 一直 404），所以它也从没跑过。 */
+  check('②b 交接页签有已填写标记', await page.evaluate(() => [...document.querySelectorAll('[role="tab"]')]
+    .some(node => (node.textContent ?? '').includes('交接') && (node.textContent ?? '').includes('✓'))))
   /* ②z 父卡带未完成子卡：抽屉要列出子卡并给「打开」按钮，且整页不能崩。
      2026-11-26 真机：statusLabelOf 的定义在合并里被丢掉、只剩调用，一打开这种卡就
      ReferenceError → 页面级错误边界把整块看板变成「工作空间渲染失败」。 */
@@ -537,7 +565,21 @@ try {
     card.click()
     return true
   })
-  await new Promise(resolve => setTimeout(resolve, 900))
+  /* 子卡刚建好，抽屉要等 /state 轮询到了才渲染出「未完成子卡」块：
+     固定 900ms 在真实看板（218 上 110 条评论那种数据量）经常不够，会判成「块不存在」的假红。
+     判据不变，改成等块出现，最多 6s；等不到就再点一次卡（可能第一次点在别的元素上）。 */
+  const pendingAppeared = () => page.waitForFunction(
+    () => document.querySelector('[data-pending-children]') !== null,
+    { timeout: 6000 },
+  ).then(() => true).catch(() => false)
+  if (!(await pendingAppeared())) {
+    await page.evaluate(() => {
+      const card = [...document.querySelectorAll('[data-kanban-card]')]
+        .find(node => String(node.textContent ?? '').includes('（探针）看板卡片'))
+      card?.click()
+    })
+    await pendingAppeared()
+  }
   const pendingInfo = await page.evaluate(() => {
     const node = document.querySelector('[data-pending-children]')
     return {
@@ -1218,7 +1260,7 @@ try {
   await clickExact('关闭')
   await clickExact('看板')
   await new Promise(resolve => setTimeout(resolve, 900))
-  const dragged = await page.evaluate(() => {
+  const dragOnce = () => page.evaluate(() => {
     const card = [...document.querySelectorAll('[data-kanban-card]')]
       .find(node => String(node.textContent ?? '').includes('（探针）看板卡片'))
     const target = document.querySelector('[data-board-column="review"]')
@@ -1230,10 +1272,20 @@ try {
     card.dispatchEvent(new DragEvent('dragend', { bubbles: true, cancelable: true, dataTransfer: data }))
     return { ok: true }
   })
+  const statusOf = async () => ((await state())?.tasks ?? []).find(item => item.id === taskId)?.status
+  let dragged = await dragOnce()
   await new Promise(resolve => setTimeout(resolve, 1400))
-  const movedState = await state()
-  const movedCard = (movedState?.tasks ?? []).find(item => item.id === taskId)
-  check('⑥c 拖拽卡片能换列并落库', dragged.ok === true && movedCard?.status === 'review', JSON.stringify({ dragged, status: movedCard?.status }))
+  let movedStatus = await statusOf()
+  /* 拖拽带乐观锁：派单器（或另一个会话）恰好在这一秒里改过这张卡时，服务端回 409、界面提示
+     「这张卡刚被改过」并刷新 —— 这是设计行为，不是拖拽坏了。像人一样再拖一次即可，
+     判据（能换列并落库）不变。2026-11-27 在 218 连跑三次红过一次，就是撞上派单 tick。 */
+  if (dragged.ok === true && movedStatus !== 'review') {
+    await new Promise(resolve => setTimeout(resolve, 1500))
+    dragged = await dragOnce()
+    await new Promise(resolve => setTimeout(resolve, 1400))
+    movedStatus = await statusOf()
+  }
+  check('⑥c 拖拽卡片能换列并落库', dragged.ok === true && movedStatus === 'review', JSON.stringify({ dragged, status: movedStatus }))
 
   /* ⑥e 改列负责人：面板先 dryRun 预览「会让哪几张卡被派走」，取消不落库，确认后落库并提示（issue #149）。
      跑完会在 finally 里把 test 列与角色白名单恢复原样。 */
@@ -1398,6 +1450,10 @@ try {
   try {
     if (restoreColumns !== null) await saveTestColumn(restoreColumns)
     if (restoreRoles !== null) await api('/config', { roles: restoreRoles })
+    if (restoreAgents !== null) {
+      const nowAgents = (await api('/state')).json?.state?.config?.agents ?? {}
+      await api('/config', { agents: { ...nowAgents, enabled: restoreAgents.enabled } })
+    }
   } catch { /* 恢复失败不影响结论，但会在下面提一句 */ }
   if (keep !== true) {
     try {
