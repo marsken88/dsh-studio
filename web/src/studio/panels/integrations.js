@@ -711,6 +711,25 @@ export function DocsSinkPanel({ config, onChanged }) {
       fieldOf(h, 'API Key',
         h(TextField, { type: 'password', autoComplete: 'new-password', 'aria-label': 'WeKnora API Key', value: apiKey, placeholder: weknora.apiKeySet ? '已配置（留空保持不变）' : 'sk-…', onChange: event => setApiKey(event.target.value) }),
         weknora.apiKeySet ? '已保存；留空保持不变，输入新值会覆盖' : '只需要 retrieve 能力；要跑问答再加 chat'),
+      /* Key 泄漏时要能**撤销**，不能只能覆盖（GitLab token / 机器人 webhook 早就能撤了）。 */
+      weknora.apiKeySet === true
+        ? h('div', { className: ROW },
+          h(Button, {
+            variant: 'destructive', size: 'sm', disabled: busy, 'data-clear-weknora-key': '',
+            onClick: async () => {
+              if (!(await confirmDialog('清除已保存的 WeKnora API Key？清除后 WeKnora 出口会连不上，需要重新填。', { title: '清除 Key', danger: true, okText: '清除' }))) return
+              setBusy(true); setNote(null)
+              try {
+                await api('/config', { docs: { provider, perProject: Object.fromEntries(overrides.map(item => [item.id, item.provider])), weknora: { ...weknora, clearApiKey: true } } })
+                setApiKey('')
+                setNote('已清除 WeKnora API Key')
+                await onChanged?.()
+              } catch (cause) { setNote(cause instanceof Error ? cause.message : String(cause)) } finally { setBusy(false) }
+            },
+          }, '清除 Key'),
+          h('span', { className: HINT }, '撤销通道：以前只能覆盖不能清除'),
+        )
+        : null,
       fieldOf(h, '租户 ID',
         h(TextField, { value: tenantId, placeholder: '10000', onChange: event => setTenantId(event.target.value) })),
       fieldOf(h, '知识库 ID',

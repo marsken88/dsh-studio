@@ -1511,3 +1511,11 @@ header id ... and cwd identify ".../studio-t-5d1d2ad4-architect/..."` —— 宿
   `docs/manual.md §8.1`「只对脚本开放的能力」一表 + 守卫测试。**只读接口删掉对写脚本的人是破坏性变更。**
 - **需求矩阵三态**：loading / 读失败（带重试）/ 真的没有功能点分开；读失败不再伪装成空态
   （以前人会去点「＋ 加功能点」，等于在错的前提上操作）。
+
+### 同日晚（收尾批）：署名、键盘可达、撤销通道与三处静默
+
+- **署名**：代码评审 / 项目检查 / 合并门禁 / 合并 MR 的 `by` 以前写死「人」，登录后记不到操作人名下（评论署名在第九批已改，这四处漏了）。
+- **看板卡片键盘可达**：卡片只有 `onClick`，Tab 停不到、回车打不开 —— 补 `role=button` / `tabIndex=0` / Enter·Space，并给 `aria-label`。
+- **命令面板读不存在的字段**：`task.owner?.label`（owner 是字符串）、`task.requirementTitle`（卡上没有）→ 负责人两种形状都认，需求标题按 `requirementId` 回查。
+- **两处静默**：`config.testing.concurrency`（整批跑用例并发）没有输入框；抽屉「期望完成」是自由文本，填「下周」会被 `fromDateInput` 静默算成 0 —— 后者现在当场红字。
+- **两条撤销/入口**：WeKnora API Key 新增 `clearApiKey`（留空仍是「不修改」，撤销要先切回飞书，否则被「没配全」拦住）；工作台 KPI 卡改成可点、可键盘触发（落到看板）。

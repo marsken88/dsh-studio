@@ -10,14 +10,20 @@ const clip = (text, max) => (text.length > max ? text.slice(0, max - 1) + '…' 
 export function searchItems(state) {
   const items = []
   const statusLabel = new Map((state.statuses ?? []).map((entry) => [entry.id, entry.label]))
+  /* 卡上没有「需求标题」字段：要搜到它就得按 requirementId 回查一次。 */
+  const requirementTitleById = new Map((state.requirements ?? []).map(entry => [String(entry.id ?? ''), String(entry.title ?? '')]))
+  const requirementTitleOf = id => requirementTitleById.get(String(id ?? '')) ?? String(id ?? '')
   for (const task of state.tasks ?? []) {
     items.push({
       key: 'task:' + task.id,
       kind: 'task',
       id: task.id,
       label: `${task.code ?? ''} ${task.title}`.trim(),
-      hint: [statusLabel.get(task.status) ?? task.status, task.owner?.label ?? ''].filter(Boolean).join(' · '),
-      search: [task.code, task.title, task.requirementTitle, task.id].filter(Boolean).join(' ').toLowerCase(),
+      /* 负责人线上是字符串，老夹具/老数据里可能是 {label}：两种都认，别再读 undefined。 */
+      hint: [statusLabel.get(task.status) ?? task.status, typeof task.owner === 'string' ? task.owner : (task.owner?.label ?? '')].filter(Boolean).join(' · '),
+      /* 卡上没有 requirementTitle 字段（需求标题在 requirements 里）：以前读它永远是 undefined，
+         ⌘K 搜需求标题搜不到卡。这里用 requirementId 查一次标题，查不到就退回 id。 */
+      search: [task.code, task.title, requirementTitleOf(task.requirementId), task.id].filter(Boolean).join(' ').toLowerCase(),
     })
   }
   for (const requirement of state.requirements ?? []) {

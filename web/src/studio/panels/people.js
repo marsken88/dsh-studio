@@ -506,6 +506,8 @@ export function TestingPanel({ config, onChanged }) {
   const [flags, setFlags] = React.useState({ allowShell: testing.allowShell === true, allowDb: testing.allowDb === true, allowBrowser: testing.allowBrowser === true })
   const [browserPath, setBrowserPath] = React.useState(String(testing.browserPath ?? ''))
   const [shellCwdDraft, setShellCwdDraft] = React.useState(String(testing.shellCwd ?? ''))
+  /* 整批跑用例的并发：以前只能打 /config 改，界面上没有输入框。 */
+  const [concurrencyDraft, setConcurrencyDraft] = React.useState(String(testing.concurrency ?? 4))
   const [limitsDraft, setLimitsDraft] = React.useState({
     casesPerTask: config.limits?.casesPerTask ?? 60,
     runKeys: config.limits?.runKeys ?? 60,
@@ -642,7 +644,21 @@ export function TestingPanel({ config, onChanged }) {
             catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)) } finally { setBusy(false) }
           },
         })),
-      
+      /* 整批跑用例的并发（1–8）：以前只在保存载荷里带着，界面上没有输入框。 */
+      fieldOf(h, '整批跑用例的并发（1–8，默认 4）',
+        h(TextField, {
+          type: 'number',
+          'aria-label': '整批跑用例的并发',
+          value: String(concurrencyDraft),
+          onChange: e => setConcurrencyDraft(e.target.value),
+          onBlur: async () => {
+            const value = Math.min(8, Math.max(1, Math.trunc(Number(concurrencyDraft)) || 4))
+            setConcurrencyDraft(String(value))
+            setBusy(true); setNote(null)
+            try { await api('/config', { testing: { ...testing, allowShell: flags.allowShell, concurrency: value } }); setNote('已保存：并发 ' + value); await onChanged() }
+            catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)) } finally { setBusy(false) }
+          },
+        })),
     ),
     h('div', { className: SECTION, 'data-section': 'limits' },
       h('div', { className: SECTION_TITLE }, '数量上限'),
