@@ -1829,3 +1829,16 @@ header id ... and cwd identify ".../studio-t-5d1d2ad4-architect/..."` —— 宿
 
 真机：`data-diagnostics` 存在、四行、命名新旧校验 `oldNameLeft=false / newNameSeen=true`；
 `probe:panel 103/103`、`tests 812`、截图 `tmp/ui-review/analytics-2/after/analytics-p2.png`。
+
+### 同日晚（效能页 P3）：「最该看」能点、近 8 周改成条形
+
+- **结论条从纯文本变成可点去向**：它以前说「现在最该看 自动化率 13%」，却带不你去任何地方 ——
+  而解释那个数的面板就在同一页往下 800px。现在每条越线项都是一个按钮：`data-focus-goto` 指向分区，
+  点一下 `setPane()` + 回到顶部，并写明「去『交付节奏』看」这类去向。
+  真机：当前只有自动化率越线 → 1 个可点项；点击后 `data-analytics-pane=overview`、`scrollTop=0`。
+- **「近 8 周」从一串数字改成 `BarRow`**：以前是「10/05 0 · 10/12 0 · 10/19 0 …」8 个数字挤成一行，
+  看不出趋势；现在用页内已有的 `BarRow`（8 行，带 title 提示），真机实测 8 行都在。
+
+`probe:panel 103/103`、`tests 812`、截图 `tmp/ui-review/analytics-2/after/analytics-p3.png`。
+
+**剩下的两条**（「返工最多的卡」跨页签搬家、两条长列表换 KV 形态）要动区块位置，留给下一批。
