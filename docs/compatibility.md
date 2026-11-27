@@ -6,12 +6,12 @@
 
 | 项 | 值 |
 | --- | --- |
-| dsh-studio | `package.json` `version: 0.19.0` |
+| dsh-studio | `package.json` `version: 0.19.1` |
 | DeepSeek Harness | `0.2.2-rc.1`（`dsh --version`） |
 | Node | `v24.22.2`（Linux 目标机）；本机 Windows `v24.19.0` |
 | 目标系统 | Ubuntu 24.04，`dsh web` 监听 `18080`，nginx `:80` 反代并注入 `dsh-auth-*` cookie |
 | 插件安装方式 | npm：`dsh plugin --profile web add @marsken/dsh-studio`；本地开发：`add link:~/dsh-studio`（profile `web`） |
-| 验证范围 | 0.19.0：一轮完整交互审计后的收口（PR #170 的 12 个提交 + PR #171 的 1 个）。`npm test` 768 条 / 767 通过 / 1 跳过（`TZ=UTC` 同）；`verify:pages` 56、`verify:drawer` 15、`verify:tdz` 44 文件、`release:check` 7 项、产物 `cmp` 一致（1,513,713 B）；**目标机 192.168.120.218 真机**：panel 96/96、modules 41/41、a11y 29 模块 0 违规、cases 8、tiers 32、empty 11、toast 7、fields 21、selects 通过、e2e 1/1（70s）、selfcheck 3/3（215s）、smoke 通过；真机行为抽查 13/13（版本状态 400、乐观锁 409、同列不清阻塞、WeKnora 探活如实报缺项、读操作不推 revision）。0.18.4 及更早的验证记录见 git 历史。 |
+| 验证范围 | 0.19.1：效能页重做（三批：样式 / 结构 / 页签 + 口径 + 跨页容器）与一批「看起来在跑其实没数据」的修正。`npm test` 787 条 / 786 通过 / 1 跳过（`TZ=UTC` 同）；`verify:pages` 56、`verify:drawer` 15、`verify:audit` 29 模块 0 违规、`release:check` 7 项；**目标机 192.168.120.218 真机**：panel 99/99、modules 41/41、e2e 3/3；2560 宽实测五页最宽文字块 572 / 786 / 1036 / 1406 / 1438 px（以前最长 2138）；`/state` 1.34 MB → 1.05 MB。0.19.0 及更早的验证记录见 git 历史。 |
 | 兼容声明 | `engines.dsh: ">=0.2.2-rc.1"`、`dsh.compatibility.dshReleases: { "0.2.2-rc.1+": "compatible" }` |
 
 > 结论：只在 **0.2.2-rc.1** 上做过端到端验证。0.2.2 正式版、以及 `<0.2.2` 均未验证。
