@@ -726,10 +726,15 @@ html body [data-dsh-studio][data-dsh-studio-portal] {
      · hint：11.5px、不透明、用 muted-foreground（浅色 #52525b / 深色自动跟随）
      · text/secondary → neutral-600，text/tertiary → neutral-500
    只动浅色主题的 muted-foreground；深色主题本来对比度就够，不碰。 */
-:where([data-dsh-studio]) {
+/* 注意特异性：这里以前写成 `:where([data-dsh-studio])`（特异性 0），
+   而 theme.css 的变量挂在 `[data-dsh-studio],[data-dsh-studio-portal]`（0,1,0）上，
+   零特异性永远输 —— 于是「灰字统一调深」这条覆盖**从未生效**，正文一直停在 2.58:1。
+   0,1,0 对齐 + 位置在后（index.css 在 theme 之后），才真正压得住。 */
+[data-dsh-studio], [data-dsh-studio-portal] {
   --muted-foreground: #52525b;
   --color-text-secondary: var(--color-neutral-600);
   --color-text-tertiary: var(--color-neutral-500);
+  --color-text-placeholder: var(--color-neutral-500);
 }
 
 

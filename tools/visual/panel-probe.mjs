@@ -1130,6 +1130,27 @@ try {
   await new Promise(resolve => setTimeout(resolve, 1500))
   const analyticsTabs = await page.evaluate(() => [...document.querySelectorAll('[data-analytics-tab]')].map(node => String(node.textContent ?? '').trim()))
   const focusBanner = await page.evaluate(() => document.querySelector('[data-analytics-focus]')?.getAttribute('data-analytics-focus') ?? '')
+  /* ⑥g 主题变量真的生效（以前这条覆盖写成 :where()，特异性 0，永远输给 theme.css） */
+  const themeTokens = await page.evaluate(() => {
+    const root = document.querySelector('[data-dsh-studio]')
+    if (root === null) return null
+    const cs = getComputedStyle(root)
+    return {
+      tertiary: cs.getPropertyValue('--color-text-tertiary').trim(),
+      secondary: cs.getPropertyValue('--color-text-secondary').trim(),
+      mono: cs.getPropertyValue('--font-mono').trim(),
+    }
+  })
+  if (themeTokens === null) {
+    console.log('ℹ ⑥g 跳过：没找到 [data-dsh-studio] 根')
+  } else {
+    check('⑥g 灰字 token 已提升到 AA（tertiary 不再是 neutral-400）',
+      themeTokens.tertiary !== 'var(--color-neutral-400)' && themeTokens.tertiary !== '',
+      JSON.stringify(themeTokens))
+    check('⑥g --font-mono 有回退（宿主没注入 --font-mono-source 时仍然等宽）',
+      /ui-monospace|monospace/.test(themeTokens.mono),
+      themeTokens.mono.slice(0, 60))
+  }
   check('⑥d 效能页有 5 个分区页签（一问一个）',
     analyticsTabs.length === 5 && analyticsTabs.join(',') === '总览,交付节奏,AI 质量,成本,上下文',
     JSON.stringify(analyticsTabs))
