@@ -103,6 +103,8 @@ export     function RequirementsPage({ state, onOpenTask, onChanged, createSigna
       const [driveBusy, setDriveBusy] = React.useState(false)
       // ---- 功能点与可追溯矩阵：需求结构化之后，能查到「每条验收标准被谁做、被哪条用例验」
       const [matrix, setMatrix] = React.useState(null)
+      /* 矩阵的三态：loading / error / ready（ready 且 matrix==null 才是「真的没有功能点」）。 */
+      const [matrixState, setMatrixState] = React.useState({ status: 'idle', error: null })
       const [matrixNote, setMatrixNote] = React.useState(null)
       // 矩阵是整条需求的全部功能点，一屏十几行时先筛再编辑：按编号/标题/验收条件搜，或只看未覆盖。
       const [matrixQuery, setMatrixQuery] = React.useState('')
@@ -174,11 +176,17 @@ export     function RequirementsPage({ state, onOpenTask, onChanged, createSigna
       }
 
       const loadMatrix = React.useCallback(async (id) => {
-        if (id === undefined || id === null || id === '') { setMatrix(null); return }
+        if (id === undefined || id === null || id === '') { setMatrix(null); setMatrixState({ status: 'idle', error: null }); return }
+        /* 三态分开：加载中 / 读失败 / 真的没有功能点。以前读失败只在角落写一句 note，
+           主区块照样显示「还没有功能点」—— 人会去点「＋ 加功能点」，等于在错的前提上操作。 */
+        setMatrixState({ status: 'loading', error: null })
         try {
           const json = await api('/requirement/matrix', { id })
           setMatrix(json.matrix)
+          setMatrixState({ status: 'ready', error: null })
         } catch (err) {
+          setMatrix(null)
+          setMatrixState({ status: 'error', error: err instanceof Error ? err.message : String(err) })
           setMatrixNote(err.message)
         }
       }, [])
@@ -1350,9 +1358,16 @@ export     function RequirementsPage({ state, onOpenTask, onChanged, createSigna
             h('div', { className: 'text-body-2-medium text-text-primary' }, '功能点与可追溯矩阵'),
             h('div', { className: 'max-w-2xl text-caption-1-regular text-text-tertiary' }, '功能点是需求的骨架：一条功能点对若干张卡、若干条用例。卡和用例上都挂 pointId，这里就能看出哪条没人做、哪条没被验证。'),
           ),
-          matrix === null
-            ? h('div', { className: HINT, style: { padding: '8px 0' } }, '还没有功能点。点「＋ 加功能点」把需求拆成可交付、可验证的条目。')
-            : h('div', { className: 'mt-2 flex min-w-0 flex-col gap-2' },
+          matrixState.status === 'loading'
+            ? h('div', { className: HINT, style: { padding: '8px 0' }, 'data-matrix-loading': '' }, '正在读功能点与矩阵…')
+            : matrixState.status === 'error'
+              ? h('div', { className: 'flex min-w-0 flex-wrap items-center gap-2 rounded-lg border border-border-error-default bg-background-secondary-default px-3 py-2', 'data-matrix-error': '' },
+                h('span', { className: 'text-caption-1-regular text-text-error-primary' }, `读不到功能点：${matrixState.error}`),
+                h(Button, { variant: 'secondary', size: 'sm', onClick: () => void loadMatrix(current.id) }, '重试'),
+                h('span', { className: HINT }, '这不是「没有功能点」—— 先别急着加新的'))
+              : matrix === null
+                ? h('div', { className: HINT, style: { padding: '8px 0' }, 'data-matrix-empty': '' }, '还没有功能点。点「＋ 加功能点」把需求拆成可交付、可验证的条目。')
+                : h('div', { className: 'mt-2 flex min-w-0 flex-col gap-2' },
               h('div', { className: 'text-caption-1-regular text-text-secondary' },
                 `功能点 ${matrix.summary.points} · 已覆盖 ${matrix.summary.coveredPoints}${matrix.summary.pointsWithoutCases > 0 ? `（${matrix.summary.pointsWithoutCases} 条还没有用例，覆盖率 ${matrix.summary.coverageRate}%）` : ''} · 卡 ${matrix.summary.cards}（未归点 ${matrix.summary.looseCards}）· 用例 ${matrix.summary.cases}（通过 ${matrix.summary.pass}${matrix.summary.fail > 0 ? `，失败 ${matrix.summary.fail}` : ''}${matrix.summary.staleCases > 0 ? `，需复跑 ${matrix.summary.staleCases}` : ''}）· 通过率 ${matrix.summary.passRate}%`,
               ),

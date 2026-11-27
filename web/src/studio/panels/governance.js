@@ -672,7 +672,18 @@ export function HealthPanel({ state, config, onChanged }) {
     try {
       if (channel === 'gitlab') {
         const out = await api('/gitlab/sync', {})
-        setNote(out.report === undefined ? '已触发 GitLab 同步' : `已同步：${(out.report.projects ?? []).map(item => `${item.name} +${item.created}`).join('，') || '无新卡'}`)
+        /* 路由回的是 summary（不是 report）：以前读 out.report 永远是 undefined，
+           于是「同步完了新增了几张卡」从来没显示过。现在把每个项目的结果说清。 */
+        const rows = Array.isArray(out.summary?.projects) ? out.summary.projects : []
+        const created = rows.reduce((sum, item) => sum + (Number(item.created) || 0), 0)
+        const failed = rows.filter(item => item.error !== undefined)
+        const done = rows.filter(item => item.error === undefined)
+        const partial = out.summary?.partial === true
+          ? `；本轮预算内只跑了 ${rows.length} 个，剩下 ${(out.summary.skippedProjects ?? []).join('、')} 下一轮继续`
+          : ''
+        setNote(rows.length === 0
+          ? '没有可同步的项目（先配好地址 / 项目路径 / 令牌）'
+          : `已同步 ${done.length} 个项目，新建 ${created} 张卡${failed.length > 0 ? `；${failed.length} 个失败：${failed.map(item => `${item.name || item.project}（${item.error}）`).join('、')}` : ''}${partial}`)
       } else if (channel === 'drive') {
         if (firstRequirement === undefined) {
           setNote('还没有带云盘文件夹的需求，先建一条需求并归档一次。')

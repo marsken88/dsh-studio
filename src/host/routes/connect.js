@@ -83,7 +83,11 @@ if (method === 'GET' && route === '/integrations/health') {
 }
 if (method === 'POST' && route === '/gitlab/sync') {
   const body = await host.readJsonBody(req).catch(() => ({}))
-  const summary = await gitlabSync(store, body.project === undefined ? undefined : String(body.project))
+  /* budgetMs 可传（默认 45s）：项目多时一轮会超过反代的 60s，超预算就返回 partial，
+     剩下的下一轮定时同步继续，面板据此如实说「只同步了 K/N 个」。 */
+  const summary = await gitlabSync(store, body.project === undefined ? undefined : String(body.project), {
+    budgetMs: Number(body.budgetMs) || undefined,
+  })
   host.sendJson(res, 200, { ok: true, summary, state: host.publicState(store) })
   return true
 }

@@ -1497,3 +1497,17 @@ header id ... and cwd identify ".../studio-t-5d1d2ad4-architect/..."` —— 宿
 `verify:drawer` 15、`verify:tiers` 32、`release:check` 7 项；产物 `dist/client.js == client.js`。
 **还没做**：目标机真机验证（缺启动 token）、WeKnora 连接测试、`/tests/run` 与 `/gitlab/sync`
 的异步化、9 条无人调用的死路由清理。
+
+### 同日续（第九、十批）：WeKnora 探活、长任务收口、矩阵三态
+
+- **WeKnora 探活**：`probeWeknora()` 只读一次知识库列表，区分「连不上 / 401 Key 不对 /
+  能连上但看不见这个知识库」；`POST /docs/test` + 面板「测试连接」；`weknora` 成为
+  集成健康第六条通道（以前填错了那条通道根本不存在）。
+- **长任务**：`/tests/run` 改「提交即返回 202」（与 `/task/quality` 同口径，脚本传 `wait:true`）；
+  `/gitlab/sync` 加 45s 预算 + `partial`/`skippedProjects`（超预算如实说只跑了 K/N 个，
+  剩下的下一轮定时同步接着跑）。顺手修掉面板读 `out.report` 而路由回 `summary` 的字段错。
+- **不删重复入口**：审计说 `GET /requirements` 与 `GET /integrations/health` 是重复，
+  我先删了，随后发现「`/requirement/list`」根本不存在 —— 已全部回滚，改成
+  `docs/manual.md §8.1`「只对脚本开放的能力」一表 + 守卫测试。**只读接口删掉对写脚本的人是破坏性变更。**
+- **需求矩阵三态**：loading / 读失败（带重试）/ 真的没有功能点分开；读失败不再伪装成空态
+  （以前人会去点「＋ 加功能点」，等于在错的前提上操作）。
