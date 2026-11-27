@@ -167,6 +167,21 @@ async function runOnce(round) {
   return failures
 }
 
+/* 目标机开着自动派单时，派单器会把自检卡接走（改状态、写广播、abort 会话），
+   断言就会时红时绿（2026-11-27 在 218 上「需求交付」红过一次，紧接着重跑又绿）。
+   自检要确定性：整轮跑之前临时停用，结束恢复。 */
+let restoreAgents = null
+try {
+  const liveAgents = (await state())?.config?.agents ?? {}
+  if (liveAgents.enabled === true) {
+    const out = await post('/config', { agents: { ...liveAgents, enabled: false } })
+    if (out.status === 200) {
+      restoreAgents = { enabled: true }
+      console.log('ℹ 已临时停用自动派单（自检卡不该被派单器接走），结束时恢复')
+    }
+  }
+} catch { /* 读不到就当没开自动派单 */ }
+
 const started = Date.now()
 const results = []
 for (let round = 1; round <= ROUNDS; round += 1) {
@@ -174,6 +189,13 @@ for (let round = 1; round <= ROUNDS; round += 1) {
   results.push(await runOnce(round))
 }
 const passed = results.filter(f => f.length === 0).length
+if (restoreAgents !== null) {
+  try {
+    const nowAgents = (await state())?.config?.agents ?? {}
+    await post('/config', { agents: { ...nowAgents, enabled: restoreAgents.enabled } })
+    console.log('ℹ 已恢复自动派单')
+  } catch { console.log('⚠ 恢复自动派单失败：请到 设置 → 自动派单 手动打开') }
+}
 console.log('\n' + (ROUNDS > 1 ? 'k=' + ROUNDS + '：' : '') + passed + '/' + results.length + ' 轮全绿（' + Math.round((Date.now() - started) / 1000) + ' 秒）')
 if (passed !== results.length) console.log('失败明细：' + results.map((f, i) => (f.length === 0 ? '' : '第' + (i + 1) + '轮 ' + f.join('/'))).filter(Boolean).join('；'))
 process.exit(passed === results.length ? 0 : 1)

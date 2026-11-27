@@ -1707,9 +1707,8 @@ function installKeyboardActivation() {
           h('div', { className: 'flex h-full items-center justify-center p-6 text-body-2-regular text-text-secondary', 'data-loading': '' }, error === null ? '正在载入工作空间…' : `载入失败：${error}`),
         )
       }
-      if (state.locked === true) {
-        return h(LoginGateView, { config: state.config, theme: resolvedTheme, message: '', onDone: () => void reload() })
-      }
+      /* 说明：/state 从来没有 locked 字段（登录态由宿主 401 + LoginGate 处理），
+         以前这里有两个读 `locked` 的整屏分支，永远不会触发，已删除。 */
       const openTask = openId === null ? null : state.tasks.find(t => t.id === openId) ?? null
       const counts = state.tasks.reduce((acc, task) => { acc[task.status] = (acc[task.status] ?? 0) + 1; return acc }, {})
       /* 推卡被门禁拦住时，人可以直接写理由强推（override 有入口了；以前只能走 API/工具）。
@@ -1957,7 +1956,7 @@ function installKeyboardActivation() {
            表现是在 B 卡里看到 A 卡的标题，点保存把 A 的标题写到 B 上。 */
         openTask !== null ? h(Drawer, { key: openTask.id, task: openTask, state, onClose: () => setOpenId(null), onChanged: reload, onOpenTask: id => setOpenId(id) }) : null,
         creating ? h(NewTaskDialog, { state, onClose: () => setCreating(false), onCreated: reload }) : null,
-        showLogin && state.locked !== true
+        showLogin
           ? h(LoginGateView, {
               config: state.config,
               theme: resolvedTheme,

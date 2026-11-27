@@ -115,7 +115,10 @@ STUDIO_TOKEN=$(sudo journalctl -u dsh-web -n 50 | grep -o 'token=[A-Za-z0-9_-]*'
     **接口测试与单测看不见"渲染在哪个面板里"**：0.9.36 就把「评审闸门」开关插进了「数据与备份」面板，
     全绿但设置页看不到。探针自己造带「（探针）」标记的数据、跑完自删；没装 puppeteer-core 或没 Chrome 时**跳过不判红**。
     改判据：在 `tools/visual/panel-probe.mjs` 的 `check(...)` 列表里加，别写一次性脚本。
-    **它已经挂在 `npm run release:preflight` 的 `--probes` 里**（发版前固定跑，96 项）：只手工跑等于没跑——
+    **它跑之前会临时停用自动派单、结束恢复**：目标机开着派单器时，探针造的卡会被接走（改状态、写播报、abort 会话），
+    同一套判据会时红时绿（2026-11-27 在 218 上「子卡」「拖拽」「需求交付」轮流红）。`tools/e2e-loop.mjs` 同样处理。
+
+    **它已经挂在 `npm run release:preflight` 的 `--probes` 里**（发版前固定跑，98 项）：只手工跑等于没跑——
     2026-11-26 的「抽屉里 statusLabelOf 未定义、整页渲染失败」就是它抓到的，而 `npm test` 与 `verify:pages` 全绿。
 ## 4.5 需求澄清（比代码更靠前的一道门）
 

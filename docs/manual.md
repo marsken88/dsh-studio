@@ -355,6 +355,9 @@ studio_task_check          { id, itemId, note }         // 清单逐项勾，附
 | 审计导出 | `GET /studio-api/audit/export.csv`（仅本机） | 同上 |
 | 探活某个模型通道 | `POST /studio-api/agents/probe` | 派单失败时由巡检脚本调用 |
 | 把订阅的会话从工作区摘掉 | `POST /studio-api/workspace/detach` | 管理动作用 `tools/workspace-dedupe.mjs` 走 |
+| 核对自报的代码事实（自动采集） | `POST /studio-api/task/verify-coding {id}` | 与面板的「核对代码事实」不同：那条是**对账**（`/task/coding/verify`，人看报告），这条是**采集**（把 worktree 的 git 事实补成一条执行记录）。卡进「待评审」时平台会自动跑一次，所以没有按钮 |
+| 用例套件清单 | `GET /studio-api/suite/list` | 面板的套件区读的是 `/cases`（一次带 suites + counts）；这个接口留给脚本单独列套件 |
+| 列出 / 删除工作区 | `GET /studio-api/workspace/list`、`POST /studio-api/workspace/delete` | 管理工作区用 `tools/workspace-dedupe.mjs`；面板不提供删除（删错会把整棵会话树挪走） |
 | 多维表格镜像 | 面板已有按钮（设置 → 飞书机器人）；接口 `POST /studio-api/feishu/mirror` | — |
 | 需求带进度的一览 | `GET /studio-api/requirements` | 面板用的是 `/state` 里的需求 + 抽屉里的矩阵；这个接口留给脚本 |
 | 只读一份集成健康 | `GET /studio-api/integrations/health` | 与 `/state` 的 `integrations` 同一份 `healthReport()`，给监控脚本用（省掉整包） |
