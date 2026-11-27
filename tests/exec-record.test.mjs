@@ -59,3 +59,12 @@ test('上下文与评审意见默认折叠（600 字 note 不再整段铺开）'
   assert.match(s, /'data-review-note-full': ''/, '评审意见要折叠')
   assert.match(s, /text-caption-1-medium text-text-secondary' \},\s*`评审意见/, 'label（谁·何时）与正文要分开')
 })
+
+test('P2：提交列表折叠 + 行内 code 有容器 + 空态文案不重复', () => {
+  const s = drawer()
+  assert.match(s, /'data-coding-commits': ''/, '本块提交要折叠')
+  assert.match(s, /'data-gitlab-commits': ''/, 'GitLab 提交要折叠')
+  assert.match(s, /const CODE_CHIP = 'shrink-0 rounded bg-background-secondary-default px-1 font-mono/, '行内 code 要容器 + 等宽 + 字阶')
+  assert.match(s, /h\('code', \{ className: CODE_CHIP \}/, '提交号要用它')
+  assert.ok(!/hint: '改代码要留记录：谁、什么模型、改了什么。'/.test(s), '空态 hint 不该与小节说明逐字重复')
+})
