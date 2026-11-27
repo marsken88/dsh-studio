@@ -106,7 +106,7 @@ const imports = [
   "import { DashboardPage } from './studio/pages/insights.js'",
   "import { CasesPage } from './studio/pages/cases.js'",
   "import { BurnChart, ProgressField } from './studio/charts.js'",
-  "import { IntakePage, RequirementsPage } from './studio/pages/requirements.js'",
+  "import { RequirementsPage } from './studio/pages/requirements.js'",
   "import { createProjectsPage } from './studio/pages/projects.js'",
   "import { ReleasesPage } from './studio/pages/releases.js'",
   "import { AnalyticsPage } from './studio/pages/analytics.js'",

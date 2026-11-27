@@ -183,6 +183,35 @@ export function BotsPanel({ config, onChanged }) {
   const [autoSync, setAutoSync] = React.useState(config.feishu?.autoSyncArtifacts !== false)
   const [driveBusy, setDriveBusy] = React.useState(false)
   const [driveNote, setDriveNote] = React.useState(null)
+  /* 多维表格镜像：卡片 → 飞书表格，一条记录一张卡。以前后端有 /feishu/mirror，
+     但设置页填不了 baseToken / tableId、也没有触发按钮，等于这条能力不存在。 */
+  const [baseToken, setBaseToken] = React.useState(config.feishu?.baseToken ?? '')
+  const [tableId, setTableId] = React.useState(config.feishu?.tableId ?? '')
+  const [mirrorBusy, setMirrorBusy] = React.useState(false)
+  const [mirrorNote, setMirrorNote] = React.useState(null)
+  const saveBitable = async () => {
+    setMirrorBusy(true); setMirrorNote(null)
+    try {
+      await api('/config', { feishu: { baseToken: baseToken.trim(), tableId: tableId.trim() } })
+      setMirrorNote('已保存')
+      await onChanged()
+    } catch (cause) { setMirrorNote(cause instanceof Error ? cause.message : String(cause)) } finally { setMirrorBusy(false) }
+  }
+  const runMirror = async dryRun => {
+    setMirrorBusy(true); setMirrorNote(null)
+    try {
+      const out = await api('/feishu/mirror', { dryRun: dryRun === true })
+      // 返回形状：dryRun → {cards, batches}；真写 → {cards, created, batches}
+      const total = Number(out.cards ?? 0)
+      const written = Number(out.created ?? 0)
+      setMirrorNote(out.ok === true
+        ? (dryRun === true
+          ? `演练完成：共 ${total} 张卡、会分 ${(out.batches ?? []).length || 1} 批写（没有真写）`
+          : `已写入 ${written}/${total} 条`)
+        : `没写成功：${String(out.error ?? '先确认多维表格的 baseToken / tableId，以及 lark-cli 的授权')}`)
+      if (dryRun !== true) await onChanged()
+    } catch (cause) { setMirrorNote(cause instanceof Error ? cause.message : String(cause)) } finally { setMirrorBusy(false) }
+  }
   const saveDrive = async () => {
     setDriveBusy(true); setDriveNote(null)
     try {
@@ -266,6 +295,24 @@ export function BotsPanel({ config, onChanged }) {
       h('div', { className: ROW },
         h('Button', { variant: 'primary', size: 'sm', disabled: driveBusy, onClick: () => void saveDrive() }, driveBusy ? '保存中…' : '保存'),
         driveNote !== null ? h('div', { className: HINT, role: 'status' }, driveNote) : null,
+      ),
+    ),
+    h('div', { className: SECTION, 'data-section': 'bitable' },
+      h('div', { className: SECTION_TITLE }, '多维表格镜像（卡片 → 飞书表格）'),
+      fieldOf(h, '多维表格 baseToken / 链接',
+        h(TextField, {
+          value: baseToken, placeholder: 'bascn… 或多维表格链接',
+          onChange: e => setBaseToken(e.target.value),
+        }),
+        '一条记录 = 一张卡，200 条一批串行写。'),
+      fieldOf(h, '数据表 tableId',
+        h(TextField, { value: tableId, placeholder: 'tbl…', onChange: e => setTableId(e.target.value) }),
+        '表里要有「编号/标题/状态/负责人/优先级/需求/更新时间」这几列。'),
+      h('div', { className: ROW },
+        h('Button', { variant: 'primary', size: 'sm', disabled: mirrorBusy, onClick: () => void saveBitable() }, mirrorBusy ? '保存中…' : '保存'),
+        h('Button', { variant: 'secondary', size: 'sm', disabled: mirrorBusy, onClick: () => void runMirror(true) }, '演练'),
+        h('Button', { variant: 'secondary', size: 'sm', disabled: mirrorBusy || baseToken.trim() === '' || tableId.trim() === '', onClick: () => void runMirror(false) }, '镜像到表格'),
+        mirrorNote !== null ? h('div', { className: HINT, role: 'status', 'data-bitable-note': '' }, mirrorNote) : null,
       ),
     ),
     draft === null ? null : h(SideDrawer, {

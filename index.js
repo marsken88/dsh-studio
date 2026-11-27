@@ -30,6 +30,7 @@ export const inject = ['tools', 'systemPrompt']
 import { assertConfigKeys, sanitizeProjectFolders, ACCESS_ROLE_LABEL, ACCESS_ROLES, ADMIN_ROUTES, ARTIFACT_KINDS, ARTIFACT_STATUS, CASE_HTTP_METHODS, CASE_PRIORITIES, CASE_RESULTS, CASE_TYPE_LABEL, CASE_TYPES, cleanId, CODING_FILE_CHANGES, CODING_REVIEW_STATUS, codingSummary, COLUMN_STRATEGIES, DEFAULT_ROLES, defaultColumns, defaultConfig, defaultDeployEnvs, defaultTemplates, DEPLOY_ENV_KINDS, FALLBACK_AGENT_MODEL, hashLocalPassword, ISOLATION_MODES, LEGACY_BLOCKED_STATUS, LEVEL_RANK, LOCAL_DEFAULT_PASSWORD, mergeCoding, mergeConfig, mergeSection, nextRequirementCode, normalizePatch, normalizeStrategy, publicArtifact, publicCases, publicChecklist, publicComments, PRIORITIES, ROLE_LABELS, roleIdsOf, rolesInColumns, canonicalAuthor, RELEASE_STATUSES, RELEASE_STATUS_LABEL, REQ_DOC_KIND_LABEL, REQ_DOC_KINDS, REQ_DOC_STATUS, REQ_REVIEW_LABEL, REQ_REVIEW_STATUS, REQ_STATUS_LABEL, REQ_STATUSES, ROLE_IDS, ROLE_LEVEL, SANDBOX_MODES, sanitizeAccess, sanitizeAllowHosts, sanitizeArtifact, sanitizeArtifacts, sanitizeBaseline, sanitizeBots, sanitizeBugSource, sanitizeCase, sanitizeCaseHttp, sanitizeCaseRun, sanitizeCases, sanitizeChangedFile, sanitizeChangedFiles, sanitizeChecklist, sanitizeChecklistItem, sanitizeCaseGate, sanitizeCoding, sanitizeColumns, sanitizeCommit, sanitizeCommits, sanitizeCosts, sanitizeDeployEnvs, sanitizeEnvs, sanitizeExperts, sanitizeIterations, sanitizeLdap, sanitizeLocalAuth, sanitizeProjects, sanitizeReqDoc, sanitizeReqDocs, sanitizeRelease, sanitizeRequirement, sanitizeRequirementChange, sanitizeRequirementGate, sanitizeRequirementHistory, sanitizeRequirementPoint, sanitizeRequirementPoints, sanitizeRequirementPool, sanitizeRequirementQuestions, sanitizeRequirementReview, sanitizeRequirements, sanitizeReviewGate, sanitizeServices, sanitizeSla, sanitizeRoles, sanitizeTeams, sanitizeTemplates, sanitizeTesting, sanitizeTestRun, sanitizeTestRuns, sanitizeUsers, sanitizeWorkProjects, seedExperts, SEVERITIES, STATUS_IDS, STATUS_SET, STATUSES, TASK_TYPES, text, verifyLocalPassword, worktreeRoot } from './src/host/domain.js'
 import { withClarifyHistoryItem } from './src/host/acceptance.js'
 import { auditSummary, sanitizeAuditEntry } from './src/host/audit.js'
+import { workloadOf } from './src/host/workload.js'
 import { nextCodeForTask } from './src/host/task-code.js'
 import { accessLevelFor, checkAccess, isCrossSiteRequest, isLoopbackRequest, isReadOnlyPost, needsConfirm, needsLocalSource, trustOutcomeFor } from './src/host/access.js'
 import { Dispatcher, RUN_LOG, attachRunLog, claimDispatchLock, clearAgentFailure, configureDispatcher, noteAgentFailure, parseMentions, runSummary } from './src/host/dispatcher.js'
@@ -2114,40 +2115,13 @@ function bugSla(task, config) {
   return { severity, hours, dueAt, closedAt, remaining, state }
 }
 
-/** 每个专家手上还有多少活：在办卡、正在跑、近 7 天完成、逾期缺陷。 */
-function workloadReport(state, runningList = []) {
-  const now = Date.now()
-  const week = 7 * 86_400_000
-  const runningBy = new Map()
-  for (const info of runningList) runningBy.set(info.expert, (runningBy.get(info.expert) ?? 0) + 1)
-  const experts = (state.config.experts ?? []).map(expert => {
-    let open = 0
-    let done7d = 0
-    let overdue = 0
-    for (const task of state.tasks) {
-      const owner = task.dispatch?.expert || task.expert || ''
-      if (owner !== expert.id) continue
-      if (task.status === 'done') {
-        if (now - (Number(task.updatedAt) || 0) <= week) done7d += 1
-        continue
-      }
-      open += 1
-      const sla = bugSla(task, state.config)
-      if (sla !== null && sla.state === 'overdue') overdue += 1
-    }
-    return {
-      id: expert.id,
-      name: expert.name,
-      emoji: expert.emoji,
-      domain: expert.domain,
-      enabled: expert.enabled !== false,
-      running: runningBy.get(expert.id) ?? 0,
-      open,
-      done7d,
-      overdue,
-    }
-  })
-  return { experts: experts.sort((a, b) => (b.running - a.running) || (b.open - a.open)), busy: experts.filter(item => item.running > 0).length }
+/** 每个专家手上还有多少活：在办卡、正在跑、近 7 天完成、逾期缺陷。
+ *
+ *  实现在 src/host/workload.js（纯汇总，index.js 有 2700 行棘轮）；
+ *  缺陷 SLA 要读 config，由这里注入。`project` 与效能页其它面板同一口径。
+ */
+function workloadReport(state, runningList = [], options = {}) {
+  return workloadOf(state, runningList, { bugSla }, options)
 }
 
 /** 燃尽：近 N 天每天结束时的剩余卡数（按创建/完成时间回推）。 */

@@ -33,7 +33,7 @@ import { ReposPanel, BotsPanel, SkillsPanel, DocsSinkPanel } from './studio/pane
 import { DashboardPage } from './studio/pages/insights.js'
 import { CasesPage } from './studio/pages/cases.js'
 import { BurnChart, ProgressField } from './studio/charts.js'
-import { IntakePage, RequirementsPage } from './studio/pages/requirements.js'
+import { RequirementsPage } from './studio/pages/requirements.js'
 import { createProjectsPage } from './studio/pages/projects.js'
 import { ReleasesPage } from './studio/pages/releases.js'
 import { AnalyticsPage } from './studio/pages/analytics.js'
@@ -1044,6 +1044,10 @@ html[data-dsh-theme="light"] [class*="rightbarCol"] { background: #fafafa !impor
         agentsGrouping: config.agents?.workspaceGrouping === 'requirement' ? 'requirement' : 'card',
         agentsWorktreeRoot: config.agents?.worktreeRoot ?? '',
         agentsCleanup: config.agents?.cleanupWorktree ?? 'manual',
+        /* 自动重试三件套（以前只能 curl /config 改）：次数 / 首次冷却 / 倍率。 */
+        agentsRetryMax: String(config.agents?.retry?.max ?? 2),
+        agentsRetryBase: String(Math.round((Number(config.agents?.retry?.baseMs ?? 60000) || 60000) / 1000)),
+        agentsRetryFactor: String(config.agents?.retry?.factor ?? 2),
         agentsAuto: Array.isArray(config.agents?.autoStatuses) ? config.agents.autoStatuses : ['clarify', 'design', 'dev_ready', 'dev', 'review', 'test', 'accept'],
       })
       const [status, setStatus] = React.useState(null)
@@ -1108,6 +1112,16 @@ html[data-dsh-theme="light"] [class*="rightbarCol"] { background: #fafafa !impor
               worktreeRoot: form.agentsWorktreeRoot,
               cleanupWorktree: form.agentsCleanup,
               autoStatuses: form.agentsAuto,
+              /* 重试三件套：秒 → 毫秒；非数字就别发，免得把已有配置改成 NaN。 */
+              ...(Number.isFinite(Number(form.agentsRetryMax)) || Number.isFinite(Number(form.agentsRetryBase)) || Number.isFinite(Number(form.agentsRetryFactor))
+                ? {
+                  retry: {
+                    ...(Number.isFinite(Number(form.agentsRetryMax)) ? { max: Number(form.agentsRetryMax) } : {}),
+                    ...(Number.isFinite(Number(form.agentsRetryBase)) ? { baseMs: Math.round(Number(form.agentsRetryBase) * 1000) } : {}),
+                    ...(Number.isFinite(Number(form.agentsRetryFactor)) ? { factor: Number(form.agentsRetryFactor) } : {}),
+                  },
+                }
+                : {}),
             },
           })
           setStatus('已保存')

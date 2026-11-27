@@ -242,11 +242,49 @@ export function AccessPanel({ state, config, onChanged }) {
 }
 
 export function ColumnsPanel({ state, onChanged }) {
-  const { h, sessionToken, api, toast, currentUser, confirmDialog, TextField, ChipField, CheckField, SwitchToggle, SelectField , React } = client()
+  const { h, sessionToken, api, toast, currentUser, confirmDialog, TextField, TextAreaField, ChipField, CheckField, SwitchToggle, SelectField , React } = client()
   const config = state.config
   const [error, setError] = React.useState(null)
   const [notice, setNotice] = React.useState(null)
   const [busy, setBusy] = React.useState(false)
+  /* 缺陷 SLA（小时）与默认验收模板：与闸门同一页，因为它们都决定「卡怎么被收口」。 */
+  const [slaDraft, setSlaDraft] = React.useState(() => ({
+    p0: String(config.sla?.p0 ?? 4),
+    p1: String(config.sla?.p1 ?? 24),
+    p2: String(config.sla?.p2 ?? 72),
+    p3: String(config.sla?.p3 ?? 168),
+  }))
+  const [slaNote, setSlaNote] = React.useState(null)
+  const [templateDraft, setTemplateDraft] = React.useState(() => ({
+    dev: (config.templates?.dev ?? []).join('\n'),
+  }))
+  const [templateNote, setTemplateNote] = React.useState(null)
+  const saveSla = async () => {
+    setBusy(true); setError(null); setSlaNote(null)
+    try {
+      const patch = {}
+      for (const level of ['p0', 'p1', 'p2', 'p3']) {
+        const value = Number(slaDraft[level])
+        if (Number.isFinite(value) && value > 0) patch[level] = Math.round(value)
+      }
+      const out = await api('/config', { sla: patch })
+      const saved = out?.state?.config?.sla ?? patch
+      setSlaDraft({ p0: String(saved.p0), p1: String(saved.p1), p2: String(saved.p2), p3: String(saved.p3) })
+      setSlaNote('已保存：超时按新时限算')
+      await onChanged()
+    } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)) } finally { setBusy(false) }
+  }
+  const saveTemplates = async () => {
+    setBusy(true); setError(null); setTemplateNote(null)
+    try {
+      const items = String(templateDraft.dev ?? '').split('\n').map(line => line.trim()).filter(line => line !== '').slice(0, 12)
+      const out = await api('/config', { templates: { ...(config.templates ?? {}), dev: items } })
+      const saved = out?.state?.config?.templates?.dev ?? items
+      setTemplateDraft({ dev: saved.join('\n') })
+      setTemplateNote(`已保存：之后新建开发卡会带 ${saved.length} 条`)
+      await onChanged()
+    } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)) } finally { setBusy(false) }
+  }
   const [openFor, setOpenFor] = React.useState(null)
   const [query, setQuery] = React.useState('')
   const statuses = state.statuses ?? []
@@ -420,6 +458,39 @@ export function ColumnsPanel({ state, onChanged }) {
         }, acceptanceGateEnabled ? '拆卡验收条件闸门：已开启' : '拆卡验收条件闸门：已关闭'),
       ),
       error !== null ? h('div', { className: ERR, role: 'alert' }, error) : null,
+    ),
+    /* 缺陷 SLA 与默认验收模板：后端早就有（config.sla / config.templates），但没入口，
+       想改只能 curl /config。SLA 决定工作台的「缺陷超时」，模板决定新建卡带哪些验收清单。 */
+    h('div', { className: SECTION, 'data-section': 'sla-templates' },
+      h('div', { className: SECTION_TITLE }, '缺陷 SLA 与默认验收清单'),
+      h('div', { className: DESC }, 'SLA = 缺陷应修时限（小时），超时在工作台与卡面标红；默认验收清单是新建开发卡时自动带的条目，一行一条（≤12）。'),
+      h('div', { className: ROW },
+        ['p0', 'p1', 'p2', 'p3'].map(level => h('div', { key: level, className: 'flex min-w-0 flex-col gap-1', style: { flex: '0 1 120px' } },
+          h('label', { className: 'text-caption-2-medium text-text-secondary' }, `${level.toUpperCase()} 小时内修完`),
+          h(TextField, {
+            'aria-label': `${level.toUpperCase()} 缺陷时限（小时）`,
+            type: 'number',
+            value: slaDraft[level],
+            onChange: e => setSlaDraft({ ...slaDraft, [level]: e.target.value }),
+          }),
+        )),
+        h(Button, { variant: 'primary', size: 'sm', disabled: busy, onClick: () => void saveSla() }, '保存 SLA'),
+      ),
+      slaNote === null ? null : h('div', { className: OK, role: 'status', 'data-sla-note': '' }, slaNote),
+      h('div', { className: 'flex min-w-0 flex-col gap-1' },
+        h('label', { className: 'text-caption-2-medium text-text-secondary' }, '开发卡的默认验收清单'),
+        h(TextAreaField, {
+          rows: 3,
+          'aria-label': '开发卡的默认验收清单',
+          placeholder: '一行一条，例如：改动的接口有可执行用例',
+          value: templateDraft.dev,
+          onChange: e => setTemplateDraft({ ...templateDraft, dev: e.target.value }),
+        }),
+        h('div', { className: ROW },
+          h(Button, { variant: 'primary', size: 'sm', disabled: busy, onClick: () => void saveTemplates() }, '保存模板'),
+          templateNote === null ? null : h('div', { className: HINT, role: 'status', 'data-template-note': '' }, templateNote),
+        ),
+      ),
     ),
     notice !== null ? h('div', { className: OK, role: 'status', 'data-column-notice': '1' }, notice) : null,
     h('div', { className: SECTION, 'data-section': 'column-owners' },      h('div', { className: SECTION_HEAD },

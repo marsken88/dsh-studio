@@ -505,6 +505,7 @@ export function TestingPanel({ config, onChanged }) {
   const [note, setNote] = React.useState(null)
   const [flags, setFlags] = React.useState({ allowShell: testing.allowShell === true, allowDb: testing.allowDb === true, allowBrowser: testing.allowBrowser === true })
   const [browserPath, setBrowserPath] = React.useState(String(testing.browserPath ?? ''))
+  const [shellCwdDraft, setShellCwdDraft] = React.useState(String(testing.shellCwd ?? ''))
   const [limitsDraft, setLimitsDraft] = React.useState({
     casesPerTask: config.limits?.casesPerTask ?? 60,
     runKeys: config.limits?.runKeys ?? 60,
@@ -628,6 +629,20 @@ export function TestingPanel({ config, onChanged }) {
             catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)) } finally { setBusy(false) }
           },
         })),
+      /* shell 用例的默认工作目录：用例里给了 cwd 就用它的，没给就用这里。
+         以前只能在 /config 里改，界面上完全看不到（表现是「命令跑了但找不到文件」）。 */
+      fieldOf(h, 'shell 用例的默认工作目录（留空 = 进程当前目录）',
+        h(TextField, {
+          value: shellCwdDraft, placeholder: '例如 /srv/app 或 E:/work/repo',
+          'aria-label': 'shell 用例的默认工作目录',
+          onChange: e => setShellCwdDraft(e.target.value),
+          onBlur: async () => {
+            setBusy(true); setNote(null)
+            try { await api('/config', { testing: { ...testing, allowShell: flags.allowShell, shellCwd: shellCwdDraft } }); setNote('已保存'); await onChanged() }
+            catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)) } finally { setBusy(false) }
+          },
+        })),
+      
     ),
     h('div', { className: SECTION, 'data-section': 'limits' },
       h('div', { className: SECTION_TITLE }, '数量上限'),

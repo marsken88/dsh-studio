@@ -242,6 +242,57 @@ try {
   check('设置 → 列的负责人能打开并按角色位出候选（运营）', columnNav === true && opened === true && hasRole('运营'), `nav=${columnNav} open=${opened} 运营=${hasRole('运营')}`)
   check('自定义岗位（finance）也出现在列候选里', hasRole('finance'), candidates.filter(text => text.startsWith('角色 · ')).join(' / '))
 
+  /* 设置里那些「后端有、界面没有」的配置项，现在必须有入口。
+     这一组判据盯的是「加完却没渲染出来」：面板崩掉时 pageerror 是空的（AGENTS §11），
+     只有按 DOM 量控件才算数。 */
+  const openSettingsSection = async prefix => {
+    const ok = await page.evaluate(want => {
+      const el = [...document.querySelectorAll('[data-settings-nav-item]')]
+        .find(node => String(node.textContent ?? '').trim().startsWith(want))
+      if (el === undefined || el === null) return false
+      el.click()
+      return true
+    }, prefix)
+    await sleep(700)
+    return ok
+  }
+  const countIn = (selector, within) => page.evaluate((sel, scope) => {
+    const root = scope === undefined || scope === null || scope === '' ? document : document.querySelector(scope)
+    if (root === null) return 0
+    return root.querySelectorAll(sel).length
+  }, selector, within)
+  const textHas = (needle, scope) => page.evaluate((want, sel) => {
+    const root = sel === '' ? document : document.querySelector(sel)
+    if (root === null) return false
+    return String(root.textContent ?? '').includes(want)
+  }, needle, scope)
+
+  /* 列的负责人 → 缺陷 SLA 与默认验收清单 */
+  await openSettingsSection('列的负责人')
+  const slaSection = await countIn('[data-section="sla-templates"]')
+  const slaInputs = await page.evaluate(() => [...document.querySelectorAll('[aria-label$="缺陷时限（小时）"]')].length)
+  const templateBox = await countIn('[aria-label="开发卡的默认验收清单"]')
+  check('列的负责人里有「缺陷 SLA 与默认验收清单」并能填', slaSection === 1 && slaInputs === 4 && templateBox === 1, 'section=' + slaSection + ' inputs=' + slaInputs + ' template=' + templateBox)
+
+  /* 自动派单 → 重试三件套 */
+  await openSettingsSection('自动派单')
+  const retryMax = await countIn('[aria-label="自动重试最多几次"]')
+  const retryBase = await countIn('[aria-label="第一次冷却（秒）"]')
+  const retryFactor = await countIn('[aria-label="每次翻几倍"]')
+  check('自动派单里有重试次数 / 冷却 / 倍率三个输入', retryMax === 1 && retryBase === 1 && retryFactor === 1, 'max=' + retryMax + ' base=' + retryBase + ' factor=' + retryFactor)
+
+  /* 飞书机器人 → 多维表格镜像（baseToken / tableId / 演练 / 镜像） */
+  await openSettingsSection('飞书机器人')
+  const bitableSection = await countIn('[data-section="bitable"]')
+  const hasMirror = await textHas('镜像到表格', '[data-section="bitable"]')
+  const hasDryRun = await textHas('演练', '[data-section="bitable"]')
+  check('飞书机器人里有「多维表格镜像」并能演练 / 真写', bitableSection === 1 && hasMirror === true && hasDryRun === true, 'section=' + bitableSection + ' mirror=' + hasMirror + ' dry=' + hasDryRun)
+
+  /* 测试执行 → shell 用例默认工作目录 */
+  await openSettingsSection('测试执行')
+  const shellCwd = await countIn('[aria-label="shell 用例的默认工作目录"]')
+  check('测试执行里能配 shell 用例的默认工作目录', shellCwd === 1, String(shellCwd))
+
   /* 设置 → 专家：角色位白名单要能在界面上加/删（issue #150）。
      没有这个入口时「加财务岗位」只能手打 POST /config —— 能力在接口里、界面不可达。 */
   const expertsNav = await page.evaluate(() => {
