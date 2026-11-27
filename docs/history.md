@@ -1619,3 +1619,28 @@ header id ... and cwd identify ".../studio-t-5d1d2ad4-architect/..."` —— 宿
 
 验证：`verify:pages` 56/56、218 真机 `probe:panel` 99/99、`verify:audit` 29 模块 0 违规；
 2560 实测五页最宽文字块 572 / 786 / 1036 / 1406 / **1438** px。
+
+### 同日晚（执行记录评审 follow-up batch 1）：三个「静默失效」的主题变量
+
+三位专家（UI / 视觉验收 / UX）对「AI Coding 执行记录」评审时，视觉验收把根因挖到了 token 层，且三条都**与这一块无关、影响全站**：
+
+1. **灰字覆盖从未生效**：`web/src/index.css` 里「统一把灰字调深」那段挂在 `:where([data-dsh-studio])`（特异性 **0**），
+   而 `theme.css` 的变量挂在 `[data-dsh-studio],[data-dsh-studio-portal]`（0,1,0）—— 零特异性永远输。
+   于是正文灰字一直停在 `neutral-400`（白底 **2.58:1**，AA 要 4.5）。
+   改成 0,1,0 + 位置在后（index.css 在 theme 之后），**实测 token 现在解到 neutral-500 / neutral-600**。
+2. **深色主题没有 `--color-text-secondary`**：只改了 tertiary，secondary 一路继承浅色的 neutral-500，
+   落在 neutral-800 底上约 2.6:1；分隔线 `--color-separator-border` 又等于面板底色（**1.00:1**，卡片没有边界）。
+   现在深色显式给 `secondary=neutral-300`、`tertiary=neutral-400`、`separator=neutral-600`。
+3. **`--font-mono` 的 `var()` 没有回退**：`var(--font-mono-source), ui-monospace, …` 里宿主没注入这个变量时
+   **整条 font-family 声明失效** → 所有「等宽」文本（文件 chip、提交号）其实用的是正文字体。
+   补成 `var(--font-mono-source, ui-monospace)`。
+
+真机取证（218，`probe:panel` 新增 ⑥g）：
+`--color-text-tertiary = oklch(55.6% 0 none)`（neutral-500）、`--color-text-secondary = oklch(43.9% 0 none)`（neutral-600）、
+`--font-mono = ui-monospace, "SFMono-Regular", Menlo, Consolas, …`。`panel: 101/101`、`pages 56/56`、`a11y 29 模块 0 违规`。
+
+新增 `tests/theme-tokens.test.mjs` 三条守卫（覆盖不许挂 `:where()`、深色必须自定义 secondary/separator、
+`--font-mono` 必须有回退）。
+
+**未做**：执行记录这一块本身的结构重排（结论行上移、统计条、折叠、按钮权重、状态上色、去掉「标记已合并」）
+—— 那是下一批，专家给了完整清单。

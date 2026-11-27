@@ -58,7 +58,7 @@
   /* Monospace ramp for code blocks. Loaded via next/font in app/layout.tsx
    * (--font-mono-source → JetBrains Mono). Figma's spec uses IBM Plex Mono;
    * JetBrains Mono is the closest already-bundled face. */
-  --font-mono: var(--font-mono-source), ui-monospace, "SFMono-Regular", Menlo,
+  --font-mono: var(--font-mono-source, ui-monospace), "SFMono-Regular", Menlo,
                Consolas, "Liberation Mono", monospace;
 
   /* ----- Radii ---------------------------------------------------------------
@@ -439,7 +439,10 @@
 
   /* Text */
   --color-text-primary:  var(--color-neutral-50);
-  --color-text-tertiary: var(--color-neutral-600);
+  /* 深色主题以前只改了 tertiary，**没有** --color-text-secondary —— 灰字一路继承浅色的
+     neutral-500，落在 neutral-800 的底色上只有 ~2.6:1。两个都按 AA 提到 neutral-400/300。 */
+  --color-text-secondary:       var(--color-neutral-300);
+  --color-text-tertiary:        var(--color-neutral-400);
   --color-text-disabled: var(--color-neutral-800);
   --color-text-error-primary: var(--color-red-400);
   --color-text-destructive: color-mix(in srgb, var(--color-red-500) 80%, var(--color-neutral-500));
@@ -568,7 +571,7 @@
   --color-border-table:            var(--color-neutral-800);
   --color-border-button-group:     color-mix(in srgb, var(--color-neutral-600) 60%, transparent);
   --color-border-sidebar-profile-hover: var(--color-neutral-600);
-  --color-separator-border:        var(--color-neutral-800);
+  --color-separator-border:        var(--color-neutral-600);
   --color-separator-border-strong: color-mix(in srgb, var(--color-neutral-700) 60%, transparent);
 
   /* Figma's dark table status pairs. */
