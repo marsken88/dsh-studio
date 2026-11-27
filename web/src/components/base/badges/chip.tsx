@@ -37,7 +37,8 @@ export interface ChipProps extends HTMLAttributes<HTMLSpanElement> {
 }
 
 const styles = sortCx({
-  base: "inline-flex items-center justify-center rounded-md px-1 whitespace-nowrap transition-[padding,font-size] duration-200 ease",
+  /* 设计文档写的是左右 6px（视觉验收实测现在是 4px，与文件 chip 的 8px 也不同档）。 */
+    base: "inline-flex items-center justify-center rounded-md px-1.5 whitespace-nowrap transition-[padding,font-size] duration-200 ease",
   variant: {
     bold: "py-0.5 text-body-medium",
     subtle: "py-1 text-body-medium",

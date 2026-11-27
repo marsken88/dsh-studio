@@ -28,5 +28,5 @@ test('--font-mono 的 var() 必须有回退（宿主没注入 --font-mono-source
   const theme = source('web/src/boardui/theme.css')
   const line = theme.split(/\r?\n/).find(text => text.includes('--font-mono:'))
   assert.ok(line !== undefined, '找不到 --font-mono 声明')
-  assert.match(line, /var\(--font-mono-source,\s*ui-monospace\)/, '要给 ui-monospace 当回退')
+  assert.match(line, /var\(--font-mono-source,\s*["']?JetBrains Mono["']?\)[\s\S]*ui-monospace/, '要给 ui-monospace 当回退')
 })

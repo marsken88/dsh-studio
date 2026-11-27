@@ -58,7 +58,7 @@
   /* Monospace ramp for code blocks. Loaded via next/font in app/layout.tsx
    * (--font-mono-source → JetBrains Mono). Figma's spec uses IBM Plex Mono;
    * JetBrains Mono is the closest already-bundled face. */
-  --font-mono: var(--font-mono-source, ui-monospace), "SFMono-Regular", Menlo,
+  --font-mono: var(--font-mono-source, "JetBrains Mono"), ui-monospace, "SFMono-Regular", Menlo,
                Consolas, "Liberation Mono", monospace;
 
   /* ----- Radii ---------------------------------------------------------------

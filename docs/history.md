@@ -1697,3 +1697,18 @@ header id ... and cwd identify ".../studio-t-5d1d2ad4-architect/..."` —— 宿
 **又一次「改坏了才发现」**：这一批我先用固定行数替换两段提交列表，行数对不上 → 括号失衡、语法报错；
 `git checkout -- drawer.js` 回滚后改成「按锚点找块 + 确认末行是 `),`」再替换，一次过。
 教训与上一批同源：**替换前先验证块的首尾形状，不要赌行数**。
+
+### 同日晚（视觉验收最后三条）
+
+- **Chip 内边距 4px → 6px**：设计文档写的是左右 6px，组件里一直是 `px-1`（4px），与文件 chip 的 8px 也不同档。
+  改在 `components/base/badges/chip.tsx` 的 base 上（一处收口，全站徽标统一）。
+- **评审输入框 34/36px → 32px**：与同排按钮（32px）对齐。真机实测 `height=32`。
+- **等宽字体**：`--font-mono` 首选 `"JetBrains Mono"`（设计意图），未安装时逐级回退到 `ui-monospace`。
+  真机实测：token 解析成 `"JetBrains Mono", ui-monospace, …`，`<code>` 实际落在 `ui-monospace` —— 说明宿主确实没注入
+  `--font-mono-source`，回退把这条路兜住了。
+
+真机取证（218）：chip `padding-left=6px`、评审输入框 `height=32`、`--font-mono` 含 JetBrains Mono 与 ui-monospace。
+`probe:panel 101/101`、`tests 799`（798 通过 / 1 跳过）。
+
+> 附注：P2 那次脚本把 `drawer.js` 的行尾从 CRLF 写成 LF，合并 diff 看起来像整文件重写（3183 删 / 3214 增）；
+> 内容无变化，且 `web/src/studio` 下其它模块本来就是 LF，所以保留现状、不来回折腾。
