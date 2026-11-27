@@ -135,6 +135,16 @@ function SectionHead({ children }) {
 function Drawer({ task, state, onClose, onChanged, onOpenTask = null }) {
   const [busy, setBusy] = React.useState(false)
   const [error, setError] = React.useState(null)
+  /* 状态历史全文（/state 只带最近 12 条）：null = 未加载，直接用 task.history。 */
+  const [historyAll, setHistoryAll] = React.useState(null)
+  const [historyBusy, setHistoryBusy] = React.useState(false)
+  const loadFullHistory = async () => {
+    setHistoryBusy(true)
+    try {
+      const out = await api('/task/parts', { id: task.id })
+      if (Array.isArray(out.history)) setHistoryAll(out.history)
+    } catch (cause) { toast(cause instanceof Error ? cause.message : String(cause)) } finally { setHistoryBusy(false) }
+  }
   const [comment, setComment] = React.useState('')
   const [notice, setNotice] = React.useState(null)
   /* 反馈不能只写在「讨论」页底部：在计划 / 设计 / 交付物 / 测试页点保存或推进，
@@ -2871,7 +2881,12 @@ function Drawer({ task, state, onClose, onChanged, onOpenTask = null }) {
         h('dt', {}, '飞书会话'), h('dd', {}, task.feishuThread === '' || task.feishuThread === undefined ? '未关联' : task.feishuThread),
       ),
       (() => {
-        const history = Array.isArray(task.history) ? [...task.history].reverse() : []
+        /* /state 每轮只带最近 12 条（全量时 75 张卡的 /state 是 1.34 MB，其中 383 KB 是历史里的长备注），
+           这里按需补全文：点「加载全部」走 /task/parts。展示顺序与判据不变。 */
+        const trimmed = Array.isArray(task.history) ? task.history : []
+        const full = historyAll === null ? trimmed : historyAll
+        const history = [...full].reverse()
+        const total = Number(task.historyTotal ?? trimmed.length)
         if (history.length === 0) return h('div', { className: 'mt-3 ' + HINT, 'data-status-history': '' }, '状态历史：无')
         const row = (item, index) => {
           const label = (state.statuses ?? []).find(entry => entry.id === item.status)?.label ?? String(item.status ?? '')
@@ -2893,7 +2908,10 @@ function Drawer({ task, state, onClose, onChanged, onOpenTask = null }) {
         const rest = history.slice(5)
         return h('div', { className: 'mt-3 flex min-w-0 flex-col gap-2', 'data-status-history': '' },
           h('div', { className: 'flex min-w-0 flex-wrap items-center justify-between gap-2' },
-            h('div', { className: 'text-caption-2-medium text-text-secondary' }, `状态历史（${history.length}）`),
+            h('div', { className: 'text-caption-2-medium text-text-secondary' }, `状态历史（${total}）`),
+            total > trimmed.length && historyAll === null
+              ? h(Button, { variant: 'ghost', size: 'xs', 'data-history-load-all': '', disabled: historyBusy, onClick: loadFullHistory }, historyBusy ? '加载中…' : `加载全部 ${total} 条`)
+              : null,
             h('span', { className: HINT }, '最新的在最上面')),
           h('ol', { className: 'flex min-w-0 flex-col gap-2' }, recent.map(row)),
           rest.length === 0 ? null : h('details', { className: 'rounded-lg border border-separator-border px-3 py-2', 'data-history-rest': '' },

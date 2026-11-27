@@ -952,13 +952,20 @@ function publicState(store) {
          注意：**计数必须在解构之前用原对象算**——以前把剥掉数组的 rest 传进去，
          Array.isArray(undefined) 兜成空数组，于是所有卡的评论数/清单进度恒为 0，
          不报错、不抛异常，只看接口 ok 根本发现不了（issue #10）。 */
-      const { comments, checklist, cases, ...rest } = task
+      const { comments, checklist, cases, history, ...rest } = task
       return {
         ...rest,
         ...publicComments(task),
         ...publicCases(task),
         ...publicChecklist(task),
         ...publicFeed(task),
+        /* 状态历史每轮都全量下发过：75 张卡的 /state 是 1.34 MB，其中 383 KB 是历史里那些长备注。
+           轮询只发最近 12 条（note 截到 300 字）+ 总数，抽屉需要全文时走 /task/parts。 */
+        history: (history ?? []).slice(-12).map(entry => ({
+          ...entry,
+          note: String(entry?.note ?? '').slice(0, 300),
+        })),
+        historyTotal: (history ?? []).length,
         sla: bugSla(task, state.config),
         /* 停摆：派单印记还在这一列但会话已经不在跑（崩过 / 被中断）。
            这种卡不会自己恢复，也不再被自动派单——以前界面上和「排队中」一模一样，
