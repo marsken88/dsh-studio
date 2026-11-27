@@ -8,12 +8,17 @@ import { isAiSignoff } from './intervention.js'
  *  这里只读已有事实，不加埋点。 */
 export function overrideSummary(state, options = {}) {
   const since = Number(options?.since) || 0
+  /* project 给了就只算这个项目：卡看 task.project、需求看 requirement.project；
+     两边都取不到时归「未归属」——全公司口径（project='') 里算进去，单选某个项目时不出现。 */
+  const project = String(options?.project ?? '')
+  const inProject = value => project === '' || String(value ?? '') === project
   const cards = []
   for (const task of state?.tasks ?? []) {
     const entry = task?.override
     if (entry === null || entry === undefined || typeof entry !== 'object') continue
     const at = Number(entry.at) || 0
     if (at < since) continue
+    if (!inProject(task.project)) continue
     cards.push({
       kind: 'card',
       id: String(task.id ?? ''),
@@ -27,6 +32,8 @@ export function overrideSummary(state, options = {}) {
   }
   const requirements = []
   for (const requirement of state?.requirements ?? []) {
+    /* requireProjectGuard: 需求侧同样按项目收 */
+    if (!inProject(requirement.project)) continue
     const entry = requirement?.override
     if (entry === null || entry === undefined || typeof entry !== 'object') continue
     const at = Number(entry.at) || 0

@@ -37,7 +37,17 @@ export async function handleInsightsRoute({ method, route, req, res, store, url 
 if (method === 'POST' && route === '/contexts') {
     // 每个专家会话的上下文洞察：窗口峰值、回合、工具调用、重试
     const body = await host.readJsonBody(req).catch(() => ({}))
-    const sessions = await collectSessionUsage()
+    /* 项目 / 区间过滤：会话按 taskId 归属项目（派单会话名里带卡 id），
+       没有 taskId 的是无卡会话（/agents/chat），选了项目就不该算进来。 */
+    const project = String(body?.project ?? '').trim()
+    const days = Number(body?.days) || 0
+    const since = days > 0 ? Date.now() - days * 86400000 : 0
+    let sessions = await collectSessionUsage()
+    if (project !== '') {
+      const ids = new Set((store.snapshot().tasks ?? []).filter(task => task.project === project).map(task => String(task.id)))
+      sessions = sessions.filter(session => ids.has(String(session?.taskId ?? '')))
+    }
+    if (since > 0) sessions = sessions.filter(session => (Number(session?.at) || 0) >= since)
     // threshold 可传：默认 60%，调小可以在真实数据上验证告警链路
     const threshold = Number(body?.threshold)
     const aggregated = aggregateContext(sessions, Number.isFinite(threshold) && threshold > 0 ? threshold : undefined)

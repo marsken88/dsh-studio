@@ -78,7 +78,7 @@ export function AnalyticsPage({ state, onOpenTask, onFixPrices }) {
   React.useEffect(() => {
     let alive = true
     /* 上下文接口挂了不该被说成「还没有会话记录」：错误与空态分开显示。 */
-    api('/contexts', {})
+    api('/contexts', { project, days })
       .then(out => { if (alive) { setContexts(out); setContextsError(null) } })
       .catch(cause => {
         if (!alive) return
@@ -249,7 +249,7 @@ export function AnalyticsPage({ state, onOpenTask, onFixPrices }) {
       h('span', { className: HINT }, `统计口径：最近 ${data.days} 天 · ${data.scope.tasks} 张卡（${data.scope.done} 张已完成）`),
       project === ''
         ? null
-        : h('span', { className: HINT, 'data-analytics-scope': project }, '（项目筛选只作用于负载 / 质量 / 成本；派单周活、交付时长、自动化率、强制放行是全公司口径）'),
+        : h('span', { className: HINT, 'data-analytics-scope': project }, '（项目筛选对全部指标生效：负载、质量、成本、派单周活、交付时长、自动化率、强制放行、上下文都只算这个项目）'),
       h(Select, {
         className: 'w-52', value: project, options: projectOptions,
         'aria-label': '按项目筛选',

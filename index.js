@@ -636,6 +636,10 @@ function buildAnalytics(state, options = {}) {
     return createdAt >= since || task.status !== 'done'
   })
 
+  /* 需求侧同样按项目收：项目为空时是全量（全公司口径）。 */
+  const scopedRequirements = project === ''
+    ? (state.requirements ?? [])
+    : (state.requirements ?? []).filter(item => String(item.project ?? '') === project)
   const expertNames = new Set((state.config.experts ?? []).map(expert => expert.name))
   let moved = 0
   let reworked = 0
@@ -740,15 +744,16 @@ function buildAnalytics(state, options = {}) {
     project,
     generatedAt: now,
     scope: { tasks: inScope.length, moved, done },
-    overrides: overrideSummary(state, { since, config: state.config, max: state.config.limits?.overrideMax ?? 3 }),
+    overrides: overrideSummary(state, { since, project, config: state.config, max: state.config.limits?.overrideMax ?? 3 }),
     // 交付节奏三把尺子（产品定义 #9 / #10 / #14）：口径写在 src/host/delivery.js 的注释里。
     gate: gateFirstPass(inScope),
-    dispatch: dispatchWeekly(state.tasks, { weeks: 8, now }),
-    delivery: requirementDelivery(state.requirements),
+    /* 下面三处以前恒用全量（不管项目筛选），页面上却写着「项目筛选对所有分区生效」。 */
+    dispatch: dispatchWeekly(inScope, { weeks: 8, now }),
+    delivery: requirementDelivery(scopedRequirements),
     // 自动化率（产品定义第 13 条）：已交付需求里零人工介入的占比。「没数据」返回 null，不冒充 0%。
     automation: automationRate(
       state,
-      (state.requirements ?? []).filter(item => ['delivered', 'closed'].includes(String(item.status ?? ''))).map(item => item.id),
+      scopedRequirements.filter(item => ['delivered', 'closed'].includes(String(item.status ?? ''))).map(item => item.id),
       state.config,
     ),
     // 用例覆盖强度（产品定义第 8 条）：带可执行断言的用例 ÷ 全部。
