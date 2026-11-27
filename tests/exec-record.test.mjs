@@ -11,11 +11,15 @@ test('评审徽标按语义上色（通过绿 / 要求修改红 / 待评审黄�
   assert.match(s, /variant: REVIEW_CHIP_VARIANT\[coding\.review\.status\]/, '徽标要用这张映射')
 })
 
-test('结论行：谁、什么时候、合并门禁还差几项', () => {
+test('结论行：谁 · 何时 · 合并门禁四态（未同步 / 不适用 / 还差 N 项 / 已通过）', () => {
   const s = drawer()
   assert.match(s, /'data-review-conclusion'/, '要有结论行钩子')
-  assert.match(s, /task\.mergeGate\?\.blockers/, '还差几项取合并门禁的 blockers')
+  assert.match(s, /'data-gate-state':/, '门禁状态要能被子断言读到')
+  // 回归：以前 mergeGate===null 时 blockers 兜成空数组，直接写「已通过」（8/8 张卡默认触发）
+  assert.match(s, /合并门禁：未同步/, '没同步过不能写「已通过」')
+  assert.match(s, /gate\.applicable === false/, '不适用要单独一态')
   assert.match(s, /还差 \$\{blockers\.length\} 项/, '缺项要写明数量')
+  assert.match(s, /gate\.state === 'success'/, '只有 success 才算已通过')
 })
 
 test('单测徽标带失败数；没有单测时不显示成绿', () => {
