@@ -773,8 +773,10 @@ function buildAnalytics(state, options = {}) {
           executable: own.executable,
           missing: own.total - own.executable,
         }
-      }).filter(row => row.missing > 0).sort((a, b) => b.missing - a.missing).slice(0, 10)
-      return { ...strength, byCard }
+      }).filter(row => row.missing > 0).sort((a, b) => b.missing - a.missing)
+      /* 清单只回 10 条，但**总数要一起给**：前端以前拿 rows.length 当总数，
+         11 张卡缺断言时界面会写「10 张卡」（与 dashboard 的 listTotal 同一类静默低报）。 */
+      return { ...strength, byCard: byCard.slice(0, 10), byCardTotal: byCard.length }
     })(),
     cycle: {
       count: cycleValues.length,
