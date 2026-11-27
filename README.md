@@ -280,6 +280,7 @@ GitHub Actions（`.github/workflows/release.yml`）会依次：校验 tag 与 `p
 | `npm run verify:empty` | 空数据巡检：把 `/state` 换成一"刚装好、什么都没建"的样子，走一遍全部页签 —— 空看板这类分支只有新装用户才会走到（issue #6 就是这么漏的） |
 | `npm run shots -- --base <端口>` | README 截图：造演示数据 → 真 `client.js` 渲染 → 逐页截图到 `docs/images/`，跑完自删（含云盘目录）。**界面一改就重跑**，别手工截图——2026-11-20 那批图停在 11-18，中间左栏、闸门、BoardUI 全变了 |
 | `npm run drive:gc -- --base <端口>` | 云盘孤儿目录体检/清理：**只删「名字像 REQ-* 且台账里没有引用」的文件夹**，项目目录/未归属项目/看不懂的一律保留，文件永不删。默认只体检，`--apply` 才真删（进回收站），串行 + 退避重试（并发会被飞书判 resource contention） |
+| `npm run worktree:gc` | `.agents/worktrees` 残留目录体检/清理：判据只有一条 —— **不在 `git worktree list` 里就是孤儿**（不按目录名猜）。默认只体检、只清 7 天以上的（`--days N` 可调），`--apply` 才真删，删前先摘掉 `node_modules` 联接（Windows 上不摘会顺着联接删主仓库依赖）。合并完工作树忘了清、或清理时有文件没删掉，残留就会越攒越多（2026-11-27 本仓库 19 个 / 494 MB） |
 | `npm run probe:panel -- --base http://127.0.0.1:<端口>` | 面板**渲染**：假宿主挂真实 `client.js` + 把 `/studio-api/*` 反代到正在跑的实例，puppeteer 逐页断言并截图到 `tmp/probe/`。接口测试与单测看不见「渲染在哪个面板里」——0.9.36 就有开关插错面板而全绿的情况。自己造「（探针）」数据、跑完自删；没装 puppeteer-core 或没 Chrome 时跳过不判红 |
 | `npm run verify:fence` | `/studio-api` 的**信任栅栏**（把 `index.js` 注册的真实 handler 挂在假宿主上发真 HTTP）：无会话读台账要 401、伪造 `Host`（DNS rebinding）要 403、跨站 `Origin` 要 403、公开提单页匿名可用但同样挡住跨站、`/health` 不要登录。单测验不到「handler 里到底调没调」，真机探针又要部署，这层夹在中间 |
 | `npm run verify:mirror` | 本地演练 GitHub Packages 镜像的改名步骤（只在打 tag 时才跑的东西，提前在本地验一遍） |
