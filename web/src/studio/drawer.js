@@ -1404,6 +1404,502 @@ function Drawer({ task, state, onClose, onChanged, onOpenTask = null }) {
   const collabPlanRows = testPlanTiers.filter(row => CASE_TIERS.includes(row.tier) && row.tier !== 'other')
   const collabGaps = testPlanGaps.map(gap => CASE_TIER_LABEL[gap.tier] ?? gap.tier)
 
+  /* 执行记录页的六个区块：抽成具名函数后，顺序在调用处一眼可见（以前是 470 行内联 JSX）。 */
+  const renderCodingSection = () => (
+      h(Section, { pane: 'coding', current: pane, id: 'coding' },
+        h(SectionHead, null, 'AI Coding 执行记录',
+          h('span', { className: HINT }, coding === null ? '改代码要留记录：谁、什么模型、改了什么' : '研发 agent 登记，人也可以补录或评审')),
+        h('div', { className: SECTION_BODY },
+          coding === null
+            ? h(EmptyState, { title: '还没有执行记录。', hint: '让研发 agent 登记，或点下面的「手动补录执行记录」自己填：agent / 模型 / 分支 / 单测数' })
+            : h('div', { className: PANEL },
+              h('div', { className: PANEL_HEAD },
+                /* 语义上色：通过=绿、要求修改=红、待评审=黄。以前恒为 gray，只能靠读字分辨。 */
+                h(ChipField, { variant: REVIEW_CHIP_VARIANT[coding.review.status] ?? 'gray', 'data-review': coding.review.status }, CODING_REVIEW_LABEL[coding.review.status] ?? coding.review.status),
+               h('div', { className: GROW },
+                  h('div', { className: PANEL_LINE }, [coding.agent || '未登记 agent', coding.model, coding.branch].filter(Boolean).join(' · ')),
+                  coding.context === '' ? null : h('details', { 'data-coding-context': '' },
+                    h('summary', { className: HINT + ' cursor-pointer', title: coding.context }, coding.context.length > 80 ? coding.context.slice(0, 80) + '…' : coding.context),
+                    h('div', { className: HINT + ' mt-1 whitespace-pre-wrap break-words' }, coding.context)),
+                ),
+                (() => {
+                  const unit = coding.unitTests ?? {}
+                  const total = Number(unit.total) || 0
+                  const passed = Number(unit.passed) || 0
+                  const failed = Math.max(0, total - passed)
+                  if (total === 0) return h(ChipField, { variant: 'gray', title: '这次执行没有自报单测' }, '无单测')
+                  return h(ChipField, {
+                    variant: failed > 0 ? 'rose' : 'lime',
+                    title: '这次执行自报的单测结果（不是平台跑的）',
+                  }, `单测 ${passed}/${total}${failed > 0 ? ` · 失败 ${failed}` : ''}`)
+                })(),
+                worktree === null
+                  ? tipOf('这张卡还没有 worktree：先去「执行记录 → 工作树」建一个，或让研发登记分支',
+                    h(Button, { variant: 'ghost', size: 'sm', disabled: true }, '核对代码事实'))
+                  : tipOf(
+                  '拿 worktree 里的 git 记录，比执行记录里自报的提交 / 文件 / 分支',
+                  h(Button, {
+                    variant: 'ghost', size: 'sm', disabled: busy || verify.busy,
+                    onClick: () => void verifyCoding(),
+                  }, verify.busy ? '核对中…' : (verify.line === '' ? '核对代码事实' : '再核对一次')),
+                ),
+                h(Button, { variant: 'ghost', size: 'sm', disabled: busy, title: '拉 MR 的改动、逐条提交、流水线与 CI 单测结果，和自报的文件数/提交数/单测数比一遍', onClick: () => void verifyGitlab() }, '从 GitLab 核对'),
+              /* 结论行（独占一行，不参与头部宽度竞争）。四态：未同步 / 不适用 / 还差 N 项 / 已通过。
+                 以前 mergeGate===null 时 blockers 兜成空数组 → 直接写「已通过」，而这卡的门禁从未算过。 */
+              (() => {
+                const gate = task.mergeGate
+                const who = coding.review.by === '' ? '未记评审人' : coding.review.by
+                const when = coding.review.at > 0 ? fmtTime(coding.review.at) : '—'
+                const blockers = Array.isArray(gate?.blockers) ? gate.blockers : []
+                let gateText = '合并门禁：未同步（去下面「合并门禁」同步一次）'
+                if (gate !== null && gate !== undefined) {
+                  if (gate.applicable === false) gateText = '合并门禁：不适用（这张卡没有代码改动）'
+                  else if (blockers.length > 0) gateText = `合并门禁：还差 ${blockers.length} 项：${blockers.slice(0, 2).join('；')}${blockers.length > 2 ? ' 等' : ''}`
+                  else if (gate.state === 'success') gateText = '合并门禁：已通过'
+                  else if (gate.state === 'failed') gateText = '合并门禁：未通过（见下方门禁块）'
+                  else gateText = '合并门禁：待检查'
+                }
+                return h('div', { className: HINT, 'data-review-conclusion': coding.review.status, 'data-gate-state': gate === null || gate === undefined ? 'unsynced' : (gate.applicable === false ? 'n/a' : gate.state) },
+                  `${who} · ${when} · ${gateText}`)
+              })(),
+              ),
+              verify.line === ''
+                ? (coding.verified === null || coding.verified === undefined
+                  ? null
+                  : h('div', { className: HINT, 'data-verify': coding.verified.ok ? 'ok' : 'bad', style: { marginTop: 8 } },
+                    `${coding.verified.ok ? '' : '注意 · '}上次核对 ${fmtTime(coding.verified.at)}：分支 ${coding.verified.branch} · 提交 ${coding.verified.commitCount.actual} 个 · 改动 ${coding.verified.fileCount.actual} 个文件` +
+                    `${coding.verified.missingCommits.length + coding.verified.missingFiles.length === 0 ? '' : ` · ${coding.verified.missingCommits.length + coding.verified.missingFiles.length} 项对不上`}`))
+                : h('div', { className: HINT, 'data-verify': verify.ok === true ? 'ok' : 'bad', style: { marginTop: 8 } },
+                  `${verify.ok === true ? '' : '注意 · '}${verify.line}`),
+                              coding.gitlab === null || coding.gitlab === undefined
+                ? null
+                : h('div', null,
+                  h('div', { className: HINT, 'data-gitlab-facts': coding.gitlab.state },
+                    '上次 GitLab 核对 ' + fmtTime(coding.gitlab.at) + '：文件 ' + coding.gitlab.files.declared + '→' + coding.gitlab.files.actual +
+                    ' · 提交 ' + coding.gitlab.commits.declared + '→' + coding.gitlab.commits.actual +
+                    (coding.gitlab.pipeline === null ? '' : ' · 流水线 ' + coding.gitlab.pipeline) +
+                    (coding.gitlab.ci === null || coding.gitlab.ci === undefined
+                      ? ''
+                      : coding.gitlab.ci.source === 'test_report'
+                        ? ' · CI 单测 ' + coding.gitlab.ci.passed + '/' + coding.gitlab.ci.total + (coding.gitlab.ci.failed > 0 ? `（失败 ${coding.gitlab.ci.failed}）` : '')
+                        : ' · CI 任务 ' + coding.gitlab.ci.passed + '/' + coding.gitlab.ci.total + ' 成功' + (coding.gitlab.ci.failed > 0 ? `（失败 ${coding.gitlab.ci.failed}）` : '')) +
+                    ((coding.gitlab.mismatches ?? []).length === 0 ? ' · 一致' : ' · ' + coding.gitlab.mismatches.join('；'))),
+                  (coding.gitlab.commitList ?? []).length === 0 ? null : h('details', { 'data-gitlab-commits': '' },
+                    h('summary', { className: 'cursor-pointer text-caption-1-regular text-text-secondary' }, `MR 里 ${coding.gitlab.commitList.length} 次提交`),
+                    h('div', { className: 'mt-1 flex max-h-56 min-w-0 flex-col gap-1 overflow-auto pr-1' },
+                      coding.gitlab.commitList.slice(0, 20).map(item => h('div', { key: 'gl-' + item.id, className: LIST_LINE },
+                        h('code', { className: CODE_CHIP }, String(item.sha ?? '').slice(0, 8)),
+                        h('span', { className: GROW }, item.title || '(无提交说明)'),
+                        h('span', { className: HINT }, item.author || 'GitLab'),
+                      )),
+                      coding.gitlab.commitList.length > 20 ? h('div', { className: HINT }, `MR 里还有 ${coding.gitlab.commitList.length - 20} 次提交`) : null,
+                    )),
+                  (coding.gitlab.missingCommits ?? []).length === 0 ? null : h('div', { className: HINT, 'data-warn': '1' },
+                    '这些自报提交在 MR 里找不到：' + coding.gitlab.missingCommits.map(sha => String(sha).slice(0, 8)).join('、')),
+                ),
+              /* 提交明细默认折叠：有数据时能再叠 400px 上下，而「几次提交」在统计行里已经有了。 */
+              (coding.commits ?? []).length === 0 ? null : h('details', { 'data-coding-commits': '' },
+                h('summary', { className: 'cursor-pointer text-caption-1-regular text-text-secondary' }, `提交 ${coding.commits.length} 次`),
+                h('div', { className: 'mt-1 flex max-h-56 min-w-0 flex-col gap-1 overflow-auto pr-1' },
+                  coding.commits.slice(0, 20).map(item => h('div', { key: item.id, className: LIST_LINE },
+                    h('code', { className: CODE_CHIP }, item.sha.slice(0, 8)),
+                    h('span', { className: GROW }, item.message || '(无提交说明)'),
+                    h('span', { className: HINT }, `${item.files} 文件`),
+                  )),
+                  coding.commits.length > 20 ? h('div', { className: HINT }, `还有 ${coding.commits.length - 20} 次提交`) : null,
+                )),
+              /* 12 个文件以前铺成 4 行 chip（占全块 30% 高度），且「12 个文件 · +1563 −2」这个结论在界面上根本不存在。
+                 现在：一行统计（增/删带色）+ 按改动量 Top3 + 展开全部（限高内滚）。 */
+              (() => {
+                const files = coding.files ?? []
+                if (files.length === 0) return null
+                const totals = files.reduce((acc, item) => ({
+                  add: acc.add + (Number(item.additions) || 0),
+                  del: acc.del + (Number(item.deletions) || 0),
+                }), { add: 0, del: 0 })
+                const byWeight = [...files].sort((a, b) => ((Number(b.additions) || 0) + (Number(b.deletions) || 0)) - ((Number(a.additions) || 0) + (Number(a.deletions) || 0)))
+                const top = byWeight.slice(0, 3)
+                const rowOf = item => h('div', { key: item.id, className: 'flex min-w-0 items-baseline gap-2' },
+                  h('span', { className: 'min-w-0 truncate font-mono text-caption-1-regular text-text-primary', title: item.path }, item.path),
+                  Number(item.additions) > 0 ? h('span', { className: 'shrink-0 tabular-nums text-caption-1-regular text-state-success-text' }, `+${item.additions}`) : null,
+                  Number(item.deletions) > 0 ? h('span', { className: 'shrink-0 tabular-nums text-caption-1-regular text-text-error-primary' }, `−${item.deletions}`) : null,
+                )
+                return h('div', { className: 'flex min-w-0 flex-col gap-1', 'data-coding-files': '' },
+                  h('div', { className: 'flex min-w-0 flex-wrap items-baseline gap-2 text-caption-1-regular' },
+                    h('span', { className: 'text-text-secondary' }, `${files.length} 个文件`),
+                    totals.add > 0 ? h('span', { className: 'tabular-nums text-state-success-text' }, `+${totals.add}`) : null,
+                    totals.del > 0 ? h('span', { className: 'tabular-nums text-text-error-primary' }, `−${totals.del}`) : null,
+                  ),
+                  h('div', { className: 'flex min-w-0 flex-col gap-0.5' }, top.map(rowOf)),
+                  files.length > top.length
+                    ? h('details', { 'data-coding-files-rest': '' },
+                      h('summary', { className: 'cursor-pointer text-caption-1-regular text-text-secondary' }, `展开其余 ${files.length - top.length} 个`),
+                      h('div', { className: 'mt-1 flex max-h-56 min-w-0 flex-col gap-0.5 overflow-auto pr-1' }, byWeight.slice(3).map(rowOf)))
+                    : null,
+                )
+              })(),
+              coding.review.note === '' && coding.review.status === 'pending'
+                ? null
+                : h('div', { className: NOTE_BOX + ' text-text-primary', 'data-review-note': coding.review.status },
+                  h('div', { className: 'text-caption-1-medium text-text-secondary' },
+                    `评审意见${coding.review.by === '' ? '' : ` · ${coding.review.by}${coding.review.at > 0 ? ` · ${fmtTime(coding.review.at)}` : ''}`}`),
+                  coding.review.note === ''
+                    ? h('div', null, '（没有填写意见）')
+                    : h('details', { 'data-review-note-full': '' },
+                      h('summary', { className: 'cursor-pointer break-words' }, coding.review.note.length > 90 ? coding.review.note.slice(0, 90) + '…' : coding.review.note),
+                      h('div', { className: 'mt-1 whitespace-pre-wrap break-words' }, coding.review.note))),
+              h('div', { className: ROW },
+                h(TextField, {
+                  size: 'small',
+                  style: { flex: 1 }, value: reviewNote, placeholder: '评审意见（可选，写清文件/行为什么/怎么改）',
+                  onChange: event => setReviewNote(event.target.value),
+                }),
+                h(Button, { variant: 'primary', size: 'sm', disabled: busy, onClick: () => void reviewCoding('approved') }, busy ? '提交中…' : '评审通过'),
+                h(Button, { variant: 'secondary', size: 'sm', disabled: busy, onClick: () => void reviewCoding('changes_requested') }, '要求修改'),
+                /* 「标记已合并」删掉了：它只写 mergedAt（自报），并不真的合并，和「合并门禁 → 合并 MR」
+                   容易混成同义词。真合并留在合并门禁；这里只在已合并时显示一行事实。 */
+                coding.mergedAt > 0 ? h('span', { className: HINT }, `已合并 · ${coding.mergedBy || '—'}`) : null,
+              ),
+            ),
+          codingDraft === null
+            ? h('div', { className: ROW },
+              h(Button, { variant: 'ghost', size: 'sm', disabled: busy, onClick: openCoding }, coding === null ? '手动补录执行记录' : '编辑执行记录'))
+            : h('div', null,
+              h('div', { className: ROW },
+                h('div', { className: FIELD, style: { flex: 1 } },
+                  tipLabel('Coding Agent', '这次改代码的 agent 名字，只作记录，不影响派单'),
+                  h(TextField, { value: codingDraft.agent, placeholder: 'claude-code / codex / 自研', onChange: e => setCodingDraft({ ...codingDraft, agent: e.target.value }) }),
+                ),
+                h('div', { className: FIELD, style: { flex: 1 } },
+                  h('div', { className: LABEL }, '模型'),
+                  h(TextField, { value: codingDraft.model, placeholder: 'deepseek-v4.1-flash', onChange: e => setCodingDraft({ ...codingDraft, model: e.target.value }) }),
+                ),
+                h('div', { className: FIELD, style: { flex: 1 } },
+                  h('div', { className: LABEL }, '分支'),
+                  h(TextField, { value: codingDraft.branch, placeholder: 'feature/xxx', onChange: e => setCodingDraft({ ...codingDraft, branch: e.target.value }) }),
+                ),
+              ),
+              h('div', { className: ROW },
+                h('div', { className: FIELD, style: { flex: '0 0 110px' } },
+                  tipLabel('单测总数', '这次执行报的单测总数，可以 agent 写回，也可以手填'),
+                  h(TextField, { value: codingDraft.total, onChange: e => setCodingDraft({ ...codingDraft, total: e.target.value }) }),
+                ),
+                h('div', { className: FIELD, style: { flex: '0 0 110px' } },
+                  tipLabel('通过数', '通过的条数；少于总数时卡片过不了准出'),
+                  h(TextField, { value: codingDraft.passed, onChange: e => setCodingDraft({ ...codingDraft, passed: e.target.value }) }),
+                ),
+                h('div', { className: FIELD, style: { flex: 1 } },
+                  h('div', { className: LABEL }, '这次依据的上下文'),
+                  h(TextField, { value: codingDraft.context, placeholder: '例如 PRD v1.2 + 架构方案 v1', onChange: e => setCodingDraft({ ...codingDraft, context: e.target.value }) }),
+                ),
+              ),
+              h('div', { className: ROW },
+                h(Button, { variant: 'primary', size: 'sm', disabled: busy, onClick: () => void saveCoding() }, '保存执行记录'),
+                h(Button, { variant: 'ghost', size: 'sm', disabled: busy, onClick: () => setCodingDraft(null) }, '取消'),
+              ),
+            ),
+        ),
+      )
+  )
+
+  /* 执行记录页的六个区块：抽成具名函数后，顺序在调用处一眼可见（以前是 470 行内联 JSX）。 */
+  const renderDiffSection = () => (
+      h(Section, { pane: 'coding', current: pane, id: 'diff' },
+        h(SectionHead, null, '代码改动（git diff）',
+          h('span', { className: HINT }, '直接读仓库里的真实改动：卡的分支对比基线。左边文件树按目录分组，标了新增/修改/删除与行数')),
+        h('div', { className: SECTION_BODY, 'data-drawer-diff': '' },
+          (() => {
+            if (diffBusy) return h('div', { className: HINT, 'data-diff-loading': '' }, '读取中…')
+            if (diffError !== null) {
+              return h('div', { className: ROW, style: { gap: 8, alignItems: 'center' } },
+                h('div', { className: ERR_TEXT }, `读不到代码改动：${diffError}`),
+                h(Button, { variant: 'ghost', size: 'sm', onClick: () => void loadDiff() }, '再试一次'))
+            }
+            if (diffView === null) {
+              return h('div', { className: ROW, style: { gap: 8, alignItems: 'center' } },
+                h(Button, { variant: 'secondary', size: 'sm', onClick: () => void loadDiff() }, '读取代码改动'),
+                h('span', { className: HINT }, '从卡的 worktree（或项目代码目录）读分支相对基线的改动'))
+            }
+            if (String(diffView.skipped ?? '') !== '') return h(EmptyState, { title: diffView.skipped })
+            if (diffView.ok !== true) return h(EmptyState, { title: '读不到代码改动' })
+            const allFiles = Array.isArray(diffView.files) ? diffView.files : []
+            const fileQuery = diffQuery.trim().toLowerCase()
+            const files = fileQuery === '' ? allFiles : allFiles.filter(item => String(item.path).toLowerCase().includes(fileQuery))
+            const totals = diffView.totals ?? { files: 0, additions: 0, deletions: 0 }
+            const uncommitted = diffView.uncommitted ?? { total: 0, files: [], additions: 0, deletions: 0 }
+            /* 文件树：目录分组 + 改动标记（新增/修改/删除）+ 行数；点一个文件在下面看它的 patch。 */
+            const tree = buildDiffTree(files)
+            const selected = files.find(item => item.path === diffPath) ?? files[0] ?? null
+            const changeLabel = item => DIFF_CHANGE_LABEL[item.change] ?? '修改'
+            const changeClass = item => DIFF_CHANGE_CLASS[item.change] ?? ''
+            const renderNode = node => (node.kind === 'dir'
+              ? h(TreeViewItem, { key: node.id, id: node.id, label: node.name, textValue: node.path, title: node.path }, node.children.map(renderNode))
+              : h(TreeViewItem, {
+                key: node.id,
+                id: node.id,
+                label: node.name,
+                textValue: node.path,
+                'data-diff-file': node.path,
+                trailingContent: h('span', { className: 'flex items-center gap-2' },
+                  h('span', { className: changeClass(node.file), 'data-change': node.file.change }, changeLabel(node.file)),
+                  h('span', { className: 'text-state-success-text' }, `+${node.file.additions}`),
+                  h('span', { className: 'text-text-error-primary' }, `−${node.file.deletions}`)),
+              }))
+            const renderLine = (line, index) => h('div', {
+              key: `d-${index}`,
+              className: line.startsWith('+++') || line.startsWith('---')
+                ? 'text-text-tertiary'
+                : line.startsWith('+')
+                  ? 'text-state-success-text'
+                  : line.startsWith('-')
+                    ? 'text-text-error-primary'
+                    : line.startsWith('@@')
+                      ? 'text-accent-600'
+                      : 'text-text-secondary',
+            }, line === '' ? ' ' : line)
+            /* 「全文」：读工作树里的文件本体（只读、200KB 上限），带行号。 */
+            const renderFileView = item => {
+              if (fileView === null || fileView.path !== item.path) return h('div', { className: HINT }, '读取文件全文…')
+              if (fileView.busy === true) return h('div', { className: HINT, 'data-diff-fulltext-loading': '' }, '读取中…')
+              if (fileView.error !== null) return h('div', { className: ERR_TEXT }, `读不到全文：${fileView.error}`)
+              const data = fileView.data ?? {}
+              if (String(data.skipped ?? '') !== '') return h('div', { className: HINT }, data.skipped)
+              if (data.binary === true) return h('div', { className: HINT }, '二进制文件，不显示全文')
+              const text = String(data.content ?? '')
+              return h('pre', {
+                className: 'max-h-[420px] overflow-auto rounded-md bg-background-secondary-default p-2 text-caption-1-regular',
+                'data-diff-fulltext': item.path,
+                style: { whiteSpace: 'pre-wrap', wordBreak: 'break-word', margin: 0 },
+              },
+                text.split('\n').map((line, index) => h('div', { key: `f-${index}`, className: 'flex gap-2 text-text-secondary' },
+                  h('span', { className: 'shrink-0 select-none tabular-nums text-text-tertiary', style: { minWidth: '3em', textAlign: 'right' } }, String(index + 1)),
+                  h('span', { className: 'min-w-0 whitespace-pre-wrap break-words' }, line === '' ? ' ' : line))),
+                data.truncated === true ? h('div', { className: HINT }, '文件太大，只显示前 200 KB') : null)
+            }
+            return h('div', { className: 'flex min-w-0 flex-col gap-2' },
+              h('div', { className: ROW, style: { gap: 8, alignItems: 'center' } },
+                h(ChipField, { variant: 'gray', 'data-diff-range': '1' }, diffView.rangeLabel || `${diffView.branch || '(无分支)'} ← ${diffView.base}`),
+                h('span', { className: HINT, 'data-diff-totals': `${totals.files}-${totals.additions}-${totals.deletions}` },
+                  `${totals.files} 个文件 · +${totals.additions} −${totals.deletions}${diffView.truncated === true ? '（已截断）' : ''}`),
+                (diffView.commits ?? []).length === 0
+                  ? null
+                  : h('div', { className: 'w-56 max-w-full', 'data-diff-commit': '' },
+                    h(SelectField, {
+                      value: diffCommit,
+                      'aria-label': '看哪一次提交',
+                      onChange: event => { setDiffCommit(event.target.value); setDiffQuery(''); void loadDiff(event.target.value) },
+                    },
+                      h('option', { value: '' }, '全部改动'),
+                      diffView.commits.map(item => h('option', { key: item.sha, value: item.sha }, `${item.sha} ${String(item.subject).slice(0, 24)}`)))),
+                allFiles.length > 6 || diffQuery !== ''
+                  ? h('div', { className: 'w-40 max-w-full', 'data-diff-filter': '' },
+                    h(TextField, { value: diffQuery, placeholder: '筛文件路径…', 'aria-label': '筛文件', onChange: event => {
+                      const value = event.target.value
+                      setDiffQuery(value)
+                      const query = value.trim().toLowerCase()
+                      const hit = allFiles.filter(item => query === '' || String(item.path).toLowerCase().includes(query))
+                      setDiffPath(hit[0]?.path ?? '')
+                      setFileView(null)
+                    } }))
+                  : null,
+                h(Button, { variant: 'ghost', size: 'sm', disabled: diffBusy, onClick: () => void loadDiff() }, '刷新'),
+                (task.gitlabMR?.url ?? '') === ''
+                  ? null
+                  : h('a', { className: LINK, href: String(task.gitlabMR.url).replace(/\/$/, '') + '/diffs', target: '_blank', rel: 'noreferrer' }, '在 GitLab 看 diff')),
+              h('div', { className: HINT }, `仓库：${diffView.dir}`),
+              uncommitted.total > 0
+                ? h('div', { className: 'text-caption-1-regular text-status-yellow-text', 'data-diff-dirty': uncommitted.total },
+                  `还有 ${uncommitted.total} 个文件没提交（+${uncommitted.additions} −${uncommitted.deletions}）：这些改动不在分支上，评审和测试都看不到`)
+                : null,
+              files.length === 0
+                ? h('div', { className: HINT }, allFiles.length === 0 ? '这条分支相对基线没有代码改动。' : '没有匹配的文件。')
+                : h('div', { className: 'min-w-0', 'data-diff-tree': '' },
+                  h(TreeView, {
+                    // 刷新（at 变了）就重建：新出现的目录也要按默认全部展开，避免沿用旧的展开集合。
+                    key: `diff-tree-${diffView.at ?? ''}`,
+                    'aria-label': '改动的文件（按目录分组）',
+                    selectionMode: 'single',
+                    selectedKeys: diffPath === '' ? [] : [diffPath],
+                    defaultExpandedKeys: diffDirIds(tree),
+                    onSelectionChange: keys => {
+                      const next = Array.from(keys)
+                      selectDiffFile(next.length > 0 ? String(next[0]) : '')
+                    },
+                    size: 'sm',
+                    showGuides: true,
+                    // 跟随上游「树跟着内容长、滚动交给外层」：不再套一层 280px 内滚动。
+                    // 圆角与所在区块一致（上游默认 24px，套在 12px 的区块里会显得层级更深）。
+                    style: { borderRadius: 12 },
+                  }, tree.map(renderNode))),
+              files.length === 0
+                ? null
+                : (selected === null
+                  ? h('div', { className: HINT }, '在文件树里选一个文件，看它的改动内容。')
+                  : h('div', { className: 'flex min-w-0 flex-col gap-2', 'data-diff-content': selected.path },
+                    h('div', { className: 'flex min-w-0 flex-wrap items-center gap-2' },
+                      h('span', { className: 'font-mono text-caption-1-regular text-text-primary' }, selected.path),
+                      h('span', { className: changeClass(selected), 'data-change': selected.change }, changeLabel(selected)),
+                      h('span', { className: 'text-caption-1-regular text-state-success-text' }, `+${selected.additions}`),
+                      h('span', { className: 'text-caption-1-regular text-text-error-primary' }, `−${selected.deletions}`),
+                      selected.binary === true ? h('span', { className: HINT }, '二进制') : null,
+                      selected.truncated === true ? h('span', { className: HINT }, '已截断') : null,
+                      h('span', { className: GROW }),
+                      h(Button, { variant: diffMode === 'diff' ? 'secondary' : 'ghost', size: 'sm', 'data-diff-mode': 'diff', onClick: () => setDiffMode('diff') }, '改动'),
+                      h(Button, {
+                        variant: diffMode === 'file' ? 'secondary' : 'ghost',
+                        size: 'sm',
+                        'data-diff-mode': 'file',
+                        onClick: () => {
+                          setDiffMode('file')
+                          if (fileView === null || fileView.path !== selected.path) void loadFile(selected.path)
+                        },
+                      }, '全文'),
+                      h(Button, { variant: 'ghost', size: 'sm', 'data-diff-copy': 'path', onClick: () => void copyPlain(selected.path, '路径') }, '复制路径'),
+                      h(Button, { variant: 'ghost', size: 'sm', 'data-diff-copy': 'content', onClick: () => void copyPlain(diffMode === 'file' ? String(fileView?.data?.content ?? '') : selected.patch, diffMode === 'file' ? '全文' : 'diff') }, '复制内容')),
+                    diffMode === 'file'
+                      ? renderFileView(selected)
+                      : (selected.patch === ''
+                        ? h('div', { className: HINT }, '没有可显示的 patch（二进制文件或改动太大）')
+                        : h('pre', { className: 'max-h-[420px] overflow-auto rounded-md bg-background-secondary-default p-2 text-caption-1-regular', style: { whiteSpace: 'pre-wrap', wordBreak: 'break-word', margin: 0 } },
+                          String(selected.patch).split('\n').map(renderLine))))),
+              diffView.omitted > 0 ? h('div', { className: HINT }, `还有 ${diffView.omitted} 个文件没展开（改动太多）`) : null,
+            )
+          })(),
+        ),
+      )
+  )
+
+  /* 执行记录页的六个区块：抽成具名函数后，顺序在调用处一眼可见（以前是 470 行内联 JSX）。 */
+  const renderMergeGateSection = () => (
+      h(Section, { pane: 'coding', current: pane, id: 'merge-gate' },
+        h(SectionHead, null, '合并门禁',
+          h('span', { className: HINT }, '把「能不能合」发成 GitLab 的 studio/merge-gate 提交状态；仓库要求状态检查时必须通过，合并按钮才会放行')),
+        h('div', { className: SECTION_BODY },
+          mergeGate === null
+            ? null
+            : h('div', { className: PANEL },
+              h('div', { className: PANEL_HEAD },
+                h(ChipField, {
+                  variant: 'gray',
+                  'data-review': mergeGate.state === 'success' ? 'approved' : 'changes_requested',
+                }, mergeGate.state === 'success' ? '通过' : '不通过'),
+                h('div', { className: GROW },
+                  h('div', { className: PANEL_LINE }, `${mergeGate.name} @ ${String(mergeGate.sha ?? '').slice(0, 8)}`),
+                  h('div', { className: HINT }, `${fmtTime(mergeGate.at)} · ${mergeGate.by || '人'}${mergeGate.error === '' ? '' : ` · ${mergeGate.error}`}`),
+                ),
+                h('span', { className: HINT }, `MR !${mergeGate.iid}`),
+              ),
+              (mergeGate.blockers ?? []).length === 0
+                ? null
+                : h('div', { className: HINT, 'data-warn': '1', style: { marginTop: 8 } },
+                  mergeGate.blockers.slice(0, 5).map((item, index) => h('div', { key: 'mg-' + index }, `· ${item}`))),
+            ),
+          h('div', { className: ROW, style: { gap: 8, alignItems: 'center', marginTop: 8, flexWrap: 'wrap' } },
+            h(Button, { variant: 'ghost', size: 'sm', disabled: busy || mergeRun.busy, onClick: () => void syncMergeGate() },
+              mergeRun.busy ? '发布中…' : '同步合并门禁'),
+            h(Button, {
+              variant: 'secondary', size: 'sm',
+              disabled: busy || mergeRun.busy || mergeGate === null || mergeGate.state !== 'success',
+              title: '门禁通过后由平台调用 GitLab 的 merge API。GitLab CE 拦不住人工点合并（没有外部状态检查），所以合并走这里才受管辖',
+              onClick: () => void mergeNow(),
+            }, '合并 MR'),
+            h('span', { className: HINT }, '需要卡片关联 MR、且配了 GitLab 项目。'),
+          ),
+          mergeRun.line === '' ? null : h('div', { className: HINT, style: { marginTop: 8 } }, mergeRun.line),
+        ),
+      )
+  )
+
+  /* 执行记录页的六个区块：抽成具名函数后，顺序在调用处一眼可见（以前是 470 行内联 JSX）。 */
+  const renderQualitySection = () => (
+      h(Section, { pane: 'coding', current: pane, id: 'quality' },
+        h(SectionHead, null, '项目检查',
+          h('span', { className: HINT }, '在这个项目的代码目录（有 worktree 就用它）里跑一条本地质量命令')),
+        h('div', { className: SECTION_BODY },
+          (() => {
+            const project = (state.config?.projects ?? []).find(item => item.id === task.project)
+            const services = project?.services ?? []
+            const service = services.find(item => item.id === task.service) ?? (services.length === 1 ? services[0] : undefined)
+            const cmd = String(service?.qualityCmd ?? '').trim() || String(project?.qualityCmd ?? '').trim()
+            if (cmd === '') {
+              return h(EmptyState, { title: '这个项目还没配检查命令。到「设置 → 平台 → 项目」填一条（如 npm run check）；配了以后，改过代码的卡要跑过它才能收口。' })
+            }
+            return h('div', { className: PANEL },
+              h('div', { className: PANEL_HEAD },
+                h(ChipField, {
+                  variant: 'gray',
+                  'data-review': quality === null ? 'pending' : (quality.ok === true ? 'approved' : 'changes_requested'),
+                }, quality === null ? '没跑过' : (quality.ok === true ? '通过' : '不通过')),
+                h('div', { className: GROW },
+                  h('div', { className: PANEL_LINE }, cmd),
+                  quality === null
+                    ? null
+                    : h('div', { className: HINT },
+                      `${fmtTime(quality.at)} · ${quality.by || '人'} · ${(Number(quality.ms) || 0) / 1000}s` +
+                      (quality.exitCode === null ? '' : ` · 退出码 ${quality.exitCode}`) +
+                      (quality.timedOut === true ? ' · 超时' : '') +
+                      (quality.cwd ? ` · ${quality.cwd}` : '')),
+                ),
+                h(Button, { variant: 'ghost', size: 'sm', disabled: busy || qualityRun.busy, onClick: () => void runQuality() },
+                  qualityRun.busy ? '跑检查中…' : (quality === null ? '跑一次' : '再跑一次')),
+              ),
+              qualityRun.line === ''
+                ? null
+                : h('div', { className: HINT, 'data-quality': quality?.ok === true ? 'ok' : 'bad', style: { marginTop: 8 } }, qualityRun.line),
+              quality === null || quality.output === ''
+                ? null
+                : h('pre', {
+                  className: HINT,
+                  'data-quality': quality.ok === true ? 'ok' : 'bad',
+                  style: { whiteSpace: 'pre-wrap', wordBreak: 'break-word', maxHeight: 180, overflow: 'auto', margin: '6px 0 0' },
+                }, String(quality.output).slice(-1500)),
+            )
+          })(),
+        ),
+      )
+  )
+
+  /* 执行记录页的六个区块：抽成具名函数后，顺序在调用处一眼可见（以前是 470 行内联 JSX）。 */
+  const renderFeedSection = () => (
+      h(Section, { pane: 'coding', current: pane, id: 'feed' },
+        h(SectionHead, null, '执行播报',
+          h('span', { className: HINT }, '派单会话在跑时的机器进度（工具 / 模型 / 回复摘要）。它不再写进讨论区——讨论区只留人和专家的评论')),
+        h('div', { className: SECTION_BODY, 'data-drawer-feed': '' },
+          (feedList.length === 0)
+            ? h('div', { className: HINT }, '这张卡还没有播报。派单会话跑起来后，这里会显示最近的机器进度。')
+            : h('div', { className: 'flex flex-col gap-2' },
+              ...feedList.slice().reverse().map((entry, index) => h('div', {
+                key: `${entry.at}-${index}`,
+                className: 'flex min-w-0 flex-col gap-1 rounded-lg bg-background-secondary-default px-3 py-2',
+                'data-feed-entry': '',
+              },
+                h('div', { className: 'flex min-w-0 items-center gap-2 text-caption-1-regular text-text-tertiary' },
+                  h('span', null, fmtTime(entry.at)),
+                  entry.expert ? h('span', { className: 'min-w-0 truncate' }, entry.expert) : null),
+                h('div', { className: 'whitespace-pre-wrap break-words text-caption-1-regular text-text-primary', style: { maxHeight: 200, overflow: 'auto' } }, String(entry.text ?? '')))),
+              feedCount > feedList.length
+                ? h('div', { className: HINT }, `只显示最近 ${feedList.length} 条，共 ${feedCount} 条`)
+                : null),
+        ),
+      )
+  )
+
+  /* 执行记录页的六个区块：抽成具名函数后，顺序在调用处一眼可见（以前是 470 行内联 JSX）。 */
+  const renderSkillSection = () => (
+      h(Section, { pane: 'coding', current: pane, id: 'skill' },
+        h(SectionHead, null, '技能沉淀',
+          h('span', { className: HINT }, '把这张卡上真实发生过的证据汇总成一条技能草稿（默认停用）')),
+        h('div', { className: SECTION_BODY },
+          h('div', { className: ROW, style: { gap: 8, alignItems: 'center', flexWrap: 'wrap' } },
+            h(Button, { variant: 'ghost', size: 'sm', disabled: busy || mine.busy, onClick: () => void mineSkill() },
+              mine.busy ? '汇总中…' : '把这张卡沉淀成技能'),
+            h('span', { className: HINT }, '只搬已有的验收锚点、跑过的命令、踩过的坑，不做推断；没有证据的卡不给沉淀。'),
+          ),
+          mine.line === '' ? null : h('div', { className: HINT, style: { marginTop: 8 } }, mine.line),
+        ),
+      )
+  )
+
   const columnLabel = (state.statuses.find(item => item.id === task.status) ?? {}).label ?? task.status
   const assignee = task.dispatch?.expert ? ownerLabel(state.config ?? {}, { kind: 'expert', id: task.dispatch.expert }) : ''
   return h('div', {
@@ -2043,478 +2539,12 @@ function Drawer({ task, state, onClose, onChanged, onOpenTask = null }) {
           task.design?.spec == null ? null : h('div', { className: HINT, style: { marginTop: 8 } }, `规范体检：查了 ${task.design.spec.checked} 个元素，${task.design.spec.violations} 处野值`),
         ),
       ),
-      h(Section, { pane: 'coding', current: pane, id: 'diff' },
-        h(SectionHead, null, '代码改动（git diff）',
-          h('span', { className: HINT }, '直接读仓库里的真实改动：卡的分支对比基线。左边文件树按目录分组，标了新增/修改/删除与行数')),
-        h('div', { className: SECTION_BODY, 'data-drawer-diff': '' },
-          (() => {
-            if (diffBusy) return h('div', { className: HINT, 'data-diff-loading': '' }, '读取中…')
-            if (diffError !== null) {
-              return h('div', { className: ROW, style: { gap: 8, alignItems: 'center' } },
-                h('div', { className: ERR_TEXT }, `读不到代码改动：${diffError}`),
-                h(Button, { variant: 'ghost', size: 'sm', onClick: () => void loadDiff() }, '再试一次'))
-            }
-            if (diffView === null) {
-              return h('div', { className: ROW, style: { gap: 8, alignItems: 'center' } },
-                h(Button, { variant: 'secondary', size: 'sm', onClick: () => void loadDiff() }, '读取代码改动'),
-                h('span', { className: HINT }, '从卡的 worktree（或项目代码目录）读分支相对基线的改动'))
-            }
-            if (String(diffView.skipped ?? '') !== '') return h(EmptyState, { title: diffView.skipped })
-            if (diffView.ok !== true) return h(EmptyState, { title: '读不到代码改动' })
-            const allFiles = Array.isArray(diffView.files) ? diffView.files : []
-            const fileQuery = diffQuery.trim().toLowerCase()
-            const files = fileQuery === '' ? allFiles : allFiles.filter(item => String(item.path).toLowerCase().includes(fileQuery))
-            const totals = diffView.totals ?? { files: 0, additions: 0, deletions: 0 }
-            const uncommitted = diffView.uncommitted ?? { total: 0, files: [], additions: 0, deletions: 0 }
-            /* 文件树：目录分组 + 改动标记（新增/修改/删除）+ 行数；点一个文件在下面看它的 patch。 */
-            const tree = buildDiffTree(files)
-            const selected = files.find(item => item.path === diffPath) ?? files[0] ?? null
-            const changeLabel = item => DIFF_CHANGE_LABEL[item.change] ?? '修改'
-            const changeClass = item => DIFF_CHANGE_CLASS[item.change] ?? ''
-            const renderNode = node => (node.kind === 'dir'
-              ? h(TreeViewItem, { key: node.id, id: node.id, label: node.name, textValue: node.path, title: node.path }, node.children.map(renderNode))
-              : h(TreeViewItem, {
-                key: node.id,
-                id: node.id,
-                label: node.name,
-                textValue: node.path,
-                'data-diff-file': node.path,
-                trailingContent: h('span', { className: 'flex items-center gap-2' },
-                  h('span', { className: changeClass(node.file), 'data-change': node.file.change }, changeLabel(node.file)),
-                  h('span', { className: 'text-state-success-text' }, `+${node.file.additions}`),
-                  h('span', { className: 'text-text-error-primary' }, `−${node.file.deletions}`)),
-              }))
-            const renderLine = (line, index) => h('div', {
-              key: `d-${index}`,
-              className: line.startsWith('+++') || line.startsWith('---')
-                ? 'text-text-tertiary'
-                : line.startsWith('+')
-                  ? 'text-state-success-text'
-                  : line.startsWith('-')
-                    ? 'text-text-error-primary'
-                    : line.startsWith('@@')
-                      ? 'text-accent-600'
-                      : 'text-text-secondary',
-            }, line === '' ? ' ' : line)
-            /* 「全文」：读工作树里的文件本体（只读、200KB 上限），带行号。 */
-            const renderFileView = item => {
-              if (fileView === null || fileView.path !== item.path) return h('div', { className: HINT }, '读取文件全文…')
-              if (fileView.busy === true) return h('div', { className: HINT, 'data-diff-fulltext-loading': '' }, '读取中…')
-              if (fileView.error !== null) return h('div', { className: ERR_TEXT }, `读不到全文：${fileView.error}`)
-              const data = fileView.data ?? {}
-              if (String(data.skipped ?? '') !== '') return h('div', { className: HINT }, data.skipped)
-              if (data.binary === true) return h('div', { className: HINT }, '二进制文件，不显示全文')
-              const text = String(data.content ?? '')
-              return h('pre', {
-                className: 'max-h-[420px] overflow-auto rounded-md bg-background-secondary-default p-2 text-caption-1-regular',
-                'data-diff-fulltext': item.path,
-                style: { whiteSpace: 'pre-wrap', wordBreak: 'break-word', margin: 0 },
-              },
-                text.split('\n').map((line, index) => h('div', { key: `f-${index}`, className: 'flex gap-2 text-text-secondary' },
-                  h('span', { className: 'shrink-0 select-none tabular-nums text-text-tertiary', style: { minWidth: '3em', textAlign: 'right' } }, String(index + 1)),
-                  h('span', { className: 'min-w-0 whitespace-pre-wrap break-words' }, line === '' ? ' ' : line))),
-                data.truncated === true ? h('div', { className: HINT }, '文件太大，只显示前 200 KB') : null)
-            }
-            return h('div', { className: 'flex min-w-0 flex-col gap-2' },
-              h('div', { className: ROW, style: { gap: 8, alignItems: 'center' } },
-                h(ChipField, { variant: 'gray', 'data-diff-range': '1' }, diffView.rangeLabel || `${diffView.branch || '(无分支)'} ← ${diffView.base}`),
-                h('span', { className: HINT, 'data-diff-totals': `${totals.files}-${totals.additions}-${totals.deletions}` },
-                  `${totals.files} 个文件 · +${totals.additions} −${totals.deletions}${diffView.truncated === true ? '（已截断）' : ''}`),
-                (diffView.commits ?? []).length === 0
-                  ? null
-                  : h('div', { className: 'w-56 max-w-full', 'data-diff-commit': '' },
-                    h(SelectField, {
-                      value: diffCommit,
-                      'aria-label': '看哪一次提交',
-                      onChange: event => { setDiffCommit(event.target.value); setDiffQuery(''); void loadDiff(event.target.value) },
-                    },
-                      h('option', { value: '' }, '全部改动'),
-                      diffView.commits.map(item => h('option', { key: item.sha, value: item.sha }, `${item.sha} ${String(item.subject).slice(0, 24)}`)))),
-                allFiles.length > 6 || diffQuery !== ''
-                  ? h('div', { className: 'w-40 max-w-full', 'data-diff-filter': '' },
-                    h(TextField, { value: diffQuery, placeholder: '筛文件路径…', 'aria-label': '筛文件', onChange: event => {
-                      const value = event.target.value
-                      setDiffQuery(value)
-                      const query = value.trim().toLowerCase()
-                      const hit = allFiles.filter(item => query === '' || String(item.path).toLowerCase().includes(query))
-                      setDiffPath(hit[0]?.path ?? '')
-                      setFileView(null)
-                    } }))
-                  : null,
-                h(Button, { variant: 'ghost', size: 'sm', disabled: diffBusy, onClick: () => void loadDiff() }, '刷新'),
-                (task.gitlabMR?.url ?? '') === ''
-                  ? null
-                  : h('a', { className: LINK, href: String(task.gitlabMR.url).replace(/\/$/, '') + '/diffs', target: '_blank', rel: 'noreferrer' }, '在 GitLab 看 diff')),
-              h('div', { className: HINT }, `仓库：${diffView.dir}`),
-              uncommitted.total > 0
-                ? h('div', { className: 'text-caption-1-regular text-status-yellow-text', 'data-diff-dirty': uncommitted.total },
-                  `还有 ${uncommitted.total} 个文件没提交（+${uncommitted.additions} −${uncommitted.deletions}）：这些改动不在分支上，评审和测试都看不到`)
-                : null,
-              files.length === 0
-                ? h('div', { className: HINT }, allFiles.length === 0 ? '这条分支相对基线没有代码改动。' : '没有匹配的文件。')
-                : h('div', { className: 'min-w-0', 'data-diff-tree': '' },
-                  h(TreeView, {
-                    // 刷新（at 变了）就重建：新出现的目录也要按默认全部展开，避免沿用旧的展开集合。
-                    key: `diff-tree-${diffView.at ?? ''}`,
-                    'aria-label': '改动的文件（按目录分组）',
-                    selectionMode: 'single',
-                    selectedKeys: diffPath === '' ? [] : [diffPath],
-                    defaultExpandedKeys: diffDirIds(tree),
-                    onSelectionChange: keys => {
-                      const next = Array.from(keys)
-                      selectDiffFile(next.length > 0 ? String(next[0]) : '')
-                    },
-                    size: 'sm',
-                    showGuides: true,
-                    // 跟随上游「树跟着内容长、滚动交给外层」：不再套一层 280px 内滚动。
-                    // 圆角与所在区块一致（上游默认 24px，套在 12px 的区块里会显得层级更深）。
-                    style: { borderRadius: 12 },
-                  }, tree.map(renderNode))),
-              files.length === 0
-                ? null
-                : (selected === null
-                  ? h('div', { className: HINT }, '在文件树里选一个文件，看它的改动内容。')
-                  : h('div', { className: 'flex min-w-0 flex-col gap-2', 'data-diff-content': selected.path },
-                    h('div', { className: 'flex min-w-0 flex-wrap items-center gap-2' },
-                      h('span', { className: 'font-mono text-caption-1-regular text-text-primary' }, selected.path),
-                      h('span', { className: changeClass(selected), 'data-change': selected.change }, changeLabel(selected)),
-                      h('span', { className: 'text-caption-1-regular text-state-success-text' }, `+${selected.additions}`),
-                      h('span', { className: 'text-caption-1-regular text-text-error-primary' }, `−${selected.deletions}`),
-                      selected.binary === true ? h('span', { className: HINT }, '二进制') : null,
-                      selected.truncated === true ? h('span', { className: HINT }, '已截断') : null,
-                      h('span', { className: GROW }),
-                      h(Button, { variant: diffMode === 'diff' ? 'secondary' : 'ghost', size: 'sm', 'data-diff-mode': 'diff', onClick: () => setDiffMode('diff') }, '改动'),
-                      h(Button, {
-                        variant: diffMode === 'file' ? 'secondary' : 'ghost',
-                        size: 'sm',
-                        'data-diff-mode': 'file',
-                        onClick: () => {
-                          setDiffMode('file')
-                          if (fileView === null || fileView.path !== selected.path) void loadFile(selected.path)
-                        },
-                      }, '全文'),
-                      h(Button, { variant: 'ghost', size: 'sm', 'data-diff-copy': 'path', onClick: () => void copyPlain(selected.path, '路径') }, '复制路径'),
-                      h(Button, { variant: 'ghost', size: 'sm', 'data-diff-copy': 'content', onClick: () => void copyPlain(diffMode === 'file' ? String(fileView?.data?.content ?? '') : selected.patch, diffMode === 'file' ? '全文' : 'diff') }, '复制内容')),
-                    diffMode === 'file'
-                      ? renderFileView(selected)
-                      : (selected.patch === ''
-                        ? h('div', { className: HINT }, '没有可显示的 patch（二进制文件或改动太大）')
-                        : h('pre', { className: 'max-h-[420px] overflow-auto rounded-md bg-background-secondary-default p-2 text-caption-1-regular', style: { whiteSpace: 'pre-wrap', wordBreak: 'break-word', margin: 0 } },
-                          String(selected.patch).split('\n').map(renderLine))))),
-              diffView.omitted > 0 ? h('div', { className: HINT }, `还有 ${diffView.omitted} 个文件没展开（改动太多）`) : null,
-            )
-          })(),
-        ),
-      ),
-      h(Section, { pane: 'coding', current: pane, id: 'skill' },
-        h(SectionHead, null, '技能沉淀',
-          h('span', { className: HINT }, '把这张卡上真实发生过的证据汇总成一条技能草稿（默认停用）')),
-        h('div', { className: SECTION_BODY },
-          h('div', { className: ROW, style: { gap: 8, alignItems: 'center', flexWrap: 'wrap' } },
-            h(Button, { variant: 'ghost', size: 'sm', disabled: busy || mine.busy, onClick: () => void mineSkill() },
-              mine.busy ? '汇总中…' : '把这张卡沉淀成技能'),
-            h('span', { className: HINT }, '只搬已有的验收锚点、跑过的命令、踩过的坑，不做推断；没有证据的卡不给沉淀。'),
-          ),
-          mine.line === '' ? null : h('div', { className: HINT, style: { marginTop: 8 } }, mine.line),
-        ),
-      ),
-      h(Section, { pane: 'coding', current: pane, id: 'quality' },
-        h(SectionHead, null, '项目检查',
-          h('span', { className: HINT }, '在这个项目的代码目录（有 worktree 就用它）里跑一条本地质量命令')),
-        h('div', { className: SECTION_BODY },
-          (() => {
-            const project = (state.config?.projects ?? []).find(item => item.id === task.project)
-            const services = project?.services ?? []
-            const service = services.find(item => item.id === task.service) ?? (services.length === 1 ? services[0] : undefined)
-            const cmd = String(service?.qualityCmd ?? '').trim() || String(project?.qualityCmd ?? '').trim()
-            if (cmd === '') {
-              return h(EmptyState, { title: '这个项目还没配检查命令。到「设置 → 平台 → 项目」填一条（如 npm run check）；配了以后，改过代码的卡要跑过它才能收口。' })
-            }
-            return h('div', { className: PANEL },
-              h('div', { className: PANEL_HEAD },
-                h(ChipField, {
-                  variant: 'gray',
-                  'data-review': quality === null ? 'pending' : (quality.ok === true ? 'approved' : 'changes_requested'),
-                }, quality === null ? '没跑过' : (quality.ok === true ? '通过' : '不通过')),
-                h('div', { className: GROW },
-                  h('div', { className: PANEL_LINE }, cmd),
-                  quality === null
-                    ? null
-                    : h('div', { className: HINT },
-                      `${fmtTime(quality.at)} · ${quality.by || '人'} · ${(Number(quality.ms) || 0) / 1000}s` +
-                      (quality.exitCode === null ? '' : ` · 退出码 ${quality.exitCode}`) +
-                      (quality.timedOut === true ? ' · 超时' : '') +
-                      (quality.cwd ? ` · ${quality.cwd}` : '')),
-                ),
-                h(Button, { variant: 'ghost', size: 'sm', disabled: busy || qualityRun.busy, onClick: () => void runQuality() },
-                  qualityRun.busy ? '跑检查中…' : (quality === null ? '跑一次' : '再跑一次')),
-              ),
-              qualityRun.line === ''
-                ? null
-                : h('div', { className: HINT, 'data-quality': quality?.ok === true ? 'ok' : 'bad', style: { marginTop: 8 } }, qualityRun.line),
-              quality === null || quality.output === ''
-                ? null
-                : h('pre', {
-                  className: HINT,
-                  'data-quality': quality.ok === true ? 'ok' : 'bad',
-                  style: { whiteSpace: 'pre-wrap', wordBreak: 'break-word', maxHeight: 180, overflow: 'auto', margin: '6px 0 0' },
-                }, String(quality.output).slice(-1500)),
-            )
-          })(),
-        ),
-      ),
-      h(Section, { pane: 'coding', current: pane, id: 'merge-gate' },
-        h(SectionHead, null, '合并门禁',
-          h('span', { className: HINT }, '把「能不能合」发成 GitLab 的 studio/merge-gate 提交状态；仓库要求状态检查时必须通过，合并按钮才会放行')),
-        h('div', { className: SECTION_BODY },
-          mergeGate === null
-            ? null
-            : h('div', { className: PANEL },
-              h('div', { className: PANEL_HEAD },
-                h(ChipField, {
-                  variant: 'gray',
-                  'data-review': mergeGate.state === 'success' ? 'approved' : 'changes_requested',
-                }, mergeGate.state === 'success' ? '通过' : '不通过'),
-                h('div', { className: GROW },
-                  h('div', { className: PANEL_LINE }, `${mergeGate.name} @ ${String(mergeGate.sha ?? '').slice(0, 8)}`),
-                  h('div', { className: HINT }, `${fmtTime(mergeGate.at)} · ${mergeGate.by || '人'}${mergeGate.error === '' ? '' : ` · ${mergeGate.error}`}`),
-                ),
-                h('span', { className: HINT }, `MR !${mergeGate.iid}`),
-              ),
-              (mergeGate.blockers ?? []).length === 0
-                ? null
-                : h('div', { className: HINT, 'data-warn': '1', style: { marginTop: 8 } },
-                  mergeGate.blockers.slice(0, 5).map((item, index) => h('div', { key: 'mg-' + index }, `· ${item}`))),
-            ),
-          h('div', { className: ROW, style: { gap: 8, alignItems: 'center', marginTop: 8, flexWrap: 'wrap' } },
-            h(Button, { variant: 'ghost', size: 'sm', disabled: busy || mergeRun.busy, onClick: () => void syncMergeGate() },
-              mergeRun.busy ? '发布中…' : '同步合并门禁'),
-            h(Button, {
-              variant: 'secondary', size: 'sm',
-              disabled: busy || mergeRun.busy || mergeGate === null || mergeGate.state !== 'success',
-              title: '门禁通过后由平台调用 GitLab 的 merge API。GitLab CE 拦不住人工点合并（没有外部状态检查），所以合并走这里才受管辖',
-              onClick: () => void mergeNow(),
-            }, '合并 MR'),
-            h('span', { className: HINT }, '需要卡片关联 MR、且配了 GitLab 项目。'),
-          ),
-          mergeRun.line === '' ? null : h('div', { className: HINT, style: { marginTop: 8 } }, mergeRun.line),
-        ),
-      ),
-      h(Section, { pane: 'coding', current: pane, id: 'feed' },
-        h(SectionHead, null, '执行播报',
-          h('span', { className: HINT }, '派单会话在跑时的机器进度（工具 / 模型 / 回复摘要）。它不再写进讨论区——讨论区只留人和专家的评论')),
-        h('div', { className: SECTION_BODY, 'data-drawer-feed': '' },
-          (feedList.length === 0)
-            ? h('div', { className: HINT }, '这张卡还没有播报。派单会话跑起来后，这里会显示最近的机器进度。')
-            : h('div', { className: 'flex flex-col gap-2' },
-              ...feedList.slice().reverse().map((entry, index) => h('div', {
-                key: `${entry.at}-${index}`,
-                className: 'flex min-w-0 flex-col gap-1 rounded-lg bg-background-secondary-default px-3 py-2',
-                'data-feed-entry': '',
-              },
-                h('div', { className: 'flex min-w-0 items-center gap-2 text-caption-1-regular text-text-tertiary' },
-                  h('span', null, fmtTime(entry.at)),
-                  entry.expert ? h('span', { className: 'min-w-0 truncate' }, entry.expert) : null),
-                h('div', { className: 'whitespace-pre-wrap break-words text-caption-1-regular text-text-primary', style: { maxHeight: 200, overflow: 'auto' } }, String(entry.text ?? '')))),
-              feedCount > feedList.length
-                ? h('div', { className: HINT }, `只显示最近 ${feedList.length} 条，共 ${feedCount} 条`)
-                : null),
-        ),
-      ),
-      h(Section, { pane: 'coding', current: pane, id: 'coding' },
-        h(SectionHead, null, 'AI Coding 执行记录',
-          h('span', { className: HINT }, coding === null ? '改代码要留记录：谁、什么模型、改了什么' : '研发 agent 登记，人也可以补录或评审')),
-        h('div', { className: SECTION_BODY },
-          coding === null
-            ? h(EmptyState, { title: '还没有执行记录。', hint: '让研发 agent 登记，或点下面的「手动补录执行记录」自己填：agent / 模型 / 分支 / 单测数' })
-            : h('div', { className: PANEL },
-              h('div', { className: PANEL_HEAD },
-                /* 语义上色：通过=绿、要求修改=红、待评审=黄。以前恒为 gray，只能靠读字分辨。 */
-                h(ChipField, { variant: REVIEW_CHIP_VARIANT[coding.review.status] ?? 'gray', 'data-review': coding.review.status }, CODING_REVIEW_LABEL[coding.review.status] ?? coding.review.status),
-               h('div', { className: GROW },
-                  h('div', { className: PANEL_LINE }, [coding.agent || '未登记 agent', coding.model, coding.branch].filter(Boolean).join(' · ')),
-                  coding.context === '' ? null : h('details', { 'data-coding-context': '' },
-                    h('summary', { className: HINT + ' cursor-pointer', title: coding.context }, coding.context.length > 80 ? coding.context.slice(0, 80) + '…' : coding.context),
-                    h('div', { className: HINT + ' mt-1 whitespace-pre-wrap break-words' }, coding.context)),
-                ),
-                (() => {
-                  const unit = coding.unitTests ?? {}
-                  const total = Number(unit.total) || 0
-                  const passed = Number(unit.passed) || 0
-                  const failed = Math.max(0, total - passed)
-                  if (total === 0) return h(ChipField, { variant: 'gray', title: '这次执行没有自报单测' }, '无单测')
-                  return h(ChipField, {
-                    variant: failed > 0 ? 'rose' : 'lime',
-                    title: '这次执行自报的单测结果（不是平台跑的）',
-                  }, `单测 ${passed}/${total}${failed > 0 ? ` · 失败 ${failed}` : ''}`)
-                })(),
-                worktree === null
-                  ? tipOf('这张卡还没有 worktree：先去「执行记录 → 工作树」建一个，或让研发登记分支',
-                    h(Button, { variant: 'ghost', size: 'sm', disabled: true }, '核对代码事实'))
-                  : tipOf(
-                  '拿 worktree 里的 git 记录，比执行记录里自报的提交 / 文件 / 分支',
-                  h(Button, {
-                    variant: 'ghost', size: 'sm', disabled: busy || verify.busy,
-                    onClick: () => void verifyCoding(),
-                  }, verify.busy ? '核对中…' : (verify.line === '' ? '核对代码事实' : '再核对一次')),
-                ),
-                h(Button, { variant: 'ghost', size: 'sm', disabled: busy, title: '拉 MR 的改动、逐条提交、流水线与 CI 单测结果，和自报的文件数/提交数/单测数比一遍', onClick: () => void verifyGitlab() }, '从 GitLab 核对'),
-              /* 结论行（独占一行，不参与头部宽度竞争）。四态：未同步 / 不适用 / 还差 N 项 / 已通过。
-                 以前 mergeGate===null 时 blockers 兜成空数组 → 直接写「已通过」，而这卡的门禁从未算过。 */
-              (() => {
-                const gate = task.mergeGate
-                const who = coding.review.by === '' ? '未记评审人' : coding.review.by
-                const when = coding.review.at > 0 ? fmtTime(coding.review.at) : '—'
-                const blockers = Array.isArray(gate?.blockers) ? gate.blockers : []
-                let gateText = '合并门禁：未同步（去下面「合并门禁」同步一次）'
-                if (gate !== null && gate !== undefined) {
-                  if (gate.applicable === false) gateText = '合并门禁：不适用（这张卡没有代码改动）'
-                  else if (blockers.length > 0) gateText = `合并门禁：还差 ${blockers.length} 项：${blockers.slice(0, 2).join('；')}${blockers.length > 2 ? ' 等' : ''}`
-                  else if (gate.state === 'success') gateText = '合并门禁：已通过'
-                  else if (gate.state === 'failed') gateText = '合并门禁：未通过（见下方门禁块）'
-                  else gateText = '合并门禁：待检查'
-                }
-                return h('div', { className: HINT, 'data-review-conclusion': coding.review.status, 'data-gate-state': gate === null || gate === undefined ? 'unsynced' : (gate.applicable === false ? 'n/a' : gate.state) },
-                  `${who} · ${when} · ${gateText}`)
-              })(),
-              ),
-              verify.line === ''
-                ? (coding.verified === null || coding.verified === undefined
-                  ? null
-                  : h('div', { className: HINT, 'data-verify': coding.verified.ok ? 'ok' : 'bad', style: { marginTop: 8 } },
-                    `${coding.verified.ok ? '' : '注意 · '}上次核对 ${fmtTime(coding.verified.at)}：分支 ${coding.verified.branch} · 提交 ${coding.verified.commitCount.actual} 个 · 改动 ${coding.verified.fileCount.actual} 个文件` +
-                    `${coding.verified.missingCommits.length + coding.verified.missingFiles.length === 0 ? '' : ` · ${coding.verified.missingCommits.length + coding.verified.missingFiles.length} 项对不上`}`))
-                : h('div', { className: HINT, 'data-verify': verify.ok === true ? 'ok' : 'bad', style: { marginTop: 8 } },
-                  `${verify.ok === true ? '' : '注意 · '}${verify.line}`),
-                              coding.gitlab === null || coding.gitlab === undefined
-                ? null
-                : h('div', null,
-                  h('div', { className: HINT, 'data-gitlab-facts': coding.gitlab.state },
-                    '上次 GitLab 核对 ' + fmtTime(coding.gitlab.at) + '：文件 ' + coding.gitlab.files.declared + '→' + coding.gitlab.files.actual +
-                    ' · 提交 ' + coding.gitlab.commits.declared + '→' + coding.gitlab.commits.actual +
-                    (coding.gitlab.pipeline === null ? '' : ' · 流水线 ' + coding.gitlab.pipeline) +
-                    (coding.gitlab.ci === null || coding.gitlab.ci === undefined
-                      ? ''
-                      : coding.gitlab.ci.source === 'test_report'
-                        ? ' · CI 单测 ' + coding.gitlab.ci.passed + '/' + coding.gitlab.ci.total + (coding.gitlab.ci.failed > 0 ? `（失败 ${coding.gitlab.ci.failed}）` : '')
-                        : ' · CI 任务 ' + coding.gitlab.ci.passed + '/' + coding.gitlab.ci.total + ' 成功' + (coding.gitlab.ci.failed > 0 ? `（失败 ${coding.gitlab.ci.failed}）` : '')) +
-                    ((coding.gitlab.mismatches ?? []).length === 0 ? ' · 一致' : ' · ' + coding.gitlab.mismatches.join('；'))),
-                  (coding.gitlab.commitList ?? []).length === 0 ? null : h('details', { 'data-gitlab-commits': '' },
-                    h('summary', { className: 'cursor-pointer text-caption-1-regular text-text-secondary' }, `MR 里 ${coding.gitlab.commitList.length} 次提交`),
-                    h('div', { className: 'mt-1 flex max-h-56 min-w-0 flex-col gap-1 overflow-auto pr-1' },
-                      coding.gitlab.commitList.slice(0, 20).map(item => h('div', { key: 'gl-' + item.id, className: LIST_LINE },
-                        h('code', { className: CODE_CHIP }, String(item.sha ?? '').slice(0, 8)),
-                        h('span', { className: GROW }, item.title || '(无提交说明)'),
-                        h('span', { className: HINT }, item.author || 'GitLab'),
-                      )),
-                      coding.gitlab.commitList.length > 20 ? h('div', { className: HINT }, `MR 里还有 ${coding.gitlab.commitList.length - 20} 次提交`) : null,
-                    )),
-                  (coding.gitlab.missingCommits ?? []).length === 0 ? null : h('div', { className: HINT, 'data-warn': '1' },
-                    '这些自报提交在 MR 里找不到：' + coding.gitlab.missingCommits.map(sha => String(sha).slice(0, 8)).join('、')),
-                ),
-              /* 提交明细默认折叠：有数据时能再叠 400px 上下，而「几次提交」在统计行里已经有了。 */
-              (coding.commits ?? []).length === 0 ? null : h('details', { 'data-coding-commits': '' },
-                h('summary', { className: 'cursor-pointer text-caption-1-regular text-text-secondary' }, `提交 ${coding.commits.length} 次`),
-                h('div', { className: 'mt-1 flex max-h-56 min-w-0 flex-col gap-1 overflow-auto pr-1' },
-                  coding.commits.slice(0, 20).map(item => h('div', { key: item.id, className: LIST_LINE },
-                    h('code', { className: CODE_CHIP }, item.sha.slice(0, 8)),
-                    h('span', { className: GROW }, item.message || '(无提交说明)'),
-                    h('span', { className: HINT }, `${item.files} 文件`),
-                  )),
-                  coding.commits.length > 20 ? h('div', { className: HINT }, `还有 ${coding.commits.length - 20} 次提交`) : null,
-                )),
-              /* 12 个文件以前铺成 4 行 chip（占全块 30% 高度），且「12 个文件 · +1563 −2」这个结论在界面上根本不存在。
-                 现在：一行统计（增/删带色）+ 按改动量 Top3 + 展开全部（限高内滚）。 */
-              (() => {
-                const files = coding.files ?? []
-                if (files.length === 0) return null
-                const totals = files.reduce((acc, item) => ({
-                  add: acc.add + (Number(item.additions) || 0),
-                  del: acc.del + (Number(item.deletions) || 0),
-                }), { add: 0, del: 0 })
-                const byWeight = [...files].sort((a, b) => ((Number(b.additions) || 0) + (Number(b.deletions) || 0)) - ((Number(a.additions) || 0) + (Number(a.deletions) || 0)))
-                const top = byWeight.slice(0, 3)
-                const rowOf = item => h('div', { key: item.id, className: 'flex min-w-0 items-baseline gap-2' },
-                  h('span', { className: 'min-w-0 truncate font-mono text-caption-1-regular text-text-primary', title: item.path }, item.path),
-                  Number(item.additions) > 0 ? h('span', { className: 'shrink-0 tabular-nums text-caption-1-regular text-state-success-text' }, `+${item.additions}`) : null,
-                  Number(item.deletions) > 0 ? h('span', { className: 'shrink-0 tabular-nums text-caption-1-regular text-text-error-primary' }, `−${item.deletions}`) : null,
-                )
-                return h('div', { className: 'flex min-w-0 flex-col gap-1', 'data-coding-files': '' },
-                  h('div', { className: 'flex min-w-0 flex-wrap items-baseline gap-2 text-caption-1-regular' },
-                    h('span', { className: 'text-text-secondary' }, `${files.length} 个文件`),
-                    totals.add > 0 ? h('span', { className: 'tabular-nums text-state-success-text' }, `+${totals.add}`) : null,
-                    totals.del > 0 ? h('span', { className: 'tabular-nums text-text-error-primary' }, `−${totals.del}`) : null,
-                  ),
-                  h('div', { className: 'flex min-w-0 flex-col gap-0.5' }, top.map(rowOf)),
-                  files.length > top.length
-                    ? h('details', { 'data-coding-files-rest': '' },
-                      h('summary', { className: 'cursor-pointer text-caption-1-regular text-text-secondary' }, `展开其余 ${files.length - top.length} 个`),
-                      h('div', { className: 'mt-1 flex max-h-56 min-w-0 flex-col gap-0.5 overflow-auto pr-1' }, byWeight.slice(3).map(rowOf)))
-                    : null,
-                )
-              })(),
-              coding.review.note === '' && coding.review.status === 'pending'
-                ? null
-                : h('div', { className: NOTE_BOX + ' text-text-primary', 'data-review-note': coding.review.status },
-                  h('div', { className: 'text-caption-1-medium text-text-secondary' },
-                    `评审意见${coding.review.by === '' ? '' : ` · ${coding.review.by}${coding.review.at > 0 ? ` · ${fmtTime(coding.review.at)}` : ''}`}`),
-                  coding.review.note === ''
-                    ? h('div', null, '（没有填写意见）')
-                    : h('details', { 'data-review-note-full': '' },
-                      h('summary', { className: 'cursor-pointer break-words' }, coding.review.note.length > 90 ? coding.review.note.slice(0, 90) + '…' : coding.review.note),
-                      h('div', { className: 'mt-1 whitespace-pre-wrap break-words' }, coding.review.note))),
-              h('div', { className: ROW },
-                h(TextField, {
-                  size: 'small',
-                  style: { flex: 1 }, value: reviewNote, placeholder: '评审意见（可选，写清文件/行为什么/怎么改）',
-                  onChange: event => setReviewNote(event.target.value),
-                }),
-                h(Button, { variant: 'primary', size: 'sm', disabled: busy, onClick: () => void reviewCoding('approved') }, busy ? '提交中…' : '评审通过'),
-                h(Button, { variant: 'secondary', size: 'sm', disabled: busy, onClick: () => void reviewCoding('changes_requested') }, '要求修改'),
-                /* 「标记已合并」删掉了：它只写 mergedAt（自报），并不真的合并，和「合并门禁 → 合并 MR」
-                   容易混成同义词。真合并留在合并门禁；这里只在已合并时显示一行事实。 */
-                coding.mergedAt > 0 ? h('span', { className: HINT }, `已合并 · ${coding.mergedBy || '—'}`) : null,
-              ),
-            ),
-          codingDraft === null
-            ? h('div', { className: ROW },
-              h(Button, { variant: 'ghost', size: 'sm', disabled: busy, onClick: openCoding }, coding === null ? '手动补录执行记录' : '编辑执行记录'))
-            : h('div', null,
-              h('div', { className: ROW },
-                h('div', { className: FIELD, style: { flex: 1 } },
-                  tipLabel('Coding Agent', '这次改代码的 agent 名字，只作记录，不影响派单'),
-                  h(TextField, { value: codingDraft.agent, placeholder: 'claude-code / codex / 自研', onChange: e => setCodingDraft({ ...codingDraft, agent: e.target.value }) }),
-                ),
-                h('div', { className: FIELD, style: { flex: 1 } },
-                  h('div', { className: LABEL }, '模型'),
-                  h(TextField, { value: codingDraft.model, placeholder: 'deepseek-v4.1-flash', onChange: e => setCodingDraft({ ...codingDraft, model: e.target.value }) }),
-                ),
-                h('div', { className: FIELD, style: { flex: 1 } },
-                  h('div', { className: LABEL }, '分支'),
-                  h(TextField, { value: codingDraft.branch, placeholder: 'feature/xxx', onChange: e => setCodingDraft({ ...codingDraft, branch: e.target.value }) }),
-                ),
-              ),
-              h('div', { className: ROW },
-                h('div', { className: FIELD, style: { flex: '0 0 110px' } },
-                  tipLabel('单测总数', '这次执行报的单测总数，可以 agent 写回，也可以手填'),
-                  h(TextField, { value: codingDraft.total, onChange: e => setCodingDraft({ ...codingDraft, total: e.target.value }) }),
-                ),
-                h('div', { className: FIELD, style: { flex: '0 0 110px' } },
-                  tipLabel('通过数', '通过的条数；少于总数时卡片过不了准出'),
-                  h(TextField, { value: codingDraft.passed, onChange: e => setCodingDraft({ ...codingDraft, passed: e.target.value }) }),
-                ),
-                h('div', { className: FIELD, style: { flex: 1 } },
-                  h('div', { className: LABEL }, '这次依据的上下文'),
-                  h(TextField, { value: codingDraft.context, placeholder: '例如 PRD v1.2 + 架构方案 v1', onChange: e => setCodingDraft({ ...codingDraft, context: e.target.value }) }),
-                ),
-              ),
-              h('div', { className: ROW },
-                h(Button, { variant: 'primary', size: 'sm', disabled: busy, onClick: () => void saveCoding() }, '保存执行记录'),
-                h(Button, { variant: 'ghost', size: 'sm', disabled: busy, onClick: () => setCodingDraft(null) }, '取消'),
-              ),
-            ),
-        ),
-      ),
+      renderCodingSection(),
+      renderDiffSection(),
+      renderMergeGateSection(),
+      renderQualitySection(),
+      renderFeedSection(),
+      renderSkillSection(),
         ),
         h('div', { className: 'flex min-w-0 flex-col gap-4' },
       h(Section, { pane: 'test', current: pane, id: 'checklist' },

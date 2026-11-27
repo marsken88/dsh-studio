@@ -424,9 +424,23 @@ try {
     const button = [...document.querySelectorAll('[data-case-edit] button')].find(node => String(node.textContent ?? '').trim() === '取消')
     button?.click()
   })
-  await new Promise(resolve => setTimeout(resolve, 300))
-  await page.keyboard.press('Escape')
-  await new Promise(resolve => setTimeout(resolve, 300))
+  await new Promise(resolve => setTimeout(resolve, 400))
+  /* 以前这里无条件按 Escape：那时「改定义」是弹层，Esc 关弹层；现在表单在抽屉内，
+     Esc 会把整个抽屉关掉 —— 后面的 ②a2/②b/②c2 就全在找已经不在的抽屉（2026-11-27 实测 9 条红）。
+     只在真有对话框时才按 Esc，并按需把抽屉重新打开。 */
+  const dialogOpen = await page.evaluate(() => document.querySelector('[role="dialog"], [role="alertdialog"]') !== null)
+  if (dialogOpen) {
+    await page.keyboard.press('Escape')
+    await new Promise(resolve => setTimeout(resolve, 300))
+  }
+  const drawerAlive = await page.evaluate(() => document.querySelector('[data-drawer-kv]') !== null
+    || document.querySelectorAll('[data-dsh-studio] [role="tab"]').length > 8)
+  if (!drawerAlive) {
+    await page.evaluate(() => [...document.querySelectorAll('[data-kanban-card]')]
+      .find(node => String(node.textContent ?? '').includes('（探针）看板卡片'))?.click())
+    await new Promise(resolve => setTimeout(resolve, 1200))
+    console.log('ℹ 抽屉被关掉了：已重新打开探针卡（后续 ②a2/②b/②c2 依赖它）')
+  }
 
   /* ②a2 执行记录 → 代码改动：真实 git diff 的入口。
      探针卡没配代码目录，这里验两件事：区块在、而且说清了为什么读不到（不空着不报错）。 */
