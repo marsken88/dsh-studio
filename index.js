@@ -2591,6 +2591,7 @@ export function apply(ctx) {
     configureTaskRoutes({
       sendJson,
       readJsonBody,
+      recordAudit,
       createTask,
       updateTask,
       commentTask,

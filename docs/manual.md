@@ -326,6 +326,8 @@ studio_task_check          { id, itemId, note }         // 清单逐项勾，附
 | 项目检查一直是「没跑」 | 设置 → 项目 → 检查命令 | 配 `qualityCmd`（如 `npm run check`）；准出门禁要求它跑过且通过 |
 | 需求签不了字 | 需求页的 gate 阻塞项 | 卡没完成 / 有未结缺陷 / 功能点没用例覆盖 / **可执行用例低于 60%**，逐项补 |
 | 版本发不出去 | 版本详情里的门禁 | 有未完成卡、阻塞卡、未结缺陷、失败用例，或**没有审批记录**都会拦。**审批按钮在其它门禁没清时会灰着**（鼠标停在上面能看到还差哪几条）：先把卡 / 用例 / 冒烟 / tag 补齐，点「审批通过」写结论，再发布。审批后可以**撤销**（回到待发布、要重新审批）；已发布的版本不能撤销 |
+| 想先确认 WeKnora 配得对不对 | 设置 → 文档出口 →「测试连接」 | 先保存再测（测的是已保存的连接）：读一次知识库列表，明确区分「连不上 / Key 不对（401）/ 能连上但看不见这个知识库」。结果同时进「集成健康 → WeKnora 知识库」 |
+| 点「整批跑用例」提示「已提交后台执行」 | 这是有意为之 | 一条用例最长 600s，整批同步等会被反代 60s 断连；结果写回各自的卡，刷新可见。脚本要同步结果传 `wait: true` |
 | 交付物同步到 WeKnora 失败 | 设置 → 文档出口、`doc.error` | 只写知识库时它才是主出口，失败会直接抛：先确认 URL / API Key / 租户 / 知识库 id；`both` 时 WeKnora 失败只记 error，不挡登记；写完会自动 reparse，没 reparse 检索查不到 |
 | 合并按钮/命令被拒 | 抽屉「合并门禁」与 GitLab | GitLab CE 没有状态检查，合并不由按钮拦，而是平台调 merge API：评审、可执行用例、项目检查、代码事实任一项没过都拒绝，并给出具体原因；合并动作要管理员 |
 | 浏览器用例跑不了 | 设置 → 测试执行、`allowBrowser` | 需要开 `allowBrowser` + 本机有 Chrome/Edge + 装得上 puppeteer-core；相对地址要配测试环境 baseUrl。CI 里 ubuntu runner 自带 Chrome，所以那边会真跑 |
@@ -335,6 +337,27 @@ studio_task_check          { id, itemId, note }         // 清单逐项勾，附
 | 准出被「这张是代码/测试类卡，但一条测试用例都没有」拦住 | 卡的「测试」页签 | 补一条**带可执行定义**的用例（http / shell / db / 浏览器任一）并跑通；产品或设计卡不会撞这条。确实不适用时，管理员可在「设置 → 列的负责人 → 用例闸门」关掉，关掉后只是 warning |
 | 准出被「三条测试线还有缺口」拦住 | 卡的「测试」页签 → 三层测试进度 | 每条线要么补一条**带可执行断言**的用例（单元用 shell 跑单测命令、集成用 http/db、端到端用 browser），要么在抽屉里点「不适用」并写明理由（等价于 `studio_task_test_plan`）。`studio_task_add_cases` 的每一条都可带 `tier`；不写会按断言推断。确实不想要这道闸门时，到「设置 → 列的负责人」关掉「三层测试闸门」（= `config.caseGate.tiers=false`），存量卡就不会被拦 |
 | `npm run shots` 拍出来的图是全白的 | 构建时有没有 console 报错、harness 的 `/react.js` 是否 404 | 工作树的 `web/node_modules` 不全时，假宿主的 React UMD 加载失败 → 面板渲染成空白（`pageerror` 不报）。补齐依赖后重跑；`capture.mjs` 现在会把 console error 也记进错误列表 |
+
+## §8.1 只对脚本 / 工具开放的能力（面板里没有按钮，不是坏了）
+
+有些接口是给自动化用的，故意不做界面 —— 免得每个能力都往单文件产物里塞一份 UI。
+找不到入口时先看这张表，别当成 bug：
+
+| 能力 | 怎么用 | 为什么没做界面 |
+| --- | --- | --- |
+| 为什么我被拒了 | `POST /studio-api/access/explain {route, method}` | 排障用，人看的是面板上的报错文案 |
+| 可用模型清单 | `GET /studio-api/models` | 专家的模型目前是自由填写的字符串，接成下拉要等模型路由定稿 |
+| 事件账本回查 | `GET /studio-api/events?since=<seq>&limit=100` | 给 webhook 消费方对账用；面板看的是卡片流转 |
+| 派单日志导出 | `GET /studio-api/export/dispatch.csv`（仅本机） | 内容是操作人姓名，按敏感导出处理 |
+| 审计导出 | `GET /studio-api/audit/export.csv`（仅本机） | 同上 |
+| 探活某个模型通道 | `POST /studio-api/agents/probe` | 派单失败时由巡检脚本调用 |
+| 把订阅的会话从工作区摘掉 | `POST /studio-api/workspace/detach` | 管理动作用 `tools/workspace-dedupe.mjs` 走 |
+| 多维表格镜像 | 面板已有按钮（设置 → 飞书机器人）；接口 `POST /studio-api/feishu/mirror` | — |
+| 需求带进度的一览 | `GET /studio-api/requirements` | 面板用的是 `/state` 里的需求 + 抽屉里的矩阵；这个接口留给脚本 |
+| 只读一份集成健康 | `GET /studio-api/integrations/health` | 与 `/state` 的 `integrations` 同一份 `healthReport()`，给监控脚本用（省掉整包） |
+
+> 这几条**保留**而不是删掉：都是只读、成本极低，删了对写脚本的人是破坏性变更。
+> 找不到按钮时先看本表，别当成 bug —— 真正的坑是「接口没有、面板也没有」。
 
 ---
 

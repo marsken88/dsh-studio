@@ -1,5 +1,7 @@
-import { INTEGRATION, feishuPush, gitlabReady, gitlabRequest, gitlabSync, healthReport, projectReady } from '../integrations.js'
+import { INTEGRATION, feishuPush, gitlabReady, gitlabRequest, gitlabSync, healthReport, markHealth, projectReady } from '../integrations.js'
 import { cleanId } from '../domain.js'
+import { sanitizeWeKnoraSink } from '../doc-sink.js'
+import { probeWeknora } from '../weknora-sink.js'
 const INJECTED = ['mirrorCardsToBitable', "applyConfig","installedPackages","publicState","readJsonBody","resolvePackageName","runPluginCli","sendJson","getSyncTimer","upsertById"]
 let host = {
   mirrorCardsToBitable: () => ({ ok: false, error: '未注入' }),
@@ -74,6 +76,7 @@ if (method === 'GET' && route === '/integrations') {
   })
   return true
 }
+
 if (method === 'GET' && route === '/integrations/health') {
   host.sendJson(res, 200, { ok: true, ...healthReport() })
   return true
@@ -173,6 +176,17 @@ if (method === 'POST' && route === '/feishu/test') {
     }
   }
   host.sendJson(res, 200, { ok: results.some(entry => entry.ok === true), results })
+  return true
+}
+if (method === 'POST' && route === '/docs/test') {
+  /* 文档出口探活：只读一次知识库列表，确认地址 / API Key / 知识库 id 三件事能对上。
+     以前填错只能等第一次归档交付物才炸，面板与集成健康都没有任何提示。 */
+  const config = store.snapshot().config
+  const sink = sanitizeWeKnoraSink(config.docs?.weknora)
+  const result = await probeWeknora({ sink, timeoutMs: 8000 })
+  const healthy = result.ok === true && result.knowledgeBaseFound === true
+  markHealth('weknora', healthy ? 'ok' : 'fail', String(result.error ?? (healthy ? '知识库可达' : '连接失败')).slice(0, 160))
+  host.sendJson(res, 200, { ok: healthy, ...result })
   return true
 }
 if (method === 'POST' && route === '/reset') {

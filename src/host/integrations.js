@@ -26,6 +26,8 @@ const CHANNELS = {
   feishu: { label: '飞书群通知', hint: '卡片状态变化往群里发消息的 webhook' },
   gitlab: { label: 'GitLab', hint: '拉 Issue、回写评论、对 MR' },
   drive: { label: '飞书云盘归档', hint: '需求文件夹与产物文档（lark-cli）' },
+  /* WeKnora 出口以前不进健康面板：填错了只能等第一次归档才炸，面板上永远是绿的。 */
+  weknora: { label: 'WeKnora 知识库', hint: '交付物投递到知识库（retrieve 能力）' },
   worktree: { label: '代码隔离', hint: 'git worktree 的创建与回收' },
   webhook: { label: '出站 webhook', hint: '卡片流转/用例失败/门禁/回归结果推给外部系统' },
 }

@@ -41,7 +41,7 @@ function originOf(req) {
   return host === '' ? '' : `${proto}://${host}`
 }
 
-const INJECTED = ['sendJson', 'readJsonBody', 'createTask', 'updateTask', 'commentTask', 'runTaskCases', 'syncArtifact', 'getDispatcher', 'applyConfig', 'autoBugFromCase', 'publicState', 'upsertById']
+const INJECTED = ['sendJson', 'readJsonBody', 'recordAudit', 'createTask', 'updateTask', 'commentTask', 'runTaskCases', 'syncArtifact', 'getDispatcher', 'applyConfig', 'autoBugFromCase', 'publicState', 'upsertById']
 
 let host = {
   sendJson: () => {},
@@ -866,12 +866,23 @@ export async function handleTaskRoute({ method, route, req, res, store, url }) {
   }
   if (method === 'POST' && route === '/tests/run') {
     const body = await host.readJsonBody(req)
-    const result = await runSuite(store, {
+    const options = {
       taskIds: Array.isArray(body.taskIds) ? body.taskIds : undefined,
       env: body.env,
       by: String(body.by ?? '测试').slice(0, 40),
       concurrency: body.concurrency,
-    })
+    }
+    /* 整批回归可能跑几分钟（一条用例最长 600s）：同步等会被反代 60s 断连，
+       面板报错而用例还在跑。默认「提交即返回 202」，结果写回各自的卡，靠 /state 轮询看；
+       脚本要同步结果就传 wait:true（与 /task/quality 同一套口径）。 */
+    if (body.wait !== true) {
+      host.sendJson(res, 202, { ok: true, queued: true, note: '已提交后台执行：跑完结果写回各张卡（刷新可见）' })
+      void runSuite(store, options).catch(error => {
+        host.recordAudit?.(store, { by: options.by, route: '/tests/run', level: 'write', status: 500, ok: false, summary: `整批回归没跑成：${String(error?.message ?? error).slice(0, 120)}` })
+      })
+      return true
+    }
+    const result = await runSuite(store, options)
     host.sendJson(res, 200, { ok: true, concurrency: result.concurrency, tasks: result.tasks, state: result.state })
     return true
   }

@@ -94,3 +94,44 @@ export async function uploadToWeknora({ sink, title, markdown, previousKnowledge
     warning: reparsed.ok === true ? '' : `已入库但触发解析失败（${reparsed.error}），需要人工 reparse`,
   }
 }
+
+/**
+ * 连接探活：只读一次「知识库列表」，确认地址、API Key、知识库三件事能对上。
+ *
+ * 为什么要它：以前填错只能等第一次归档交付物才炸，而且失败还只是记在交付物上；
+ * 面板里没有任何「测一下」的入口，集成健康里也没有 WeKnora 这条通道。
+ *
+ * 判据：
+ *   · 连不上 / 超时 / 401 → ok:false，原文带上（不打印 key）；
+ *   · 列表里能找到 knowledgeBaseId → ok:true 且 knowledgeBaseFound:true；
+ *   · 能找到但列表里没有它 → ok:true 但 knowledgeBaseFound:false（地址与 key 是对的，
+ *     多半是知识库 id 抄错，或者这个 key 看不见那个库）。
+ */
+export async function probeWeknora({ sink, fetchImpl, timeoutMs = 8000 } = {}) {
+  const ready = weknoraReady(sink)
+  if (!ready.ok) return { ok: false, knowledgeBaseFound: false, error: `WeKnora 出口没配全：缺 ${ready.missing.join(' / ')}` }
+  const doFetch = typeof fetchImpl === 'function' ? fetchImpl : globalThis.fetch
+  if (typeof doFetch !== 'function') return { ok: false, knowledgeBaseFound: false, error: '当前运行环境没有 fetch' }
+  const base = trim(sink.baseUrl, 300).replace(/\/+$/, '')
+  const kb = trim(sink.knowledgeBaseId, 60)
+  const headers = { 'X-API-Key': trim(sink.apiKey, 200) }
+  const tenantId = trim(sink.tenantId, 40)
+  if (tenantId !== '') headers['X-Tenant-ID'] = tenantId
+  const listed = await callJson(doFetch, `${base}/knowledge-bases`, { method: 'GET', headers }, timeoutMs)
+  if (listed.ok !== true) {
+    const hint = listed.status === 401 || listed.status === 403 ? 'API Key 不对或没有列出知识库的权限' : listed.error
+    return { ok: false, knowledgeBaseFound: false, status: listed.status, error: hint }
+  }
+  const items = Array.isArray(listed.body?.data) ? listed.body.data
+    : Array.isArray(listed.body) ? listed.body
+      : Array.isArray(listed.body?.data?.items) ? listed.body.data.items
+        : []
+  const found = items.some(item => String(item?.id ?? item?.knowledge_base_id ?? '') === kb)
+  return {
+    ok: true,
+    knowledgeBaseFound: found,
+    status: listed.status,
+    count: items.length,
+    error: found ? '' : `地址与 Key 都能用，但这个 Key 看不见知识库 ${kb}（共 ${items.length} 个）`,
+  }
+}

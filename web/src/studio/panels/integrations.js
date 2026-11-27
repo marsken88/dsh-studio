@@ -598,6 +598,9 @@ export function DocsSinkPanel({ config, onChanged }) {
   const [addProvider, setAddProvider] = React.useState('feishu')
   const [busy, setBusy] = React.useState(false)
   const [note, setNote] = React.useState(null)
+  /* 探活的状态与保存分开：测试不该改动草稿，也不该被「未保存」影响。 */
+  const [testBusy, setTestBusy] = React.useState(false)
+  const [testNote, setTestNote] = React.useState(null)
   const projectOf = id => projects.find(item => String(item.id ?? '') === id)
   /* 保存后用回读值刷新本地状态（R7）：apiKey 回读恒空，控件回到「留空保持不变」的占位。 */
   const applyReadback = next => {
@@ -713,6 +716,23 @@ export function DocsSinkPanel({ config, onChanged }) {
       fieldOf(h, '知识库 ID',
         h(TextField, { value: kb, placeholder: 'deba6be0-…', onChange: event => setKb(event.target.value) }),
         '交付物会以 manual 文档写进这个库，并自动触发 reparse'),
+      /* 探活：以前填错只能等第一次归档交付物才炸；现在能在这里测。 */
+      h('div', { className: ROW },
+        h(Button, {
+          variant: 'secondary', size: 'sm', disabled: busy || testBusy, 'data-docs-test': '',
+          onClick: async () => {
+            setTestBusy(true); setTestNote(null)
+            try {
+              const out = await api('/docs/test', {})
+              setTestNote(out.ok === true
+                ? `连接正常：能看见知识库（共 ${out.count ?? 0} 个）`
+                : `连不上：${String(out.error ?? '检查地址 / Key / 知识库 id')}`)
+            } catch (cause) { setTestNote(cause instanceof Error ? cause.message : String(cause)) } finally { setTestBusy(false) }
+          },
+        }, testBusy ? '测试中…' : '测试连接'),
+        h('span', { className: HINT }, '先保存再测：测的是已保存的连接；结果也会进「集成健康」'),
+        testNote === null ? null : h('span', { className: HINT, role: 'status', 'data-docs-test-note': '' }, testNote),
+      ),
     ),
     h('div', { className: SECTION, 'data-section': 'per-project' },
       h('div', { className: SECTION_TITLE }, '项目级覆盖'),
