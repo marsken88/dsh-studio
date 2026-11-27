@@ -39,7 +39,8 @@ const ERR_TEXT = 'text-caption-1-regular text-text-error-primary'
 const OK_TEXT = 'text-caption-1-regular text-state-success-text'
 const WARN_TEXT = 'whitespace-nowrap text-caption-1-semibold text-text-error-primary'
 const LIST_LINE = 'flex min-w-0 items-center gap-2 border-b border-separator-border py-2 last:border-b-0'
-const NOTE_BOX = 'rounded-lg bg-background-secondary-default p-2 text-caption-1-regular text-text-secondary'
+/* 不带文字色：调用点按场景给（评审意见正文用 primary）。带 text-secondary 会把调用点压掉。 */
+const NOTE_BOX = 'rounded-lg bg-background-secondary-default p-2 text-caption-1-regular'
 const LINK = 'text-caption-1-regular text-accent-600 hover:underline'
 /* 列表行：交付物、用例都用它；左边一条竖线表示结果（失败红、通过绿、未跑灰）。 */
 const LIST_ROW = 'flex min-w-0 items-center gap-2 border-b border-l-2 border-separator-border py-2 last:border-b-0 border-l-separator-border'
@@ -1461,7 +1462,10 @@ function Drawer({ task, state, onClose, onChanged, onOpenTask = null }) {
                 const who = coding.review.by === '' ? '未记评审人' : coding.review.by
                 const when = coding.review.at > 0 ? fmtTime(coding.review.at) : '—'
                 const blockers = Array.isArray(gate?.blockers) ? gate.blockers : []
-                let gateText = '合并门禁：未同步（去下面「合并门禁」同步一次）'
+                const hasMr = Number(task.gitlabMR?.iid ?? 0) > 0
+                let gateText = hasMr
+                  ? '合并门禁：未同步（去下面「合并门禁」同步一次）'
+                  : '合并门禁：还没关联 MR（填了 MR 号再同步）'
                 if (gate !== null && gate !== undefined) {
                   if (gate.applicable === false) gateText = '合并门禁：不适用（这张卡没有代码改动）'
                   else if (blockers.length > 0) gateText = `合并门禁：还差 ${blockers.length} 项：${blockers.slice(0, 2).join('；')}${blockers.length > 2 ? ' 等' : ''}`
@@ -1807,8 +1811,12 @@ function Drawer({ task, state, onClose, onChanged, onOpenTask = null }) {
                   mergeGate.blockers.slice(0, 5).map((item, index) => h('div', { key: 'mg-' + index }, `· ${item}`))),
             ),
           h('div', { className: ROW, style: { gap: 8, alignItems: 'center', marginTop: 8, flexWrap: 'wrap' } },
-            h(Button, { variant: 'ghost', size: 'sm', disabled: busy || mergeRun.busy, onClick: () => void syncMergeGate() },
-              mergeRun.busy ? '发布中…' : '同步合并门禁'),
+            h(Button, {
+              variant: 'ghost', size: 'sm',
+              disabled: busy || mergeRun.busy || !(Number(task.gitlabMR?.iid ?? 0) > 0),
+              title: Number(task.gitlabMR?.iid ?? 0) > 0 ? '把「能不能合」算一遍并发成 GitLab 提交状态' : '这张卡还没关联 MR，先填 MR 号',
+              onClick: () => void syncMergeGate(),
+            }, mergeRun.busy ? '发布中…' : '同步合并门禁'),
             h(Button, {
               variant: 'secondary', size: 'sm',
               disabled: busy || mergeRun.busy || mergeGate === null || mergeGate.state !== 'success',

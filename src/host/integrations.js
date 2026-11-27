@@ -486,6 +486,9 @@ export async function publishMergeGate(store, taskId, { by = 'agent' } = {}) {
     || String((task.coding?.commits ?? []).at(-1)?.sha ?? '')
   const base = {
     at: Date.now(),
+    /* 与 merge-gate.js 同一判据：没有代码改动、也没有关联 MR 时门禁「不适用」。
+       以前这里不带 applicable，sanitize 默认成 true，面板的「不适用」态永远走不到。 */
+    applicable: gate.applicable !== false,
     by: String(by ?? 'agent').slice(0, 40),
     state: gate.ready ? 'success' : 'failed',
     name: MERGE_GATE_NAME,

@@ -1765,3 +1765,53 @@ header id ... and cwd identify ".../studio-t-5d1d2ad4-architect/..."` —— 宿
 
 真机取证：`actionsBelowConclusion=true`、`noteInputHidden=true`、`hasNoteToggle=true`、`gitlabDisabled=true`；
 `probe:panel 101/101`、`tests 799`（新增 3 条守卫，exec-record 共 12 条）。
+
+### 同日晚（终验必修项：深色 success 色、不适用可达、按 MR 分档、三条断言）
+
+两位专家终验后只拦下两条必修 + 一条流程问题，其余判定「可以收口」。这批发：
+
+- **深色 `--color-state-success-text`**：上一轮我插进 `.dark` 的脚本被文件里**同名自引用行**（`--color-state-success-text: var(--color-state-success-text)`）
+  骗过，判断「已有」而实际没落地 —— 深色 `+1730` 一直停在 lime-800（2.15:1）。这次按「.dark 块行范围」逐行检查后再插入，
+  真机实测 token = `oklch(76.8% .233 130.85)`（lime-500）、`data-theme=dark`、深浅截图 md5 不同。
+  **这是同一个坑第二次**（第一次是 `REVIEW_CHIP_VARIANT` 常量）：判断「要不要插入」必须看**定义所在的块**，不能看整个文件有没有这个名字。
+- **「不适用」态可达**：`publishMergeGate` 落库的 `base` 不带 `applicable`，`sanitizeMergeGate` 默认成 true → 四态里的「不适用」永远走不到。
+  现在 `base.applicable = gate.applicable !== false`。
+- **结论行按有没有 MR 分档**：没 MR 的卡（真机 5/7 张）以前被指挥「去下面同步一次」，而那个按钮必然失败。
+  现在写「合并门禁：还没关联 MR（填了 MR 号再同步）」，且「同步合并门禁」按前置 disabled。
+- **三条断言补上**（UX 指出：顺序与四态没有任何自动断言，`applicable` 这个 bug 已犯两次）：
+  `probe:panel` 新增 ②a3 两条（第一块必须是 `coding`、未同步的卡不得出现「已通过」）；
+  新增 `tests/merge-gate-applicable.test.mjs` 三条（保留 false / 默认 true / 往返不丢字段）。
+- 顺手：`textarea` 的 placeholder 也提到 secondary（上一批只改了 input）；`NOTE_BOX` 不再带文字色（它压掉了调用点的 primary）。
+
+真机：`probe:panel 103/103`、`tests 807`（806 通过 / 1 跳过）、深色截图 `dataTheme=dark` 且与浅色 md5 不同。
+
+### 同日晚（效能页评审 P0）：一条吸顶行、一张告警表、一个总数
+
+三位专家（UI 设计师 / UX 架构师 / 视觉验收）评审效能页截图，**三人独立指到同一个真 bug**，这批修 P0：
+
+- **两层 sticky 同 `top-0 z-10` 互相遮挡**：筛选行（`analytics.js:245`）与页签行（`:288`）都用同一个 `STICKY`，
+  滚动后页签条把「项目 / 区间」两个 Select **完全盖住、点不到**（截图里 KPI 被横切成裸数字就是它）。
+  现在只保留**页签行吸顶**（加 `border-b` 说明这是一层工具条），筛选行随内容滚走 ——
+  同一时刻只允许一条吸顶行。真机滚动 900px 验证：页签 `position=sticky`、两个 Select 已滚出视口、无遮挡。
+- **用例缺口总数低报**：后端 `byCard` 只回 10 条（`index.js:776`），前端拿 `rows.length` 当总数 ——
+  11 张卡缺断言时界面写「10 张卡」。现在后端多给一个 `byCardTotal`，前端写「共 N 张卡（按缺口排序列出前 10 张）」。
+- **告警线收成一张表**：阈值以前在结论条与 KPI 卡各写一次，还写得不一致（自动化率只有结论条判、卡片从不标红），
+  而且「目标 40–70%」与判定 `<30% 或 >90%` 不是同一条线 —— 89.7% 四舍五入显示 **90%** 却不报警。
+  现在 `ALARM` 一处定义，`alarmHit()` 判定（用未取整的值）、`alarmText()` 显示（**落在告警线上时补一位小数**）。
+  真机验证：门禁 KPI 现在显示 **89.7%**（不再是 90%），结论条不误报。
+- 顺带把命名统一成「**验收一次通过率**」（与「一次通过率 73%」区分开：前者分母是到过待验收的卡）。
+
+`probe:panel 103/103`、`tests 812`（811 通过 / 1 跳过）、真机截图见 `tmp/ui-review/analytics-2/after/`。
+
+### 同日晚（效能页评审 P1）：页签权重、左轨、四列、计数列
+
+- **选中页签不再是最弱的元素**：BoardUI 的 `ghost` 变体是「accent-100 蓝底 + accent-700 蓝字」，
+  而选中项用 `secondary`（浅灰底）—— 实测选中 `#fefefe` 对条底 **1.07:1**、未选中反而 **5.60:1**，权重完全倒挂。
+  现在用属性选择器（0,2,0 特异性，压过组件工具类）：未选中透明底 + 次要文字色，**只有选中项**有强调色与 `accent-500` 边框。
+  真机实测：选中 白底/primary 字/accent 边框，未选中 透明底/`#707070` 字。
+- **分区标题回到同一条左轨**：`SECTION` 少了 `px-4`，每个分区标题都比面板标题左移 16px。真机实测两者都是 **296**。
+- **四张卡不再用五列**：「其它读数」只有 4 张，5 列网格右侧空一整格（面板宽 20%）。改 `xl:grid-cols-4`，
+  真机四张卡各 313px、行宽 1288，无空槽。
+- 用例缺口的计数列改成**等宽右对齐**（`tabular-nums` + `text-end` + 固定最小宽），一列数字能竖着比。
+
+`probe:panel 103/103`、`tests 812`、截图 `tmp/ui-review/analytics-2/after/analytics-p1.png`。

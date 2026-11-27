@@ -24,12 +24,39 @@ const CTX_CHIP = 'flex min-w-[84px] flex-col gap-1 rounded-lg border border-sepa
    而分区自己 overflow-hidden，里面的内容就被裁掉（工作台出现「空条」的根因）。 */
 /* 正文用 text-secondary：text-tertiary 在浅色只有 2.58:1、深色 1.94:1，正文读不清（UI 评审 P0-2）。 */
 const HINT = 'text-caption-1-regular text-text-secondary'
-const SECTION = 'mt-4 flex flex-wrap items-baseline gap-2 border-t border-neutral-200 pt-3 text-body-2-medium text-text-secondary dark:border-neutral-600'
+/* px-4：面板标题与正文都在 16px 处，分区标题以前贴边，每个分区都错一格左轨。 */
+const SECTION = 'mt-4 flex flex-wrap items-baseline gap-2 border-t border-separator-border px-4 pt-3 text-body-2-medium text-text-secondary'
 const FOOT = 'mt-2 border-t border-neutral-200 pt-2 text-caption-1-regular text-text-secondary dark:border-neutral-600'
 const KV = 'flex items-baseline justify-between gap-3 border-b border-neutral-200 py-1 text-body-2-regular last:border-b-0 dark:border-neutral-700'
 const ROW = 'flex min-w-0 flex-wrap items-center gap-2'
 const GRID = 'grid grid-cols-1 gap-3 xl:grid-cols-12'
+/* 告警线只有这一份：结论条与 KPI 卡的标红以前各写一次（还写得不一致——自动化率只有结论条判、
+   卡片从不标红）。目标区间也放这里，文案里的「目标 40–70%」与判定用同一组数。 */
+const ALARM = {
+  coverage: { below: 0.6, target: '≥60%', label: '用例可执行覆盖' },
+  rework: { above: 0.3, target: '≤30%', label: '返工率' },
+  gate: { below: 0.3, above: 0.9, target: '40–70%', label: '验收一次通过率' },
+  automation: { below: 0.5, target: '≥50%', label: '自动化率' },
+}
+/* 判定用**未取整的值**；显示值恰好落在告警线上（如 89.7% 显示成 90%）时补一位小数，
+   否则会出现「界面上写着 90%，却不在告警里」的自相矛盾。 */
+function alarmText(value, rule) {
+  if (value === null || value === undefined) return '—'
+  const percent = value * 100
+  const rounded = Math.round(percent)
+  const onLine = (rule.above !== undefined && rounded === Math.round(rule.above * 100))
+    || (rule.below !== undefined && rounded === Math.round(rule.below * 100))
+  return onLine ? percent.toFixed(1) + '%' : rounded + '%'
+}
+function alarmHit(value, rule) {
+  if (value === null || value === undefined) return false
+  if (rule.above !== undefined && value > rule.above) return true
+  if (rule.below !== undefined && value < rule.below) return true
+  return false
+}
 const KPI_GRID = 'grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-5'
+/* 四张卡就别用五列：以前右侧空出一整格（面板宽 20%），看着像少渲染了一张。 */
+const KPI_GRID_4 = 'grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4'
 
 export function AnalyticsPage({ state, onOpenTask, onFixPrices }) {
   const { h, React, api, ChipField } = client()
@@ -242,7 +269,9 @@ export function AnalyticsPage({ state, onOpenTask, onFixPrices }) {
 
   return h('div', { className: PAGE, 'data-analytics-page': '', 'data-analytics-pane': pane, ref: pageRef },
     secondaryError === null ? null : h('div', { className: 'mb-2 text-caption-1-regular text-text-error-primary' }, `部分数据没加载出来：${secondaryError}（负载 / 燃尽 / 成本 / 质量可能是空的或旧的）`),
-    h('div', { className: ROW + ' ' + STICKY },
+    /* 筛选行不吸顶：它和下面的页签行曾经都是 sticky top-0，两层同 z 叠在一起，
+       滚动后页签条把两个 Select 完全盖住（点不到）。同一时刻只允许一条吸顶行。 */
+    h('div', { className: ROW },
       h('span', { className: HINT }, `统计口径：最近 ${data.days} 天 · ${data.scope.tasks} 张卡（${data.scope.done} 张已完成）`),
       project === ''
         ? null
@@ -263,10 +292,10 @@ export function AnalyticsPage({ state, onOpenTask, onFixPrices }) {
        所以放在页签之上，并显式写明这一点，免得切到「上下文」还以为它在说上下文。 */
       const focus = []
       const coverage = data.cases?.rate ?? null
-      if (coverage !== null && coverage < 0.6) focus.push('用例可执行覆盖 ' + pct(coverage) + '（目标 ≥60%）')
-      if (data.rework?.rate > 0.3) focus.push('返工率 ' + pct(data.rework.rate) + '（>30%）')
-      if (gate.rate !== null && (gate.rate < 0.3 || gate.rate > 0.9)) focus.push('门禁一次通过率 ' + pct(gate.rate) + '（目标 40–70%）')
-      if (au.rate !== null && au.rate < 0.5) focus.push('自动化率 ' + pct(au.rate) + '（已交付需求里零人工介入偏少）')
+      if (alarmHit(coverage, ALARM.coverage)) focus.push(`用例可执行覆盖 ${alarmText(coverage, ALARM.coverage)}（目标 ${ALARM.coverage.target}）`)
+      if (alarmHit(data.rework?.rate, ALARM.rework)) focus.push(`返工率 ${alarmText(data.rework.rate, ALARM.rework)}（目标 ${ALARM.rework.target}）`)
+      if (alarmHit(gate.rate, ALARM.gate)) focus.push(`${ALARM.gate.label} ${alarmText(gate.rate, ALARM.gate)}（目标 ${ALARM.gate.target}）`)
+      if (alarmHit(au.rate, ALARM.automation)) focus.push(`${ALARM.automation.label} ${alarmText(au.rate, ALARM.automation)}（目标 ${ALARM.automation.target}）`)
       if (dispatchData.weeks.length > 0 && dispatchData.latest < dispatchData.target) focus.push('派单周活 ' + dispatchData.latest + ' 张（目标 ≥' + dispatchData.target + '）')
       return h('div', {
         'data-analytics-focus': focus.length > 0 ? 'warn' : 'ok',
@@ -285,7 +314,7 @@ export function AnalyticsPage({ state, onOpenTask, onFixPrices }) {
         { id: 'cost', label: '成本' },
         { id: 'context', label: '上下文' },
       ]
-      return h('div', { className: STICKY + ' gap-1', role: 'group', 'aria-label': '效能分区' },
+      return h('div', { className: STICKY + ' gap-1 border-b border-separator-border', role: 'group', 'aria-label': '效能分区' },
         tabs.map(tab => h(Button, {
           key: tab.id, 'aria-pressed': pane === tab.id ? 'true' : 'false', 'data-analytics-tab': tab.id,
           variant: pane === tab.id ? 'secondary' : 'ghost', size: 'sm',
@@ -297,8 +326,8 @@ export function AnalyticsPage({ state, onOpenTask, onFixPrices }) {
       h('span', { className: HINT }, '产品定义第 4 节那五条可断言的指标：门禁一次通过率、自动化率、需求交付时长、用例覆盖强度、派单周活'),
     ),
     h('div', { className: KPI_GRID, 'data-analytics-panel': 'overview' },
-      kpi('门禁一次通过率', gate.rate === null ? '—' : pct(gate.rate), gate.cards === 0 ? '还没有走到验收的卡' : `${gate.firstPass}/${gate.cards} 张第一次进待验收就完成 · 目标 40–70%`, gate.rate !== null && (gate.rate < 0.3 || gate.rate > 0.9)),
-      kpi('自动化率', au.rate === null ? '—' : pct(au.rate), au.rate === null ? '还没有已交付的需求' : `零人工介入 ${au.untouched}/${au.delivered} 条已交付需求`),
+      kpi(ALARM.gate.label, gate.rate === null ? '—' : alarmText(gate.rate, ALARM.gate), gate.cards === 0 ? '还没有走到验收的卡' : `${gate.firstPass}/${gate.cards} 张第一次进待验收就完成 · 目标 ${ALARM.gate.target}`, alarmHit(gate.rate, ALARM.gate)),
+      kpi(ALARM.automation.label, au.rate === null ? '—' : alarmText(au.rate, ALARM.automation), au.rate === null ? '还没有已交付的需求' : `零人工介入 ${au.untouched}/${au.delivered} 条已交付需求 · 目标 ${ALARM.automation.target}`, alarmHit(au.rate, ALARM.automation)),
       kpi('需求交付时长', delivery.medianDays === null ? '—' : fmtSpan(delivery.medianDays), delivery.count === 0 ? '还没有签过字的需求' : `中位 ${delivery.count} 条需求 · 创建到签字`),
       (() => {
         const cases = data.cases ?? { total: 0, executable: 0, rate: null }
@@ -315,6 +344,8 @@ export function AnalyticsPage({ state, onOpenTask, onFixPrices }) {
     (() => {
       const cases = data.cases ?? {}
       const rows = Array.isArray(cases.byCard) ? cases.byCard : []
+      /* 清单只回 10 条，总量单独给：以前用 rows.length 当总数，11 张卡缺断言时会写「10 张卡」。 */
+      const cardTotal = Number(cases.byCardTotal ?? rows.length)
       if (rows.length === 0) return null
       return h('div', { className: `${PANEL} mt-3`, 'data-analytics-panel': 'overview' },
         h('div', { className: PANEL_HEAD },
@@ -322,7 +353,7 @@ export function AnalyticsPage({ state, onOpenTask, onFixPrices }) {
           h('span', { className: HINT, style: { marginLeft: 'auto' } }, '点一行跳到那张卡去补可执行断言')),
         h('div', { className: PANEL_BODY },
           h('div', { className: FOOT },
-            `可执行覆盖 ${cases.rate === null || cases.rate === undefined ? '—' : pct(cases.rate)}（目标 ≥60%）· ${rows.length} 张卡的用例还没有可执行断言`),
+            `可执行覆盖 ${cases.rate === null || cases.rate === undefined ? '—' : pct(cases.rate)}（目标 ≥60%）· 共 ${cardTotal} 张卡的用例还没有可执行断言${cardTotal > rows.length ? `（按缺口排序列出前 ${rows.length} 张）` : ''}`),
           rows.map(row => h('button', {
             key: row.id,
             className: 'flex w-full items-center gap-3 rounded-lg px-2 py-2 text-left hover:bg-background-primary-hover',
@@ -330,13 +361,13 @@ export function AnalyticsPage({ state, onOpenTask, onFixPrices }) {
           },
             h('span', { className: 'font-mono text-caption-1-medium text-text-secondary' }, row.code || row.id),
             h('span', { className: 'min-w-0 flex-1 truncate text-body-2-medium text-text-primary' }, row.title),
-            h('span', { className: HINT }, `${row.missing}/${row.total} 条待补`),
+              h('span', { className: 'shrink-0 text-end tabular-nums text-caption-1-regular text-text-secondary', style: { minWidth: 84 } }, `${row.missing}/${row.total} 待补`),
           )),
         ),
       )
     })(),
     h('div', { className: SECTION, 'data-analytics-panel': 'overview' }, h('span', {}, '其它读数（不进门槛，供参考）')),
-    h('div', { className: KPI_GRID, 'data-analytics-panel': 'overview' },
+    h('div', { className: KPI_GRID_4, 'data-analytics-panel': 'overview' },
       kpi('一次通过率', pct(data.rework.firstPassRate), '完成的卡里，从没被退回过的比例', data.rework.firstPassRate < 0.6),
       kpi('返工率', pct(data.rework.rate), `${data.rework.reworked}/${data.rework.moved} 张卡倒退过`, data.rework.rate > 0.3),
       kpi('中位周期', fmtSpan(data.cycle.medianDays), `平均 ${fmtSpan(data.cycle.avgDays)} · P90 ${fmtSpan(data.cycle.p90Days)}`),

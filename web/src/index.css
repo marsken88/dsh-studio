@@ -1101,7 +1101,18 @@ html body [data-dsh-studio] .studio-tabs-thumb {
 
 /* 效能页「用例缺口」：可执行覆盖低于目标时，直接列出该补的卡（点一行跳过去） */
 
-
-
-
-
+/* 效能页分区页签：BoardUI 的 ghost 变体是「accent-100 底 + accent-700 字」，
+   于是未选中的页签是蓝的、选中的反而是浅灰底 —— 权重倒挂（视觉验收实测选中 1.07:1、未选中 5.60:1）。
+   这里只允许「选中」项拥有强调色：未选中透明底、次要文字色；选中项补一圈 accent 边框。
+   用属性选择器提高特异性（0,2,0），压过组件自带的工具类。 */
+[data-dsh-studio] [data-analytics-tab][aria-pressed="false"] {
+  background: transparent;
+  color: var(--color-text-secondary);
+  box-shadow: none;
+}
+[data-dsh-studio] [data-analytics-tab][aria-pressed="false"]:hover {
+  background: var(--color-background-primary-hover);
+}
+[data-dsh-studio] [data-analytics-tab][aria-pressed="true"] {
+  border: 1px solid var(--color-accent-500);
+}
