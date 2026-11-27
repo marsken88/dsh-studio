@@ -19,9 +19,9 @@ configureRequirementRoutes({
   createTask: async () => ({}),
 })
 
-const call = (store, route, body) => {
+const call = (store, route, body, reqExtra = {}) => {
   const res = {}
-  return handleRequirementRoute({ method: 'POST', route, req: { body }, res, store, url: new URL('http://x' + route) }).then(handled => ({ handled, res }))
+  return handleRequirementRoute({ method: 'POST', route, req: { body, ...reqExtra }, res, store, url: new URL('http://x' + route) }).then(handled => ({ handled, res }))
 }
 
 test('需求路由：按编号（REQ-2026-001）也能读，找不到时列出可用的引用', async () => {
@@ -81,6 +81,37 @@ test('/task/signoff 用的是卡 id，不是需求引用（批量归一化误伤
     const task = store.snapshot().tasks.find(item => item.id === 't-1')
     assert.equal(task.signoff?.by, '产品经理')
     assert.equal(task.signoff?.actorKind, 'ai', '专家名册里的名字 = AI（与闸门同一口径）')
+  } finally {
+    store.db?.close?.()
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('/task/signoff 的签字人取服务端身份：请求体不能把「人签」署成别人', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'dsh-task-signoff-identity-'))
+  const store = new StudioStore(join(dir, 'state.json'), { dbFile: join(dir, 'state.db'), secrets: new SecretStore(join(dir, '.secrets.json')) })
+  try {
+    await store.ready
+    await store.mutate(state => {
+      state.tasks.push({
+        id: 't-1', code: 'DEV-001', title: '签字卡', status: 'accept', role: 'product',
+        requirementId: '', checklist: [], artifacts: [], comments: [], history: [], cases: [], blocked: null,
+      })
+    })
+    // 登录会话存在时：body.by 只是自报，必须让位给 req.studioActor。
+    const out = await call(store, '/task/signoff', { id: 't-1', by: '张三', note: '我验过了' }, { studioActor: '李四' })
+    assert.equal(out.res.status, 200, JSON.stringify(out.res.body?.error ?? ''))
+    let task = store.snapshot().tasks.find(item => item.id === 't-1')
+    assert.equal(task.signoff?.by, '李四', '以服务端会话身份为准')
+    assert.equal(task.signoff?.source, 'session')
+    assert.equal(task.signoff?.actorKind, 'human')
+
+    // 免登录单机模式（没有会话、没有反代头）：仍兼容请求体自报。
+    const local = await call(store, '/task/signoff', { id: 't-1', by: '王五', note: '单机模式' })
+    assert.equal(local.res.status, 200, JSON.stringify(local.res.body?.error ?? ''))
+    task = store.snapshot().tasks.find(item => item.id === 't-1')
+    assert.equal(task.signoff?.by, '王五')
+    assert.equal(task.signoff?.source, 'body')
   } finally {
     store.db?.close?.()
     rmSync(dir, { recursive: true, force: true })

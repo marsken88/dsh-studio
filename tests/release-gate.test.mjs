@@ -1,7 +1,12 @@
 // 发布门禁：审批现在是 blocker，不再是「提示一下」。
 import assert from 'node:assert/strict'
+import { mkdtempSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import test from 'node:test'
 
+import { configureReleasesRoutes, handleReleasesRoute } from '../src/host/routes/releases.js'
+import { SecretStore, StudioStore } from '../src/host/store.js'
 import { releaseGate, releaseNotes } from '../src/host/release-model.js'
 
 const task = {
@@ -36,6 +41,38 @@ test('releaseGate：有人审批且其它条件都满足才 ready', () => {
 test('releaseGate：已发布的版本不再 ready（防止重复发布）', () => {
   const released = { ...release, status: 'released', approvals: [{ id: 'ap-1', by: '人', at: 1, note: '' }] }
   assert.equal(releaseGate(state, released).ready, false)
+})
+
+test('/release/save 不能手写「已发布 / 已回滚」：发布门禁只能由发布/回滚动作触发', async () => {
+  configureReleasesRoutes({
+    readJsonBody: async req => req.body ?? {},
+    sendJson: (res, status, payload) => { res.status = status; res.body = payload },
+    publicState: () => ({ revision: 1 }),
+  })
+  const dir = mkdtempSync(join(tmpdir(), 'dsh-release-status-'))
+  const store = new StudioStore(join(dir, 'state.json'), { dbFile: join(dir, 'state.db'), secrets: new SecretStore(join(dir, '.secrets.json')) })
+  const call = body => {
+    const res = {}
+    return handleReleasesRoute({
+      method: 'POST', route: '/release/save',
+      req: { body }, res, store, url: new URL('http://x/release/save'),
+    }).then(handled => ({ handled, res }))
+  }
+  try {
+    await store.ready
+    await assert.rejects(() => call({ release: { version: 'v9.9.9', name: '绕过', status: 'released' } }), /只能由「发布」或「回滚」动作写入/)
+    await assert.rejects(() => call({ release: { version: 'v9.9.8', name: '绕过', status: 'rolled_back' } }), /只能由「发布」或「回滚」动作写入/)
+
+    const created = await call({ release: { version: 'v9.9.9', name: '正常', status: 'draft' } })
+    assert.equal(created.res.status, 200)
+    const id = created.res.body.release.id
+    await assert.rejects(() => call({ release: { id, status: 'released' } }), /只能由「发布」或「回滚」动作写入/)
+    const approved = await call({ release: { id, status: 'approved' } })
+    assert.equal(approved.res.body.release.status, 'approved', '草稿 → 已审批仍可保存')
+  } finally {
+    store.db?.close?.()
+    rmSync(dir, { recursive: true, force: true })
+  }
 })
 
 test('releaseNotes：按需求与卡类型分组，能直接贴群里', () => {

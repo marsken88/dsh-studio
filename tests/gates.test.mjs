@@ -1,10 +1,14 @@
 // P1 三条的契约测试：评审进准出、禁自评、签字来源
 import assert from 'node:assert/strict'
+import { mkdtempSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import test from 'node:test'
 
 import { resolveSigner } from '../src/host/access.js'
 import { isSelfReview } from '../src/host/quality.js'
-import { configureExecutor, taskExitGate } from '../src/host/executor.js'
+import { configureExecutor, taskExitGate, updateTask } from '../src/host/executor.js'
+import { SecretStore, StudioStore } from '../src/host/store.js'
 
 configureExecutor(new Proxy({}, { get: () => () => undefined }))
 
@@ -140,4 +144,38 @@ test('子卡没完成/没签字时，主卡不许签收（childSignoffBlockers�
   // 准出门禁里也要出现这一条（agent 读到 gate 就知道该先收口子卡）
   const gate = taskExitGate(state([{ ...parent, signoff: { by: '人', at: 1, note: 'ok' } }, openBug]), parent)
   assert.ok(gate.blockers.some(line => /子卡没完成/.test(line)), JSON.stringify(gate.blockers))
+})
+
+test('同列提交不是一次推进：不清阻塞、不重跑设计/评审门禁', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'dsh-same-status-'))
+  const store = new StudioStore(join(dir, 'state.json'), { dbFile: join(dir, 'state.db'), secrets: new SecretStore(join(dir, '.secrets.json')) })
+  try {
+    await store.ready
+    await store.mutate(state => {
+      state.tasks.push({
+        id: 't-same', code: 'DEV-009', title: '同列拖放', status: 'test', role: 'qa',
+        requirementId: '', checklist: [], artifacts: [], comments: [], cases: [], history: [],
+        blocked: { at: 1, by: '人', reason: '等环境' },
+        coding: { agent: '', review: { status: 'pending', by: '', at: 0, note: '' } },
+      })
+    })
+    // 目标列 = 当前列：评审门禁本来会拦（review pending），同列必须放过。
+    const task = await updateTask(store, 't-same', { status: 'test', by: '人' })
+    assert.equal(task.status, 'test')
+    assert.notEqual(task.blocked, null, '同列提交不能顺手解除阻塞')
+    assert.equal(task.history.some(entry => String(entry.note ?? '') === 'unblocked'), false, '不该写一条假的解除阻塞历史')
+
+    // 真的换到待测试列：门禁照旧生效。
+    await store.mutate(state => {
+      state.tasks.push({
+        id: 't-move', code: 'DEV-010', title: '真的换列', status: 'dev', role: 'dev',
+        requirementId: '', checklist: [], artifacts: [], comments: [], cases: [], history: [], blocked: null,
+        coding: { agent: '', review: { status: 'pending', by: '', at: 0, note: '' } },
+      })
+    })
+    await assert.rejects(() => updateTask(store, 't-move', { status: 'test' }), /进测试被拦/)
+  } finally {
+    store.db?.close?.()
+    rmSync(dir, { recursive: true, force: true })
+  }
 })

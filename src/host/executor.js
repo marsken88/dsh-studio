@@ -1437,7 +1437,12 @@ export async function updateTask(store, id, patch) {
   const override = normalized.override ?? ''
   delete normalized.override
   const blockReason = text(patch.blockedReason, 500)
-  if (normalized.status === 'done' && override === '') {
+  /* 目标列 = 当前列时什么都不该触发：门禁只回答「能不能进这一列」，
+     同列拖放/同列提交不是一次推进。以前拖回原列会重跑设计/评审/准出门禁
+     （弹出「确实要强推就写原因」），还会顺手清掉阻塞标记。 */
+  const statusNow = normalized.status !== undefined ? store.snapshot().tasks.find(entry => entry.id === id) : undefined
+  const sameStatus = statusNow !== undefined && normalized.status === statusNow.status
+  if (normalized.status === 'done' && override === '' && !sameStatus) {
     const current = store.snapshot().tasks.find(entry => entry.id === id)
     if (current !== undefined) {
       const simulated = { ...current, ...normalized, blocked: current.blocked }
@@ -1448,7 +1453,7 @@ export async function updateTask(store, id, patch) {
       }
     }
   }
-  if (normalized.status !== undefined && override === '') {
+  if (normalized.status !== undefined && override === '' && !sameStatus) {
     // 设计闸门：开了开关的项目，进开发列之前设计必须评审通过。
     const current = store.snapshot().tasks.find(entry => entry.id === id)
     if (current !== undefined) {
@@ -1530,7 +1535,9 @@ export async function updateTask(store, id, patch) {
     }
     // 换列时负责人会被这一列的默认负责人覆盖，团队记忆要用「换列前」的那个人去认团。
     const expertBefore = task.expert
-    if (normalized.status !== undefined) {
+    /* 只有**真的换列**才更新列相关状态：同列提交（拖回原列、只改标题时带上 status）
+       不该清阻塞、不该重置派单印记、也不该写一条假的「推进」历史。 */
+    if (normalized.status !== undefined && previous !== task.status) {
       /* 换列 = 新的一棒：把上一列的派单印记清成「本列还没派过」。
          不清的话，卡被打回原来那一列时 dispatch.status 又等于当前列，
          tick 会当成「这一列已经派过一轮」——永远不动（2026-11-25 反馈的「卡停着」之一）。

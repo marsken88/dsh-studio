@@ -869,7 +869,7 @@ html[data-dsh-theme="light"] [class*="rightbarCol"] { background: #fafafa !impor
 
     /** @ 选择器：一列可搜的名单，代替原来平铺的一堆按钮。 */
     const MentionPicker = createMentionPicker({ h, React, TextField, SearchField })
-    const Drawer = createDrawer({ h, React, api, kit, currentUser, renderMarkdown, tipOf, tipLabel, confirmDialog, promptDialog, TextField, TextAreaField, ChipField, CheckField, SelectField, MdField, MentionPicker })
+    const Drawer = createDrawer({ h, React, api, kit, currentUser, renderMarkdown, tipOf, tipLabel, confirmDialog, promptDialog, TextField, TextAreaField, ChipField, CheckField, SelectField, MdField, MentionPicker, toast })
     const Palette = createPalette({ h, React, TextField })
     const RunTray = createRunTray({ h, React, api })
     const ProjectsOverview = createProjectsPage({ h, React, api })

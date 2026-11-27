@@ -113,7 +113,7 @@ const HANDOFF_FORM = [
   ['impactScope', '影响面', '模块 / 接口 / 数据 / 用户'],
 ]
 
-export function createDrawer({ h, React, api, kit, currentUser, renderMarkdown, tipOf, tipLabel, confirmDialog, promptDialog, TextField, TextAreaField, ChipField, CheckField, SelectField, MdField, MentionPicker }) {
+export function createDrawer({ h, React, api, kit, currentUser, renderMarkdown, tipOf, tipLabel, confirmDialog, promptDialog, TextField, TextAreaField, ChipField, CheckField, SelectField, MdField, MentionPicker, toast }) {
 /* 小节 = 圆角卡片：标题行 + 内容。pane 决定它属于哪个页签，current 是当前页签。
    这两个组件放在工厂作用域里（不是 Drawer 内部）：组件身份必须跨渲染稳定，
    否则每次轮询/输入都会得到一个新类型，React 整块卸载重挂——输入框会一个字丢一次焦点。 */
@@ -137,6 +137,22 @@ function Drawer({ task, state, onClose, onChanged, onOpenTask = null }) {
   const [error, setError] = React.useState(null)
   const [comment, setComment] = React.useState('')
   const [notice, setNotice] = React.useState(null)
+  /* 反馈不能只写在「讨论」页底部：在计划 / 设计 / 交付物 / 测试页点保存或推进，
+     成功与失败都要当场看得见，否则就是「点了没反应」。error / notice 一变化就补一条
+     轻提示；讨论页底部仍保留原位文案（贴图/复制上下文时还在）。 */
+  const lastToast = React.useRef({ error: null, notice: null })
+  React.useEffect(() => {
+    if (error === null) { lastToast.current.error = null; return }
+    if (lastToast.current.error === error) return
+    lastToast.current.error = error
+    if (typeof toast === 'function') toast(String(error), 'error')
+  }, [error])
+  React.useEffect(() => {
+    if (notice === null) { lastToast.current.notice = null; return }
+    if (lastToast.current.notice === notice) return
+    lastToast.current.notice = notice
+    if (typeof toast === 'function') toast(String(notice), 'success')
+  }, [notice])
   const [picked, setPicked] = React.useState('')
   /* 「马上处理」可以带一句开场白（拼进提示词）；issue #148 评论：以前卡上派单没法交代这次要干什么。 */
   const [dispatchNote, setDispatchNote] = React.useState('')
@@ -451,6 +467,25 @@ function Drawer({ task, state, onClose, onChanged, onOpenTask = null }) {
       await onChanged()
     } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)) } finally { setBusy(false) }
   }
+  /* 推进到某列：门禁拦住时给「写原因强推」的出口，与看板拖拽同一套流程。
+     以前这里只 setError，而抽屉的错误只在「讨论」页可见，看起来就是按钮没反应。 */
+  const advanceTo = async (status, role) => {
+    setBusy(true); setError(null); setNotice(null)
+    try {
+      await api('/task/update', { id: task.id, patch: { status, role } })
+      await onChanged()
+    } catch (cause) {
+      const message = cause instanceof Error ? cause.message : String(cause)
+      if (!/准出没过|进开发被拦|进测试被拦/.test(message)) { setError(message); return }
+      const reason = await promptDialog(`${message}\n\n确实要强推就写原因（会计入 override 统计）：`, { title: '绕过门禁', okText: '强推' })
+      if (reason === null || String(reason).trim() === '') return
+      try {
+        await api('/task/update', { id: task.id, patch: { status, role, override: String(reason).trim() } })
+        setNotice('已强推，原因已记录')
+        await onChanged()
+      } catch (again) { setError(again instanceof Error ? again.message : String(again)) }
+    } finally { setBusy(false) }
+  }
   /* 交接契约单独走一次 /task/update：五段是一个整体，走 push 的 patch 包装也行，
      但这里要给出「保存成功」的明确反馈——专家写契约时最怕点了没反应。 */
   const saveHandoff = async () => {
@@ -489,7 +524,7 @@ function Drawer({ task, state, onClose, onChanged, onOpenTask = null }) {
   const send = async () => {        if (comment.trim().length === 0) return
     setBusy(true); setError(null)
     try {
-      const out = await api('/task/comment', { id: task.id, body: comment, author: '人', kind: 'human' })
+      const out = await api('/task/comment', { id: task.id, body: comment, author: currentUser(), kind: 'human' })
       const told = (out.mentions ?? []).map(mention => mention.label ?? mention.id)
       setComment('')
       if (told.length > 0) setError(null)
@@ -1376,7 +1411,7 @@ function Drawer({ task, state, onClose, onChanged, onOpenTask = null }) {
               : h(Button, {
                 key: 'next', variant: 'primary', size: 'sm', disabled: busy,
                 title: '推进到下一列，下一列的 AI 会接手',
-                onClick: () => void push({ status: forward.id, role: forward.role }),
+                onClick: () => void advanceTo(forward.id, forward.role),
               }, `推进到「${forward.label}」`),
             rest.length === 0 ? null : h(SelectField, {
               key: 'other', value: '', disabled: busy,
@@ -1384,7 +1419,7 @@ function Drawer({ task, state, onClose, onChanged, onOpenTask = null }) {
                 const id = event.target.value
                 if (id === '') return
                 const target = order.find(item => item.id === id)
-                if (target !== undefined) void push({ status: target.id, role: target.role })
+                if (target !== undefined) void advanceTo(target.id, target.role)
               },
             },
               h('option', { value: '' }, `其他状态（${rest.length}）`),
@@ -2727,8 +2762,12 @@ function Drawer({ task, state, onClose, onChanged, onOpenTask = null }) {
               // 避免人也画出机器人头像。
               const looksAi = /产品|架构|研发|开发|测试|运维|专家/.test(String(item.author ?? ''))
               const human = item.kind === 'human' ? true : item.kind === 'agent' ? false : !(expert !== undefined || looksAi)
+              /* 登录后作者记的是登录名：只有它等于当前登录人才显示「我」，
+                 否则同事的评论会被误认成自己（以前作者一律写死「人」，所有人都看到「我提出」）。 */
+              const me = currentUser()
+              const mine = human && (item.author === undefined || item.author === '' || item.author === me)
               const who = human
-                ? (item.author === undefined || item.author === '' || item.author === '人' ? '我' : item.author)
+                ? (mine ? '我' : item.author)
                 : (expert?.name ?? (item.author === '' || item.author === undefined ? 'AI' : item.author))
               // 老评论的作者可能是「架构」「研发」这类简写，或带 emoji 前缀；
               // 能对上专家就统一显示专家本名，对不上原样显示。
@@ -2751,7 +2790,7 @@ function Drawer({ task, state, onClose, onChanged, onOpenTask = null }) {
                 h('div', { className: 'flex min-w-0 flex-col gap-1' },
                   h('div', { className: 'flex min-w-0 flex-wrap items-center gap-2' },
                     h('span', { className: 'text-body-2-semibold text-text-primary' }, who),
-                    h('span', { className: 'rounded-full border border-separator-border px-2 text-caption-1-regular text-text-tertiary' }, human ? '我提出' : 'AI 回复'),
+                    h('span', { className: 'rounded-full border border-separator-border px-2 text-caption-1-regular text-text-tertiary' }, human ? (mine ? '我提出' : '人提出') : 'AI 回复'),
                     expert !== undefined && expert.domain !== '' ? h(ChipField, { variant: 'gray', 'data-role': expert.role }, expert.domain) : null,
                     h('div', { className: 'ml-auto flex items-center gap-1' },
                       h('span', { className: 'text-caption-1-regular text-text-tertiary tabular-nums' }, fmtTime(item.at)),

@@ -119,3 +119,23 @@ test('#18 幂等并发闸：同一 key 同时只放一个请求进去，释放�
   assert.equal(gate.claim('route:k1'), true, '释放后同一个 key 可以再来（正常重试）')
   assert.equal(gate.claim(''), true, '空 scope 不参与抢锁')
 })
+
+test('抽屉反馈接线：toast 递给 createDrawer，推进按钮走带 override 的 advanceTo', () => {
+  const drawer = source('web/src/studio/drawer.js')
+  const client = source('client.src.js')
+  assert.match(drawer, /export function createDrawer\(\{[^}]*MentionPicker, toast \}\)/, 'createDrawer 要接 toast')
+  assert.match(drawer, /if \(typeof toast === 'function'\) toast\(String\(error\), 'error'\)/, '失败要有可见轻提示')
+  assert.match(drawer, /const advanceTo = async/, '推进要有独立入口')
+  assert.match(drawer, /advanceTo\(forward\.id, forward\.role\)/, '主推进按钮要能强推')
+  assert.match(drawer, /advanceTo\(target\.id, target\.role\)/, '其它状态推进也要能强推')
+  assert.match(client, /MentionPicker, toast \}\)/, '组合根要真的把 toast 传进去')
+})
+
+test('只读路由判定接在请求管线的权限判定之前（否则 action=get 永不生效）', () => {
+  const index = source('index.js')
+  assert.match(index, /import \{[^}]*isReadOnlyPost[^}]*\} from '\.\/src\/host\/access\.js'/)
+  assert.match(index, /const readOnlyPost = isReadOnlyPost\(route, req\.__studioBody \?\? \{\}\)/)
+  const order = index.indexOf('req.__studioBody = await readJsonBody(req)')
+  const levelAt = index.indexOf('const level = route.startsWith')
+  assert.ok(order > 0 && levelAt > order, 'body 必须先解析再算权限档位')
+})

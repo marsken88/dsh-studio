@@ -30,7 +30,7 @@ export const inject = ['tools', 'systemPrompt']
 import { assertConfigKeys, sanitizeProjectFolders, ACCESS_ROLE_LABEL, ACCESS_ROLES, ADMIN_ROUTES, ARTIFACT_KINDS, ARTIFACT_STATUS, CASE_HTTP_METHODS, CASE_PRIORITIES, CASE_RESULTS, CASE_TYPE_LABEL, CASE_TYPES, cleanId, CODING_FILE_CHANGES, CODING_REVIEW_STATUS, codingSummary, COLUMN_STRATEGIES, DEFAULT_ROLES, defaultColumns, defaultConfig, defaultDeployEnvs, defaultTemplates, DEPLOY_ENV_KINDS, FALLBACK_AGENT_MODEL, hashLocalPassword, ISOLATION_MODES, LEGACY_BLOCKED_STATUS, LEVEL_RANK, LOCAL_DEFAULT_PASSWORD, mergeCoding, mergeConfig, mergeSection, nextRequirementCode, normalizePatch, normalizeStrategy, publicArtifact, publicCases, publicChecklist, publicComments, PRIORITIES, ROLE_LABELS, roleIdsOf, rolesInColumns, canonicalAuthor, RELEASE_STATUSES, RELEASE_STATUS_LABEL, REQ_DOC_KIND_LABEL, REQ_DOC_KINDS, REQ_DOC_STATUS, REQ_REVIEW_LABEL, REQ_REVIEW_STATUS, REQ_STATUS_LABEL, REQ_STATUSES, ROLE_IDS, ROLE_LEVEL, SANDBOX_MODES, sanitizeAccess, sanitizeAllowHosts, sanitizeArtifact, sanitizeArtifacts, sanitizeBaseline, sanitizeBots, sanitizeBugSource, sanitizeCase, sanitizeCaseHttp, sanitizeCaseRun, sanitizeCases, sanitizeChangedFile, sanitizeChangedFiles, sanitizeChecklist, sanitizeChecklistItem, sanitizeCaseGate, sanitizeCoding, sanitizeColumns, sanitizeCommit, sanitizeCommits, sanitizeCosts, sanitizeDeployEnvs, sanitizeEnvs, sanitizeExperts, sanitizeIterations, sanitizeLdap, sanitizeLocalAuth, sanitizeProjects, sanitizeReqDoc, sanitizeReqDocs, sanitizeRelease, sanitizeRequirement, sanitizeRequirementChange, sanitizeRequirementGate, sanitizeRequirementHistory, sanitizeRequirementPoint, sanitizeRequirementPoints, sanitizeRequirementPool, sanitizeRequirementQuestions, sanitizeRequirementReview, sanitizeRequirements, sanitizeReviewGate, sanitizeServices, sanitizeSla, sanitizeRoles, sanitizeTeams, sanitizeTemplates, sanitizeTesting, sanitizeTestRun, sanitizeTestRuns, sanitizeUsers, sanitizeWorkProjects, seedExperts, SEVERITIES, STATUS_IDS, STATUS_SET, STATUSES, TASK_TYPES, text, verifyLocalPassword, worktreeRoot } from './src/host/domain.js'
 import { withClarifyHistoryItem } from './src/host/acceptance.js'
 import { nextCodeForTask } from './src/host/task-code.js'
-import { accessLevelFor, checkAccess, isCrossSiteRequest, isLoopbackRequest, needsConfirm, needsLocalSource, READ_ONLY_POST_ROUTES, trustOutcomeFor } from './src/host/access.js'
+import { accessLevelFor, checkAccess, isCrossSiteRequest, isLoopbackRequest, isReadOnlyPost, needsConfirm, needsLocalSource, trustOutcomeFor } from './src/host/access.js'
 import { Dispatcher, RUN_LOG, attachRunLog, claimDispatchLock, clearAgentFailure, configureDispatcher, noteAgentFailure, parseMentions, runSummary } from './src/host/dispatcher.js'
 import { worktreeBaseFor } from './src/host/dispatch-cwd.js'
 import { mirrorCards } from './src/host/bitable.js'
@@ -1160,6 +1160,9 @@ async function applyConfig(store, patch) {
       if (SANDBOX_MODES.includes(String(a.sandbox ?? ''))) config.agents.sandbox = String(a.sandbox)
       if (ESCALATION_MODES.includes(String(a.escalation ?? ''))) config.agents.escalation = String(a.escalation)
       if (ISOLATION_MODES.includes(String(a.isolation ?? ''))) config.agents.isolation = String(a.isolation)
+      /* 执行播报落点（feed / comment / off）：设置页有这个下拉，但以前 applyConfig 的
+         agents 分支没有它 —— 保存显示成功、取值被静默丢弃，刷新后又弹回 feed。 */
+      if (['feed', 'comment', 'off'].includes(String(a.broadcast ?? ''))) config.agents.broadcast = String(a.broadcast)
       if (['card', 'requirement'].includes(String(a.workspaceGrouping ?? ''))) config.agents.workspaceGrouping = String(a.workspaceGrouping)
       if (typeof a.worktreeRoot === 'string') config.agents.worktreeRoot = a.worktreeRoot.trim().slice(0, 400)
       if (['on_done', 'manual'].includes(String(a.cleanupWorktree ?? ''))) config.agents.cleanupWorktree = String(a.cleanupWorktree)
@@ -2319,30 +2322,31 @@ function registerRoutes(webCtx, store, ctx, getDispatcher = () => undefined) {
     const resolved = resolveActor(req, store.snapshot().config)
     if (resolved !== '') req.studioActor = resolved
     const operator = operatorOf(req)
-    // 登录/登出/改密绝不能受权限名单影响，否则一旦开启权限就再也登不进来。
-  // 有些 POST 只是读（取交付物正文、取评论）：别被写档位挡住只读成员。
-  const readOnlyPost = READ_ONLY_POST_ROUTES.has(route)
-    || (route === '/task/artifact' && String(req.__studioBody?.action ?? '') === 'get')
-  const level = route.startsWith('/auth/') ? 'read' : readOnlyPost ? 'read' : accessLevelFor(route, method)
-    let summary = ''
     /* 跨站 POST 一律拒绝（详见 access.js 的 isCrossSiteRequest）：恶意网页能用
        no-cors 简单请求打进来，而 readJsonBody 不校验 content-type。 */
     if (method === 'POST' && isCrossSiteRequest(req)) {
       sendJson(res, 403, { ok: false, code: 'bad_origin', error: '跨站请求被拒绝' })
       return
     }
+    /* body 先解析再判权限：只读判定要看 action（取交付物正文 / worktree list / 设计只读）。
+       以前在解析之前读 req.__studioBody，`/task/artifact action=get` 的只读分支永不生效：
+       只读成员打不开交付物正文，普通用户每展开一次就写一条审计、revision+1、ETag 全失效。
+       readJsonBody 会把结果缓存到 req.__studioBody，路由里再读不会重复消费流。 */
     if (method === 'POST') {
       try {
         req.__studioBody = await readJsonBody(req)
-        summary = auditSummary(req.__studioBody)
       } catch {
         /* 坏 JSON 交给下面的 core 去报 400 */
       }
     }
+    // 登录/登出/改密绝不能受权限名单影响，否则一旦开启权限就再也登不进来。
+    // 有些 POST 只是读（取交付物正文、取评论、算准出）：别被写档位挡住只读成员。
+    const readOnlyPost = isReadOnlyPost(route, req.__studioBody ?? {})
+    const level = route.startsWith('/auth/') ? 'read' : readOnlyPost ? 'read' : accessLevelFor(route, method)
     /* 只读 POST（取评论、取交付物正文、用例列表…）不记审计：审计写库会让 revision +1，
        而 /state 的 ETag 就是 revision —— 于是每开一次卡片抽屉，所有在线客户端的
        304 缓存全部失效、下一次轮询拉整包。读操作不该留下写痕迹。 */
-    if (readOnlyPost) summary = ''
+    const summary = readOnlyPost || method !== 'POST' || req.__studioBody === undefined ? '' : auditSummary(req.__studioBody)
     /* 权限模型默认没开（access.enabled=false）。这种部署下，admin 级操作
        （市场安装、快照恢复、成员权限、配置写入…）以前对任何能连到这个端口的人开放，
        等于匿名超管。这里把 admin 级操作限制在回环来源；普通业务读写不受影响，

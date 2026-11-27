@@ -297,7 +297,7 @@ function Board({ state, onOpen, onMove, onWip, onCreate }) {
           'data-col': column.id, 'data-board-column': column.id, 'data-role': column.role,
           onDragOver: event => { event.preventDefault(); if (event.dataTransfer !== null) event.dataTransfer.dropEffect = 'move'; event.currentTarget.setAttribute('data-drag-over', '1') },
           onDragLeave: event => event.currentTarget.removeAttribute('data-drag-over'),
-          onDrop: event => { event.preventDefault(); event.currentTarget.removeAttribute('data-drag-over'); const id = event.dataTransfer === null ? '' : event.dataTransfer.getData('text/plain'); if (id === '' || id === undefined) return; const wip = Number(config.columns?.[column.id]?.wip) || 0; /* 用**全量**任务数判定 WIP：byStatus 是筛选后的结果，拿它计数会让「开着筛选就能绕过上限」 */
+          onDrop: event => { event.preventDefault(); event.currentTarget.removeAttribute('data-drag-over'); const id = event.dataTransfer === null ? '' : event.dataTransfer.getData('text/plain'); if (id === '' || id === undefined) return; /* 拖回原列是空操作：不能当作一次推进 —— 那会重跑设计/评审/准出门禁（要人填 override），还会把阻塞标记清掉。 */ const moved = state.tasks.find(task => task.id === id); if (moved !== undefined && moved.status === column.id) return; const wip = Number(config.columns?.[column.id]?.wip) || 0; /* 用**全量**任务数判定 WIP：byStatus 是筛选后的结果，拿它计数会让「开着筛选就能绕过上限」 */
             const filled = state.tasks.filter(task => task.status === column.id).length; if (wip > 0 && filled >= wip) { toast(`「${column.label}」已到 WIP 上限 ${wip}，先把列里的卡往前推`, 'error'); return } void onMove(id, column.id) },
         },
           h('div', { className: COLUMN_HEAD },
