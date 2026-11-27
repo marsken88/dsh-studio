@@ -323,7 +323,7 @@ export function AnalyticsPage({ state, onOpenTask, onFixPrices }) {
     })(),
     h('div', { className: SECTION, 'data-analytics-panel': 'overview' },
       '质量',
-      h('span', { className: HINT }, '产品定义第 4 节那五条可断言的指标：门禁一次通过率、自动化率、需求交付时长、用例覆盖强度、派单周活'),
+      h('span', { className: HINT }, '产品定义第 4 节那五条可断言的指标：验收一次通过率、自动化率、需求交付时长、用例覆盖强度、派单周活'),
     ),
     h('div', { className: KPI_GRID, 'data-analytics-panel': 'overview' },
       kpi(ALARM.gate.label, gate.rate === null ? '—' : alarmText(gate.rate, ALARM.gate), gate.cards === 0 ? '还没有走到验收的卡' : `${gate.firstPass}/${gate.cards} 张第一次进待验收就完成 · 目标 ${ALARM.gate.target}`, alarmHit(gate.rate, ALARM.gate)),
@@ -366,14 +366,21 @@ export function AnalyticsPage({ state, onOpenTask, onFixPrices }) {
         ),
       )
     })(),
-    h('div', { className: SECTION, 'data-analytics-panel': 'overview' }, h('span', {}, '其它读数（不进门槛，供参考）')),
-    h('div', { className: KPI_GRID_4, 'data-analytics-panel': 'overview' },
-      kpi('一次通过率', pct(data.rework.firstPassRate), '完成的卡里，从没被退回过的比例', data.rework.firstPassRate < 0.6),
-      kpi('返工率', pct(data.rework.rate), `${data.rework.reworked}/${data.rework.moved} 张卡倒退过`, data.rework.rate > 0.3),
-      kpi('中位周期', fmtSpan(data.cycle.medianDays), `平均 ${fmtSpan(data.cycle.avgDays)} · P90 ${fmtSpan(data.cycle.p90Days)}`),
-      kpi('AI 交付物采纳率', pct(data.ai.acceptedRate), `${data.ai.accepted}/${data.ai.artifactsAi} 件已被验收 · 占全部交付物 ${pct(data.ai.aiShare)}`),
+    /* 以前这里是四张和主 KPI 同权的大卡，标题还是一句免责（「不进门槛，供参考」）——
+       免责当作分区标题，读者只能把括号读进去。现在换成紧凑行：一行一个读数，
+       「不参与准出」写进标题本身。 */
+    h('div', { className: SECTION, 'data-analytics-panel': 'overview' },
+      '诊断读数（找原因用，不参与准出门禁）',
+      h('span', { className: HINT }, '与上面的门槛指标不同权：用来定位「为什么慢」，不做准出判断'),
     ),
-    h('div', { className: `${PANEL} mt-3`, 'data-analytics-panel': 'overview' },
+    h('div', { className: PANEL + ' mt-3', 'data-analytics-panel': 'overview', 'data-diagnostics': '' },
+      h('div', { className: PANEL_BODY },
+        h('div', { className: KV }, h('span', {}, '完成卡一次通过率'), h('b', { className: 'tabular-nums' }, pct(data.rework.firstPassRate)), h('span', { className: HINT }, '完成的卡里从没被退回过的比例')),
+        h('div', { className: KV }, h('span', {}, '返工率'), h('b', { className: 'tabular-nums' }, pct(data.rework.rate)), h('span', { className: HINT }, data.rework.reworked + '/' + data.rework.moved + ' 张卡倒退过')),
+        h('div', { className: KV }, h('span', {}, '中位周期'), h('b', { className: 'tabular-nums' }, fmtSpan(data.cycle.medianDays)), h('span', { className: HINT }, '平均 ' + fmtSpan(data.cycle.avgDays) + ' · P90 ' + fmtSpan(data.cycle.p90Days))),
+        h('div', { className: KV }, h('span', {}, 'AI 交付物采纳率'), h('b', { className: 'tabular-nums' }, pct(data.ai.acceptedRate)), h('span', { className: HINT }, data.ai.accepted + '/' + data.ai.artifactsAi + ' 件已被验收 · 占全部交付物 ' + pct(data.ai.aiShare))),
+      ),
+    ),    h('div', { className: `${PANEL} mt-3`, 'data-analytics-panel': 'overview' },
       h('div', { className: PANEL_HEAD },
         '自动化率',
         h('span', { className: HINT }, '已交付需求里，全程没有人工介入（评论/换列/签字）的占比')),
@@ -397,8 +404,8 @@ export function AnalyticsPage({ state, onOpenTask, onFixPrices }) {
         h('div', { className: FOOT },
           '近 8 周：' + (dispatchData.weeks ?? []).map(item => `${new Date(item.week).toLocaleDateString('zh-CN', { month: '2-digit', day: '2-digit' })} ${item.cards}`).join(' · ')),
         gate.rate === null
-          ? h('div', { className: HINT }, '门禁一次通过率：还没有走到验收的卡。')
-          : h('div', { className: FOOT }, `门禁一次通过率 ${pct(gate.rate)}：${gate.cards} 张到过待验收，其中 ${gate.cards - gate.firstPass} 张被打回过${gate.bounced.length > 0 ? '（' + gate.bounced.map(item => item.code || item.id).join('、') + '）' : ''}`),
+          ? h('div', { className: HINT }, '验收一次通过率：还没有走到验收的卡。')
+          : h('div', { className: FOOT }, `被打回过 ${gate.cards - gate.firstPass} 张（分母 ${gate.cards} 张到过待验收）${gate.bounced.length > 0 ? '：' + gate.bounced.map(item => item.code || item.id).join('、') : ''}`),
         delivery.medianDays === null
           ? h('div', { className: HINT }, '需求交付时长：还没有签过字的需求。')
           : h('div', { className: FOOT }, `需求交付时长：中位 ${fmtSpan(delivery.medianDays)}、平均 ${fmtSpan(delivery.avgDays)}（${delivery.count} 条已签字需求）`),

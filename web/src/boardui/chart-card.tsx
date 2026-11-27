@@ -41,7 +41,7 @@ export function StatCard({ label, value, hint, warn = false, className }: StatCa
         {value}
       </div>
       {hint === undefined || hint === null || hint === "" ? null : (
-        <div className="text-caption-1-regular leading-relaxed text-text-tertiary">{hint}</div>
+        <div className="text-caption-1-regular text-text-secondary">{hint}</div>
       )}
     </div>
   );

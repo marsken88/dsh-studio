@@ -1815,3 +1815,17 @@ header id ... and cwd identify ".../studio-t-5d1d2ad4-architect/..."` —— 宿
 - 用例缺口的计数列改成**等宽右对齐**（`tabular-nums` + `text-end` + 固定最小宽），一列数字能竖着比。
 
 `probe:panel 103/103`、`tests 812`、截图 `tmp/ui-review/analytics-2/after/analytics-p1.png`。
+
+### 同日晚（效能页评审 P2）：诊断读数降级、命名统一、不再复述
+
+- **「其它读数（不进门槛，供参考）」→ 紧凑行**：以前是四张与主 KPI **同权**的大卡，标题还是一句免责 ——
+  免责当分区标题，读者只能把括号读进去。现在标题本身就是口径：「诊断读数（找原因用，不参与准出门禁）」，
+  四行 `label · 值 · 一句说明`，实测整块 177px（四张大卡要 ~160px + 一段分区标题）。
+- **不再复述百分比**：交付节奏面板的 FOOT 原来把「门禁一次通过率 90%」再念一遍，现在只留 KPI 上没有的信息 ——
+  「被打回过 4 张（分母 39 张到过待验收）：BUG-041、BUG-004…」。
+- **命名统一**：「门禁一次通过率」在 KPI 卡、分区说明、交付节奏面板三处仍混着，现在统一「**验收一次通过率**」
+  （与「完成卡一次通过率 73%」区分：前者分母是到过待验收的卡，后者是已完成的卡）。
+- StatCard 的说明行去掉 `leading-relaxed`（与同页 FOOT 的 16px 行高一致）。
+
+真机：`data-diagnostics` 存在、四行、命名新旧校验 `oldNameLeft=false / newNameSeen=true`；
+`probe:panel 103/103`、`tests 812`、截图 `tmp/ui-review/analytics-2/after/analytics-p2.png`。
