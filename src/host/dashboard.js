@@ -1,3 +1,5 @@
+import { openBlockedOf } from './blocked.js'
+import { statusFlow } from './delivery.js'
 /* 工作台汇总（从 executor.js 抬出来：那边有 2000 行闸门）。
  *
  * 只做汇总、不改数据。两个刻意的口径：
@@ -41,7 +43,8 @@ export function dashboardOf(state, deps = {}) {
   }))
 
   const overdue = open.filter(task => task.dueAt > 0 && task.dueAt < now)
-  const blocked = open.filter(task => task.blocked != null)
+  /* 口径只有一份：未完成且挂阻塞（见 src/host/blocked.js）。 */
+  const blocked = openBlockedOf(open)
   const stalled = open.filter(task => isStalled(task, stalledCtx))
   const slaOverdue = open.filter(task => task.type === 'bug' && slaOf(task, state.config).state === 'overdue')
   // 强制放行是逃生舱，用得越来越顺就该被看一眼：30 天内超过上限算风险。
@@ -64,8 +67,17 @@ export function dashboardOf(state, deps = {}) {
   const done = tasks.filter(task => task.status === 'done')
   const dayStart = new Date()
   dayStart.setHours(0, 0, 0, 0)
-  const doneToday = done.filter(task => (task.updatedAt || 0) >= dayStart.getTime())
-  const doneWeek = done.filter(task => (task.updatedAt || 0) >= now - 7 * 24 * 60 * 60 * 1000)
+  /* 「今天完成」以前用 updatedAt —— 一张上周完成的卡今天被人评论一句也会算进来。
+     现在取 history 里**最后一次进入 done** 的时间；老数据没有状态流时退回 updatedAt。 */
+  const doneAtOf = task => {
+    const flow = statusFlow(task)
+    for (let index = flow.length - 1; index >= 0; index -= 1) {
+      if (flow[index].status === 'done' && flow[index].at > 0) return flow[index].at
+    }
+    return Number(task.updatedAt) || 0
+  }
+  const doneToday = done.filter(task => doneAtOf(task) >= dayStart.getTime())
+  const doneWeek = done.filter(task => doneAtOf(task) >= now - 7 * 24 * 60 * 60 * 1000)
   const runs = Array.isArray(runLog) ? runLog : []
 
   return {

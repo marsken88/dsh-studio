@@ -1677,6 +1677,11 @@ return h('div', { className: PAGE, 'data-requirements-page': '' },
                       h(Chip, { color: 'gray', className: 'font-mono' }, req.code || '未编号'),
                       req.source === 'business' ? h(Chip, { color: 'blue', 'data-src': 'business', title: [req.requester?.name, req.requester?.dept].filter(Boolean).join(' · ') || '业务提单' }, '业务提单') : null,
                       h(Chip, { color: 'soft', 'data-req': req.status }, REQ_STATUS_LABEL[req.status] ?? req.status),
+                      /* 状态说「已交付」、门禁却说「还差 N 项」时，把矛盾直接写出来 ——
+                         以前两个信号并排、谁也不解释谁，进度条还画成 100%。 */
+                      req.status === 'delivered' && gate !== null && gate.ready !== true
+                        ? h(Chip, { color: 'rose', 'data-req-gate-conflict': '' }, '已交付但门禁未过')
+                        : null,
                       h('span', { className: HINT }, `${reqDone}/${tasks.length} 卡`),
                       gate === null ? null : h('span', { className: HINT, style: { color: gate.ready ? 'var(--color-notification-success-foreground)' : 'var(--color-chart-8-active)' } },
                         gate.ready ? '准出通过' : `还差 ${gate.blockers.length} 项`),
@@ -1685,7 +1690,7 @@ return h('div', { className: PAGE, 'data-requirements-page': '' },
                           `可执行 ${req.progress.coverage.executable}/${req.progress.coverage.total}`)
                         : null,
                     ),
-                    h(ProgressTrack, { percentage: pct, size: 'sm', className: 'mt-1' }),
+                    h(ProgressTrack, { percentage: gate !== null && gate.ready !== true ? Math.min(pct, 99) : pct, size: 'sm', className: 'mt-1' }),
                   )
                 }),
           ),

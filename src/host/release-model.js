@@ -1,3 +1,4 @@
+import { openBlockedOf, staleBlockedOf, STALE_BLOCKED_NOTE } from './blocked.js'
 /* 版本的纯逻辑：门禁与发布说明。从 index.js 抬出来，给 2700 行上限留空间，
  * 也让「审批是门禁」这条能被单测直接断言（不用起整个宿主）。
  */
@@ -10,7 +11,11 @@ export const RELEASE_APPROVAL_BLOCKER = '还没有发布审批：先在版本上
 export function releaseGate(state, release, options = {}) {
   const tasks = state.tasks.filter(task => task.releaseId === release.id)
   const open = tasks.filter(task => task.status !== 'done')
-  const blocked = tasks.filter(task => task.blocked !== null && task.blocked !== undefined)
+  /* 只算「未完成且挂阻塞」：已完成卡上的残留标记以前也会拦发布，
+     结果是「3/3 卡完成、未完成 0、阻塞 1」的版本永远发不出去。 */
+  const doneIds = (state?.statuses ?? []).map(item => item.id)
+  const blocked = openBlockedOf(tasks, doneIds.length > 0 ? doneIds : ['done'])
+  const staleBlocked = staleBlockedOf(tasks, doneIds.length > 0 ? doneIds : ['done'])
   const bugs = tasks.filter(task => task.type === 'bug' && task.status !== 'done')
   const failing = []
   const emptyArtifacts = []
@@ -35,6 +40,8 @@ export function releaseGate(state, release, options = {}) {
   /* 审批是门禁，不是提示：没有人在版本上点过「审批通过」，就不许发。 */
   if ((release.approvals ?? []).length === 0) blockers.push(RELEASE_APPROVAL_BLOCKER)
   const warnings = []
+  /* 已完成卡上的残留阻塞标记不拦路，但要说出来让人清掉。 */
+  if (staleBlocked.length > 0) warnings.push(`${staleBlocked.length} 张已完成卡还挂着阻塞标记：${STALE_BLOCKED_NOTE}`)
   if (emptyArtifacts.length > 0) warnings.push(`${emptyArtifacts.length} 件交付物缺正文`)
   if (tasks.length > 0 && tasks.every(task => (task.artifacts ?? []).length === 0)) warnings.push('这批卡一件交付物都没登记')
   const gray = release.grayBatches ?? []
