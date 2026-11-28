@@ -292,7 +292,7 @@ export function AnalyticsPage({ state, onOpenTask, onFixPrices }) {
       h('span', { className: HINT }, `统计口径：最近 ${data.days} 天 · ${data.scope.tasks} 张卡（${data.scope.done} 张已完成）`),
       project === ''
         ? null
-        : h('span', { className: HINT, 'data-analytics-scope': project }, '（项目筛选对全部指标生效：负载、质量、成本、派单周活、交付时长、自动化率、强制放行、上下文都只算这个项目）'),
+        : h('span', { className: HINT, 'data-analytics-scope': project }, '（全站生效）'),
       h(Select, {
         className: 'w-52', value: project, options: projectOptions,
         'aria-label': '按项目筛选',
@@ -350,7 +350,7 @@ export function AnalyticsPage({ state, onOpenTask, onFixPrices }) {
     })(),
     h('div', { className: SECTION, 'data-analytics-panel': 'overview' },
       '质量',
-      h('span', { className: HINT }, '产品定义第 4 节那五条可断言的指标：验收一次通过率、自动化率、需求交付时长、用例覆盖强度、派单周活'),
+      h('span', { className: HINT }, '产品定义第 4 节那五条可断言的指标'),
     ),
     h('div', { className: KPI_GRID, 'data-analytics-panel': 'overview' },
       kpi(ALARM.gate.label, gate.rate === null ? '—' : alarmText(gate.rate, ALARM.gate), gate.cards === 0 ? '还没有走到验收的卡' : `${gate.firstPass}/${gate.cards} 张第一次进待验收就完成 · 目标 ${ALARM.gate.target}`, alarmHit(gate.rate, ALARM.gate)),
@@ -398,7 +398,7 @@ export function AnalyticsPage({ state, onOpenTask, onFixPrices }) {
        「不参与准出」写进标题本身。 */
     h('div', { className: SECTION, 'data-analytics-panel': 'overview' },
       '诊断读数（找原因用，不参与准出门禁）',
-      h('span', { className: HINT }, '与上面的门槛指标不同权：用来定位「为什么慢」，不做准出判断'),
+      h('span', { className: HINT }, '与门槛指标不同权：定位「为什么慢」，不做准出判断'),
     ),
     h('div', { className: PANEL + ' mt-3', 'data-analytics-panel': 'overview', 'data-diagnostics': '' },
       h('div', { className: PANEL_BODY },

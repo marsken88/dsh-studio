@@ -19,7 +19,7 @@ const STAT_VALUE = 'text-title-2-semibold text-text-primary tabular-nums'
 const HINT = 'text-caption-1-regular text-text-tertiary'
 
 export function createProjectsPage({ h, React, api }) {
-  return function ProjectsOverview({ state, onOpenBoard, onOpenSettings }) {
+  return function ProjectsOverview({ state, onOpenBoard, onOpenSettings, onOpenTask }) {
     const [metrics, setMetrics] = React.useState(null)
     const [error, setError] = React.useState(null)
     React.useEffect(() => {
@@ -155,7 +155,12 @@ export function createProjectsPage({ h, React, api }) {
               'data-project-task': task.id,
             },
               h('span', { className: 'shrink-0 font-mono text-caption-1-regular text-text-tertiary' }, task.code || task.id),
-              h('span', { className: 'min-w-0 flex-1 truncate text-body-2-regular text-text-primary', title: task.title }, task.title),
+              h('button', {
+                className: 'min-w-0 flex-1 truncate text-left text-body-2-regular text-text-primary hover:underline',
+                title: task.title,
+                'data-unassigned-card': task.id,
+                onClick: () => { if (typeof onOpenTask === 'function') onOpenTask(task.id) },
+              }, task.title),
               h('span', { className: 'shrink-0 text-caption-1-regular text-text-secondary' }, statusLabel(task.status)),
               h('span', { className: 'shrink-0 text-caption-1-regular text-text-tertiary tabular-nums' }, fmtTime(task.updatedAt)),
             )),

@@ -222,7 +222,7 @@ export function ExpertsPanel({ config, onChanged }) {
     }),
     h('div', { className: 'flex min-w-0 flex-col gap-3 rounded-xl border border-separator-border bg-background-primary-default p-4', 'data-section': 'roles' },
       h('div', { className: SECTION_TITLE }, '角色位（岗位白名单）'),
-      h('div', { className: HINT }, '角色位是「按卡的业务领域挑人」的依据：专家的岗位、列负责人的角色位、卡片的 role 都按它校验。默认 产品 / 架构 / 研发 / 测试 / 运营；公司有财务、支持等岗位就在这里加——加完专家和列负责人立刻能选。删岗位前要先把用到它的专家和列改掉（平台会拦并说明还在用）。'),
+      h('div', { className: HINT }, '角色位是「按业务领域挑人」的依据（专家岗位 / 列负责人 / 卡片 role 都按它校验）。有财务、支持等岗位就在这里加；删岗位前先把用到它的专家和列改掉。'),
       h('div', { className: 'flex min-w-0 flex-wrap items-center gap-2', 'data-role-chips': roles.join(',') },
         roles.map(role => h(ChipField, { key: role, variant: 'gray', 'data-role-chip': role },
           ROLE_LABEL[role] ?? role,

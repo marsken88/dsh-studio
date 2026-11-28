@@ -496,7 +496,7 @@ export function ColumnsPanel({ state, onChanged }) {
     h('div', { className: SECTION, 'data-section': 'column-owners' },      h('div', { className: SECTION_HEAD },
         h('div', { className: 'flex min-w-0 flex-col gap-1' },
           h('div', { className: SECTION_TITLE }, '每一列由谁负责'),
-          h('div', { className: DESC }, '推荐挂「角色位」：澄清/验收挂产品经理、开发挂研发工程师、测试挂测试工程师——派单时会按卡片的业务领域自动挑对应领域专家（如支付产品经理）；也可以直接指定某位专家或专家团。一列可挂多人（候选池），一个都不挂就只把卡停在原地等人认领。'),
+          h('div', { className: DESC }, '推荐挂「角色位」：派单时按卡的业务领域自动挑对应专家（如支付产品经理）；也可直接指定专家或专家团。一列可挂多人（候选池），都不挂就停在原地等人认领。'),
         ),
       ),
       statuses.map(column => {
