@@ -32,6 +32,7 @@ const COLUMN_OWNER = 'flex-none truncate px-3 pb-2 text-caption-1-regular text-t
 const COLUMN_BODY = 'flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto p-2'
 /* p-4：其余页面左轨在 296（页面 p-4），看板列网格以前是 292，跨页会跳 4px。 */
 const BOARD_ROW = 'flex min-h-0 flex-1 items-stretch gap-2 overflow-x-auto overflow-y-hidden p-4'
+const ISSUE_LABEL = { overdue: '逾期', stalled: '停摆', gateFailed: '准出被拦', noRequirement: '未挂需求' }
 const HINT = 'text-caption-1-regular text-text-tertiary'
 const LABEL_ROW = 'flex cursor-pointer items-center gap-1 text-caption-1-regular text-text-secondary'
 const LABEL_ROW_WARN = 'flex cursor-pointer items-center gap-1 text-caption-1-regular text-text-error-primary'
@@ -58,13 +59,16 @@ const ROLE_ACCENT = {
 }
 
 export function createBoard({ h, React, Card, TextField, SearchField, SelectField, CheckField, toast }) {
-function Board({ state, onOpen, onMove, onWip, onCreate, initialProject = '' }) {
+function Board({ state, onOpen, onMove, onWip, onCreate, initialProject = '', initialIssue = '' }) {
   const config = state.config ?? {}
   const experts = config.experts ?? []
   const [query, setQuery] = React.useState('')
   const [expertFilter, setExpertFilter] = React.useState('')
   const [typeFilter, setTypeFilter] = React.useState('')
   const [projectFilter, setProjectFilter] = React.useState(initialProject)
+  /* 工作台/项目页点过来的「问题筛选」：逾期 / 停摆 / 准出被拦 / 未挂需求。
+     这些数在别处点得动，落到这里就得是筛好的看板，否则点进去等于没点。 */
+  const [issueFilter, setIssueFilter] = React.useState(initialIssue)
   const [iterationFilter, setIterationFilter] = React.useState('')
   const [serviceFilter, setServiceFilter] = React.useState('')
   const [requirementFilter, setRequirementFilter] = React.useState('')
@@ -115,7 +119,7 @@ function Board({ state, onOpen, onMove, onWip, onCreate, initialProject = '' }) 
       if (first !== undefined && typeof first.scrollIntoView === 'function') first.scrollIntoView({ block: 'nearest', inline: 'start' })
     }, 150)
     return () => clearTimeout(timer)
-  }, [query, expertFilter, typeFilter, projectFilter, iterationFilter, serviceFilter, requirementFilter, onlyBlocked, onlyNoBody])
+  }, [query, expertFilter, typeFilter, projectFilter, iterationFilter, serviceFilter, requirementFilter, onlyBlocked, onlyNoBody, issueFilter])
 
   const projects = config.projects ?? []
   const activeProject = projects.find(item => item.id === projectFilter)
@@ -125,6 +129,10 @@ function Board({ state, onOpen, onMove, onWip, onCreate, initialProject = '' }) 
     for (const column of state.statuses) map.set(column.id, [])
     for (const task of state.tasks) {
       if (onlyBlocked && !isOpenBlocked(task)) continue
+      if (issueFilter === 'overdue' && !(Number(task.dueAt) > 0 && Number(task.dueAt) < Date.now() && task.status !== 'done')) continue
+      if (issueFilter === 'stalled' && task.stalled !== true) continue
+      if (issueFilter === 'gateFailed' && !(task.gate?.ready === false && task.status !== 'done')) continue
+      if (issueFilter === 'noRequirement' && String(task.requirementId ?? '') !== '') continue
       if (onlyNoBody && artifactsWithoutBody(task).length === 0) continue
       if (typeFilter !== '' && (task.type ?? 'requirement') !== typeFilter) continue
       if (projectFilter !== '' && task.project !== projectFilter) continue
@@ -141,7 +149,7 @@ function Board({ state, onOpen, onMove, onWip, onCreate, initialProject = '' }) 
       list.sort((left, right) => (weight[left.priority] ?? 1) - (weight[right.priority] ?? 1) || right.updatedAt - left.updatedAt)
     }
     return map
-  }, [state, query, expertFilter, typeFilter, projectFilter, iterationFilter, serviceFilter, requirementFilter, onlyBlocked, onlyNoBody])
+  }, [state, query, expertFilter, typeFilter, projectFilter, iterationFilter, serviceFilter, requirementFilter, onlyBlocked, onlyNoBody, issueFilter])
   const total = [...byStatus.values()].reduce((sum, list) => sum + list.length, 0)
   const bugCount = [...byStatus.values()].reduce((sum, list) => sum + list.filter(task => task.type === 'bug').length, 0)
   const designPending = state.tasks.filter(task => task.design !== null && task.design !== undefined && task.design.status !== 'approved').length
@@ -154,7 +162,7 @@ function Board({ state, onOpen, onMove, onWip, onCreate, initialProject = '' }) 
      注意顺序：filtering 必须先声明。以前它写在 boardEmpty 后面，靠 && 短路侥幸不触发 ——
      空看板（新装用户）第一条就为 true，于是去读还没初始化的 filtering：
      `Cannot access 're' before initialization`（issue #6，macOS 桌面版首次打开看板）。 */
-  const filtering = query !== '' || expertFilter !== '' || typeFilter !== '' || onlyBlocked || onlyNoBody || projectFilter !== '' || iterationFilter !== '' || serviceFilter !== '' || requirementFilter !== ''
+  const filtering = query !== '' || expertFilter !== '' || typeFilter !== '' || onlyBlocked || onlyNoBody || projectFilter !== '' || iterationFilter !== '' || serviceFilter !== '' || requirementFilter !== '' || issueFilter !== ''
   const boardEmpty = (state.tasks ?? []).length === 0 && filtering === false
   return h('div', { className: ROOT, 'data-board': '' },
     /* 闸门关掉时要一眼看见：数据来自 /state.gates（服务端算好的按钮态），不是前端猜配置 */
@@ -237,6 +245,7 @@ function Board({ state, onOpen, onMove, onWip, onCreate, initialProject = '' }) 
       ),
       h('label', { className: LABEL_ROW },
         h(CheckField, { checked: hideEmpty, onChange: event => setHideEmpty(event.target.checked) }),
+
         h('span', {}, '隐藏空列'),
       ),
       h('label', {
@@ -274,11 +283,11 @@ function Board({ state, onOpen, onMove, onWip, onCreate, initialProject = '' }) 
       filtering
         ? h(Button, {
           variant: 'secondary', size: 'xs',
-          onClick: () => { setQuery(''); setExpertFilter(''); setTypeFilter(''); setOnlyBlocked(false); setOnlyNoBody(false); setProjectFilter(''); setIterationFilter(''); setServiceFilter(''); setRequirementFilter('') },
+          onClick: () => { setQuery(''); setExpertFilter(''); setTypeFilter(''); setOnlyBlocked(false); setOnlyNoBody(false); setProjectFilter(''); setIterationFilter(''); setServiceFilter(''); setRequirementFilter(''); setIssueFilter('') },
         }, '清除筛选')
         : null,
       h('span', { className: STAT, 'data-board-stat': '' },
-        `${total} 张卡 · ${designPending > 0 ? `${designPending} 个设计待评审 · ` : ''}${bugCount > 0 ? `${bugCount} 个缺陷` : `${columns.length} 列`}`),
+        `${ISSUE_LABEL[issueFilter] ? ISSUE_LABEL[issueFilter] + ' · ' : ''}${total} 张卡 · ${designPending > 0 ? `${designPending} 个设计待评审 · ` : ''}${bugCount > 0 ? `${bugCount} 个缺陷` : `${columns.length} 列`}`),
     ),
     h('div', { className: 'relative flex min-h-0 min-w-0 flex-1' },
     h('div', {

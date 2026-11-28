@@ -78,16 +78,17 @@ export function DashboardPage({ state, onOpenTask, onOpenBoard, onOpenCases }) {
   const ai = data.ai ?? {}
   // KPI 与任务行都是 BoardUI 的实现：与效能页共用同一套壳，不再和手写 KPI 卡混排。
   /* KPI 卡以前点了没反应（数字很刺眼但进不去）。现在整块可点、可键盘触发，落到看板。 */
-  const kpi = (label, value, hint, warn) => onOpenBoard === undefined
+  /* 第 5 个参数 issue：这张卡点下去要落到「筛好的看板」（逾期/停摆/准出被拦/未挂需求），
+     否则点进去等于没点。 */
+  const kpi = (label, value, hint, warn, issue) => onOpenBoard === undefined
     ? h(StatCard, { key: label, label, value: String(value ?? 0), hint, warn: warn === true })
     : h('div', {
       key: label,
       role: 'button',
       tabIndex: 0,
       'data-kpi-link': label,
-      'aria-label': `${label}：${value}，点开看板`,
       className: 'min-w-0 cursor-pointer rounded-2xl outline-none focus-visible:ring-2 focus-visible:ring-border-focus-ring',
-      onClick: () => onOpenBoard(),
+      onClick: () => onOpenBoard(issue === undefined ? undefined : { issue }),
       onKeyDown: event => {
         if (event.key !== 'Enter' && event.key !== ' ') return
         event.preventDefault()
@@ -141,11 +142,11 @@ export function DashboardPage({ state, onOpenTask, onOpenBoard, onOpenCases }) {
     h('div', { className: 'flex min-w-0 flex-col gap-2', 'data-stat-section': 'action' },
       h('div', { className: 'text-caption-1-medium text-text-tertiary' }, '今天要处理'),
       h('div', { className: KPI_GRID },
-        kpi('逾期', risks.overdue, '过了期望完成时间还没完成', risks.overdue > 0),
+        kpi('逾期', risks.overdue, '过了期望完成时间还没完成', risks.overdue > 0, 'overdue'),
         kpi('阻塞', risks.blocked, '挂着阻塞标记等人决策', risks.blocked > 0),
-        kpi('停摆', risks.stalled ?? 0, '派单中断过、不会再自动派单，要人点「重新派单」', (risks.stalled ?? 0) > 0),
+        kpi('停摆', risks.stalled ?? 0, '派单中断、不会自动恢复，要人点「重新派单」', (risks.stalled ?? 0) > 0, 'stalled'),
         kpi('缺陷超时', risks.slaOverdue, '按 P0-P3 时限算', risks.slaOverdue > 0),
-        kpi('准出被拦', risks.gateFailed, '待测试/待验收里过不了准出', risks.gateFailed > 0),
+        kpi('准出被拦', risks.gateFailed, '待测试/待验收里过不了准出', risks.gateFailed > 0, 'gateFailed'),
       ),
     ),
     h('div', { className: 'flex min-w-0 flex-col gap-2', 'data-stat-section': 'background' },
