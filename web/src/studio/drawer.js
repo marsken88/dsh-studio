@@ -3110,7 +3110,7 @@ function Drawer({ task, state, onClose, onChanged, onOpenTask = null }) {
                       ),
                     )
                     : h('div', {
-                      className: 'md-content min-w-0 rounded-xl border border-l-2 border-separator-border p-2 text-body-2-regular leading-relaxed '
+                      className: 'md-content min-w-0 rounded-xl border border-l-2 border-separator-border p-2 text-body-2-regular '
                         + (human ? 'bg-background-secondary-default ' : 'bg-background-primary-default ')
                         + roleRail,
                     },

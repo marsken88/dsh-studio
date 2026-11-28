@@ -241,7 +241,7 @@ export function ReleasesPage({ state, onOpenTask }) {
       ),
       release === null || release === undefined
         ? null
-        : h('div', { className: `${PANEL} mt-3` },
+        : h('div', { className: `${PANEL}` },
           h('div', { className: PANEL_HEAD }, '发布门禁',
             h('span', { className: HINT }, '卡全做完、没阻塞、缺陷关闭、用例没有失败，才算能发')),
           h('div', { className: PANEL_BODY },
@@ -313,7 +313,7 @@ export function ReleasesPage({ state, onOpenTask }) {
         ),
       release === null || release === undefined
         ? null
-        : h('div', { className: `${PANEL} mt-3` },
+        : h('div', { className: `${PANEL}` },
           h('div', { className: PANEL_HEAD }, '发布冒烟清单',
             h('span', { className: HINT }, `${(release.smoke ?? []).filter(item => item.done).length}/${(release.smoke ?? []).length} 项已过 · 发布前逐条点过，门禁才算过`)),
           h('div', { className: PANEL_BODY },
@@ -349,7 +349,7 @@ export function ReleasesPage({ state, onOpenTask }) {
         ),
       release === null || release === undefined
         ? null
-        : h('div', { className: `${PANEL} mt-3` },
+        : h('div', { className: `${PANEL}` },
           h('div', { className: PANEL_HEAD }, '审批、灰度与部署记录',
             h('span', { className: HINT }, `审批 ${(release.approvals ?? []).length} 条 · 灰度 ${(release.grayBatches ?? []).length} 批`)),
           h('div', { className: PANEL_BODY },
@@ -453,7 +453,7 @@ export function ReleasesPage({ state, onOpenTask }) {
         ),
       release === null || release === undefined
         ? null
-        : h('div', { className: `${PANEL} mt-3` },
+        : h('div', { className: `${PANEL}` },
           h('div', { className: PANEL_HEAD }, '这个版本里的卡', h('span', { className: HINT }, `${tasks.length} 张`)),
           h('div', { className: PANEL_BODY },
             tasks.length === 0
@@ -486,7 +486,7 @@ export function ReleasesPage({ state, onOpenTask }) {
         ),
       release === null || release === undefined
         ? null
-        : h('div', { className: `${PANEL} mt-3` },
+        : h('div', { className: `${PANEL}` },
           h('div', { className: PANEL_HEAD }, '发布说明',
             h(Button, {
               variant: 'ghost', size: 'sm', disabled: busy,

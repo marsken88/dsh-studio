@@ -20,6 +20,9 @@ const HINT = 'text-caption-1-regular text-text-tertiary'
 const LABEL = 'text-caption-1-medium text-text-secondary'
 /* 5 张卡：宽屏一排 5 张；窄一档时 2 列排不完，第 5 张横跨两列，
    避免「2+2+1」最后一行只剩一张窄卡（unslop：KPI 不许落单）。 */
+/* 每个 KPI 组都是 **5 张卡**（风险 5 张 / 整体 5 张），所以 xl 用 5 列刚好铺满；
+   sm 只有 2 列，第 5 张会单独占一行左侧留空 —— `sm:[&>*:last-child]:col-span-2` 是让它跨满收尾，
+   到 xl 再恢复 1 列。这是有意的，不是「数量与列数不匹配」的补丁。 */
 const KPI_GRID = 'grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-5 sm:[&>*:last-child]:col-span-2 xl:[&>*:last-child]:col-span-1'
 
 export function DashboardPage({ state, onOpenTask, onOpenBoard, onOpenCases }) {
