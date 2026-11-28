@@ -6,12 +6,12 @@
 
 | 项 | 值 |
 | --- | --- |
-| dsh-studio | `package.json` `version: 0.19.1` |
+| dsh-studio | `package.json` `version: 0.19.2` |
 | DeepSeek Harness | `0.2.2-rc.1`（`dsh --version`） |
 | Node | `v24.22.2`（Linux 目标机）；本机 Windows `v24.19.0` |
 | 目标系统 | Ubuntu 24.04，`dsh web` 监听 `18080`，nginx `:80` 反代并注入 `dsh-auth-*` cookie |
 | 插件安装方式 | npm：`dsh plugin --profile web add @marsken/dsh-studio`；本地开发：`add link:~/dsh-studio`（profile `web`） |
-| 验证范围 | 0.19.1：效能页重做（三批：样式 / 结构 / 页签 + 口径 + 跨页容器）与一批「看起来在跑其实没数据」的修正。`npm test` 787 条 / 786 通过 / 1 跳过（`TZ=UTC` 同）；`verify:pages` 56、`verify:drawer` 15、`verify:audit` 29 模块 0 违规、`release:check` 7 项；**目标机 192.168.120.218 真机**：panel 99/99、modules 41/41、e2e 3/3；2560 宽实测五页最宽文字块 572 / 786 / 1036 / 1406 / 1438 px（以前最长 2138）；`/state` 1.34 MB → 1.05 MB。0.19.0 及更早的验证记录见 git 历史。 |
+| 验证范围 | 0.19.2：三处静默失效的主题变量（灰字特异性 / 深色骨架 / 等宽回退）、卡片抽屉「执行记录」五批（结论优先 / 降噪 / 重排 / 窄屏 / 终验）、效能页四批（吸顶唯一 / 告警一张表 / 层级与左轨 / 结论可点）。`npm test` 812 条 / 811 通过 / 1 跳过（`TZ=UTC` 同）；`verify:pages` 56、`verify:audit` 29 模块 0 违规、`release:check` 7 项；**目标机 192.168.120.218 真机**：`probe:panel` **103/103**（含执行记录区块顺序与门禁四态）；深浅色截图 md5 不同、640px 抽屉面板 456px。0.19.1 及更早的验证记录见 git 历史。 |
 | 兼容声明 | `engines.dsh: ">=0.2.2-rc.1"`、`dsh.compatibility.dshReleases: { "0.2.2-rc.1+": "compatible" }` |
 
 > 结论：只在 **0.2.2-rc.1** 上做过端到端验证。0.2.2 正式版、以及 `<0.2.2` 均未验证。
