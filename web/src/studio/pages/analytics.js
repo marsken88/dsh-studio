@@ -267,6 +267,23 @@ export function AnalyticsPage({ state, onOpenTask, onFixPrices }) {
     return h('div', { className: `${PANEL} mt-3`, 'data-analytics-panel': 'context' }, head, h('div', { className: PANEL_BODY }, body))
   }
 
+  /* 「返工最多的卡」是质量指标，不是成本：以前它落在「成本」页签里，团队找卡点时没人会去那儿翻。 */
+  const renderReworkPanel = () => (
+      h('div', { className: 'xl:col-span-8' },
+        h(TaskList, {
+          title: '返工最多的卡',
+          aside: `评审打回 ${data.rework.reviewRework} 次 · 测试打回 ${data.rework.testRework} 次`,
+          empty: '没有卡倒退过，挺好。',
+        },
+          (data.rework.worst ?? []).map(item => h(TaskRow, {
+            key: item.id,
+            title: `${item.code === '' ? '' : `${item.code} `}${item.title}`,
+            hint: `倒退 ${item.backward} 次 · 现在在「${(state.statuses.find(entry => entry.id === item.status) ?? {}).label ?? item.status}」`,
+            action: h(Button, { variant: 'ghost', size: 'sm', onClick: () => onOpenTask(item.id) }, '打开'),
+          })),
+        ),
+      )
+  )
   return h('div', { className: PAGE, 'data-analytics-page': '', 'data-analytics-pane': pane, ref: pageRef },
     secondaryError === null ? null : h('div', { className: 'mb-2 text-caption-1-regular text-text-error-primary' }, `部分数据没加载出来：${secondaryError}（负载 / 燃尽 / 成本 / 质量可能是空的或旧的）`),
     /* 筛选行不吸顶：它和下面的页签行曾经都是 sticky top-0，两层同 z 叠在一起，
@@ -566,6 +583,7 @@ export function AnalyticsPage({ state, onOpenTask, onFixPrices }) {
           h('div', { className: KV }, h('span', {}, '已合并'), h('b', {}, `${data.ai.merged}`)),
         ),
       ),
+      renderReworkPanel(),
     ),
     /* 团队负载与燃尽讲的是「节奏」，不是 AI 质量：跟周期分布、每列停留放一起。 */
     h('div', { className: GRID, 'data-analytics-panel': 'rhythm', 'data-rhythm-load': '' },
@@ -664,20 +682,6 @@ export function AnalyticsPage({ state, onOpenTask, onFixPrices }) {
               h('div', { className: HINT },
                 `${costs.budget.runs}/${costs.budget.budgetRuns} 次 · ${costs.budget.hours}/${costs.budget.budgetHours} 小时 · ${costs.budget.hint}`),
             ),
-        ),
-      ),
-      h('div', { className: 'xl:col-span-8' },
-        h(TaskList, {
-          title: '返工最多的卡',
-          aside: `评审打回 ${data.rework.reviewRework} 次 · 测试打回 ${data.rework.testRework} 次`,
-          empty: '没有卡倒退过，挺好。',
-        },
-          (data.rework.worst ?? []).map(item => h(TaskRow, {
-            key: item.id,
-            title: `${item.code === '' ? '' : `${item.code} `}${item.title}`,
-            hint: `倒退 ${item.backward} 次 · 现在在「${(state.statuses.find(entry => entry.id === item.status) ?? {}).label ?? item.status}」`,
-            action: h(Button, { variant: 'ghost', size: 'sm', onClick: () => onOpenTask(item.id) }, '打开'),
-          })),
         ),
       ),
     ),
