@@ -1928,7 +1928,7 @@ function installKeyboardActivation() {
           : null,
         /* key=id：切换卡片时强制重新挂载，否则 draft/plan/comment 这些本地 state 会沿用上一张卡的值 ——
            表现是在 B 卡里看到 A 卡的标题，点保存把 A 的标题写到 B 上。 */
-        openTask !== null ? h(Drawer, { key: openTask.id, task: openTask, state, onClose: () => setOpenId(null), onChanged: reload, onOpenTask: id => setOpenId(id) }) : null,
+        openTask !== null ? h(Drawer, { key: openTask.id, task: openTask, state, onClose: () => setOpenId(null), onChanged: reload, onOpenTask: id => setOpenId(id), onOpenRequirement: id => { setOpenId(null); setFocusReq({ id, at: Date.now() }); setTab('requirements') } }) : null,
         creating ? h(NewTaskDialog, { state, onClose: () => setCreating(false), onCreated: reload }) : null,
         showLogin
           ? h(LoginGateView, {

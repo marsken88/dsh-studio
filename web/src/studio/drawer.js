@@ -139,7 +139,7 @@ function SectionHead({ children }) {
   return h('div', { className: SECTION_HEAD }, h('div', { className: SECTION_TITLE }, list[0]), list.slice(1))
 }
 
-function Drawer({ task, state, onClose, onChanged, onOpenTask = null }) {
+function Drawer({ task, state, onClose, onChanged, onOpenTask = null, onOpenRequirement = null }) {
   const [busy, setBusy] = React.useState(false)
   const [error, setError] = React.useState(null)
   /* 状态历史全文（/state 只带最近 12 条）：null = 未加载，直接用 task.history。 */
@@ -2974,7 +2974,10 @@ function Drawer({ task, state, onClose, onChanged, onOpenTask = null }) {
         h('dt', {}, '编号'), h('dd', {}, task.code === undefined || task.code === '' ? '未挂需求（无编号）' : task.code),
         h('dt', {}, '所属需求'), h('dd', {}, (() => {
           const req = (state.requirements ?? []).find(item => item.id === task.requirementId)
-          return req === undefined ? '未挂需求' : `${req.code || req.id}｜${req.title}`
+          if (req === undefined) return '未挂需求'
+          const label = `${req.code || req.id}｜${req.title}`
+          /* 卡 → 需求以前没有入口（纯文本），这里点开需求详情。 */
+          return typeof onOpenRequirement === 'function' ? h('button', { className: 'hover:underline', onClick: () => onOpenRequirement(req.id) }, label) : label
         })()),
         h('dt', {}, '所属项目'), h('dd', {}, (state.config?.projects ?? []).find(item => item.id === task.project)?.name ?? '未归属项目'),
         h('dt', {}, '迭代'), h('dd', {}, ((state.config?.projects ?? []).find(item => item.id === task.project)?.iterations ?? []).find(item => item.id === task.iteration)?.name ?? '未排期'),

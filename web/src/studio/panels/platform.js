@@ -256,7 +256,7 @@ export function LdapPanel({ config, onChanged }) {
       note === null ? null : h('div', { className: OK, role: 'status' }, note),
       error === null ? null : h('div', { className: ERR, role: 'alert' }, error),
       h('div', { className: HINT },
-        '依赖系统里的 ldapsearch（Ubuntu：apt-get install ldap-utils）。密码只写进 ~/.dsh/dsh-studio.secrets.json（0600），不会出现在状态、导出和日志里。'),
+        '依赖系统 ldapsearch（apt-get install ldap-utils）。密码只写进 secrets.json（0600），不进状态/导出/日志。'),
     ),
     h('div', { className: SECTION, 'data-section': 'local-admin' },
       h('div', { className: SECTION_TITLE }, '本地超管账号'),
@@ -381,7 +381,7 @@ export function CostsPanel({ config, onChanged, suggestModels }) {
         fieldOf(h, '警告阈值（百分比）',
           h(TextField, { value: warnAt, onChange: event => setWarnAt(event.target.value) })),
       ),
-      h('div', { className: HINT }, '效能页的「AI 执行成本」会显示真实 token 用量（读 studio-* 会话日志）。要显示钱就在 config.costs.prices 里配价目表：[{ "model": "deepseek-v4.1-flash", "input": 2, "output": 8, "cacheRead": 0.2 }]，单位是元 / 百万 token；没配价目的调用记「未知」，不按 0 算。'),
+      h('div', { className: HINT }, '效能页「AI 执行成本」读 studio-* 日志算 token；要显示钱就在 config.costs.prices 配价目（单位：元 / 百万 token，示例见 docs/manual.md）；没配价目记「未知」，不按 0 算。'),
       h('div', { className: DIVIDER },
         h('div', { className: LABEL }, '价目表（元 / 百万 token）'),
         suggested > 0

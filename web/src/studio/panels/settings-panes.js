@@ -127,7 +127,7 @@ export function AutoDispatchPane({ form, setForm, saveBar }) {
         ['allow', '自动批准（推荐）：会话直接以完全权限运行（无沙箱，不再逐次审批）'],
         ['deny', '自动拒绝：只做沙箱允许的事，被拒的写进卡上评论'],
       ]),
-      h('div', { className: HINT }, '选「自动批准」= 派单 / 发起会话一开头就拿到完全权限（DSH 的 danger-full-access），不会再因为越界写入停下来问；选「自动拒绝」才把上面的沙箱档位当边界用，越界一律拒绝并写成卡上评论。专家自己的沙箱选「只读」时永远只读。'),
+      h('div', { className: HINT }, '选「自动批准」= 会话一开始就有完全权限（DSH danger-full-access），越界写入不再提问；选「自动拒绝」才把沙箱档位当边界，越界一律拒绝并写进卡评论。专家自己的沙箱选「只读」时永远只读。'),
       selectOf('执行播报写到哪里', 'agentsBroadcast', [
         ['feed', '卡上的「执行播报」（推荐）：讨论区只留人和专家的话'],
         ['comment', '写成评论（旧行为，会把讨论区刷满）'],

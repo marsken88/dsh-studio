@@ -356,7 +356,7 @@ export function ExpertsPanel({ config, onChanged }) {
         fieldOf(h, '角色提示词（每次派活都会作为系统提示发给这个专家）',
           h(TextAreaField, {
             rows: 9, value: draft.prompt,
-            placeholder: '例如：\n你是支付域的产品经理。先读 docs/ 与支付相关的 ADR，再动手。\n需求必须写清：目标用户、主流程、异常与退款路径、对账口径。\n不确定的地方去代码或历史工单里找证据，禁止编造接口字段。',
+            placeholder: '例如：\n你是支付域的产品经理。先读 docs/ 与支付相关的 ADR，再动手。\n需求写清：目标用户、主流程、异常与退款路径。\n不确定的地方去代码或历史工单里找证据，禁止编造接口字段。',
             onChange: e => set('prompt', e.target.value),
           })),
         h(SwitchToggle, {
