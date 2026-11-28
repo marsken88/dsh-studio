@@ -264,7 +264,7 @@ export function AnalyticsPage({ state, onOpenTask, onFixPrices }) {
       : contextsError !== null ? h('div', { className: 'text-caption-1-regular text-text-error-primary', 'data-contexts-error': '' }, `读不到会话日志：${contextsError}（这不是「没有数据」，是接口或日志读不出来）`)
         : rows.length === 0 ? h('div', { className: HINT }, '还没有专家会话记录。')
           : h('div', null, kpis, rows.map(renderContextRow))
-    return h('div', { className: `${PANEL} mt-3`, 'data-analytics-panel': 'context' }, head, h('div', { className: PANEL_BODY }, body))
+    return h('div', { className: `${PANEL}`, 'data-analytics-panel': 'context' }, head, h('div', { className: PANEL_BODY }, body))
   }
 
   /* 「返工最多的卡」是质量指标，不是成本：以前它落在「成本」页签里，团队找卡点时没人会去那儿翻。 */
@@ -374,7 +374,7 @@ export function AnalyticsPage({ state, onOpenTask, onFixPrices }) {
       /* 清单只回 10 条，总量单独给：以前用 rows.length 当总数，11 张卡缺断言时会写「10 张卡」。 */
       const cardTotal = Number(cases.byCardTotal ?? rows.length)
       if (rows.length === 0) return null
-      return h('div', { className: `${PANEL} mt-3`, 'data-analytics-panel': 'overview' },
+      return h('div', { className: `${PANEL}`, 'data-analytics-panel': 'overview' },
         h('div', { className: PANEL_HEAD },
           '用例缺口',
           h('span', { className: HINT, style: { marginLeft: 'auto' } }, '点一行跳到那张卡去补可执行断言')),
@@ -407,7 +407,8 @@ export function AnalyticsPage({ state, onOpenTask, onFixPrices }) {
         h('div', { className: KV }, h('span', {}, '中位周期'), h('b', { className: 'tabular-nums' }, fmtSpan(data.cycle.medianDays)), h('span', { className: HINT }, '平均 ' + fmtSpan(data.cycle.avgDays) + ' · P90 ' + fmtSpan(data.cycle.p90Days))),
         h('div', { className: KV }, h('span', {}, 'AI 交付物采纳率'), h('b', { className: 'tabular-nums' }, pct(data.ai.acceptedRate)), h('span', { className: HINT }, data.ai.accepted + '/' + data.ai.artifactsAi + ' 件已被验收 · 占全部交付物 ' + pct(data.ai.aiShare))),
       ),
-    ),    h('div', { className: `${PANEL} mt-3`, 'data-analytics-panel': 'overview' },
+    ),
+    h('div', { className: `${PANEL}`, 'data-analytics-panel': 'overview' },
       h('div', { className: PANEL_HEAD },
         '自动化率',
         h('span', { className: HINT }, '已交付需求里，全程没有人工介入（评论/换列/签字）的占比')),
@@ -422,7 +423,7 @@ export function AnalyticsPage({ state, onOpenTask, onFixPrices }) {
             ...(au.perRequirement ?? []).slice(0, 6).map(item => h('div', { key: item.id, className: FOOT, title: item.interventions === 0 ? '全程没人工介入' : '有人工介入点' },
               `${item.code || item.id} · 卡 ${item.tasks} 张 · 人工介入 ${item.interventions} 次${item.interventions === 0 ? '（零介入）' : ''}`)),
           ])),
-    h('div', { className: `${PANEL} mt-3`, 'data-analytics-panel': 'overview' },
+    h('div', { className: `${PANEL}`, 'data-analytics-panel': 'overview' },
       h('div', { className: PANEL_HEAD },
         '交付节奏',
         h('span', { className: HINT }, 'AI 每周碰到几张卡 · 需求从创建到签字花多久 · 验收第一次就过多少')),
@@ -471,7 +472,7 @@ export function AnalyticsPage({ state, onOpenTask, onFixPrices }) {
             ? { role: 'button', tabIndex: 0, 'data-override-open': item.id, onClick: () => onOpenTask(item.id), onKeyDown: event => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); onOpenTask(item.id) } } }
             : {}),
         }, `${item.kind === 'card' ? '卡' : '需求'} ${item.code || item.id} ${item.title} · ${item.by || '（没记签名人）'} · ${fmtTime(item.at)} — ${item.reason === '' ? '（没写原因）' : item.reason}`)
-        return h('div', { className: `${PANEL} mt-3`, 'data-analytics-panel': 'overview', 'data-override-panel': '' },
+        return h('div', { className: `${PANEL}`, 'data-analytics-panel': 'overview', 'data-override-panel': '' },
           h('div', { className: PANEL_HEAD },
             `${ov.overLimit ? '超限 · ' : ''}强制放行 ${ov.total} 次`,
             h('span', { className: HINT }, `卡 ${ov.cards} · 需求 ${ov.requirements}${ov.noReason > 0 ? ` · ${ov.noReason} 次没写原因` : ''}（区间内）`)),
