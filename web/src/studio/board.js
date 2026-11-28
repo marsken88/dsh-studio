@@ -124,7 +124,7 @@ function Board({ state, onOpen, onMove, onWip, onCreate, initialProject = '' }) 
     const map = new Map()
     for (const column of state.statuses) map.set(column.id, [])
     for (const task of state.tasks) {
-      if (onlyBlocked && (task.blocked ?? null) === null) continue
+      if (onlyBlocked && !isOpenBlocked(task)) continue
       if (onlyNoBody && artifactsWithoutBody(task).length === 0) continue
       if (typeFilter !== '' && (task.type ?? 'requirement') !== typeFilter) continue
       if (projectFilter !== '' && task.project !== projectFilter) continue
@@ -145,7 +145,9 @@ function Board({ state, onOpen, onMove, onWip, onCreate, initialProject = '' }) 
   const total = [...byStatus.values()].reduce((sum, list) => sum + list.length, 0)
   const bugCount = [...byStatus.values()].reduce((sum, list) => sum + list.filter(task => task.type === 'bug').length, 0)
   const designPending = state.tasks.filter(task => task.design !== null && task.design !== undefined && task.design.status !== 'approved').length
-  const blockedCount = state.tasks.filter(task => (task.blocked ?? null) !== null).length
+  /* 口径与宿主一致：未完成且挂阻塞（src/host/blocked.js）。已完成的卡留着标记不算阻塞。 */
+  const isOpenBlocked = task => (task.blocked ?? null) !== null && String(task.status ?? "") !== "done"
+  const blockedCount = state.tasks.filter(isOpenBlocked).length
   const noBodyCount = state.tasks.filter(task => artifactsWithoutBody(task).length > 0).length
   const columns = state.statuses.filter(column => !hideEmpty || (byStatus.get(column.id) ?? []).length > 0)
   /* 一张卡都没有时给一条「从零到一」的路，而不是让 8 列各写一句「暂无任务」。

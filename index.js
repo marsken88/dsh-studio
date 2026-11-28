@@ -492,7 +492,8 @@ function projectMetrics(tasks, now) {
   const week = 7 * 24 * 3600 * 1000
   for (const task of tasks) {
     if (byStatus[task.status] !== undefined) byStatus[task.status] += 1
-    if (task.blocked !== null && task.blocked !== undefined) blocked += 1
+    /* 只算未完成且挂阻塞（与工作台/门禁同一口径），已完成的卡不再计入。 */
+    if (task.blocked !== null && task.blocked !== undefined && String(task.status ?? '') !== 'done') blocked += 1
     if (task.createdAt > now - week) created += 1
     if (task.dueAt > 0 && task.dueAt < now && task.status !== 'done') overdue += 1
     if (task.type === 'bug' && task.status !== 'done') bugs += 1
@@ -551,7 +552,7 @@ function buildMetrics(state) {
           ...iteration,
           total: inIteration.length,
           done: inIteration.filter(task => task.status === 'done').length,
-          blocked: inIteration.filter(task => task.blocked !== null && task.blocked !== undefined).length,
+          blocked: inIteration.filter(task => task.blocked !== null && task.blocked !== undefined && String(task.status ?? '') !== 'done').length,
         }
       }),
       metrics: projectMetrics(tasks, now),
