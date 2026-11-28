@@ -267,6 +267,23 @@ export function AnalyticsPage({ state, onOpenTask, onFixPrices }) {
     return h('div', { className: `${PANEL} mt-3`, 'data-analytics-panel': 'context' }, head, h('div', { className: PANEL_BODY }, body))
   }
 
+  /* 「返工最多的卡」是质量指标，不是成本：以前它落在「成本」页签里，团队找卡点时没人会去那儿翻。 */
+  const renderReworkPanel = () => (
+      h('div', { className: 'xl:col-span-8' },
+        h(TaskList, {
+          title: '返工最多的卡',
+          aside: `评审打回 ${data.rework.reviewRework} 次 · 测试打回 ${data.rework.testRework} 次`,
+          empty: '没有卡倒退过，挺好。',
+        },
+          (data.rework.worst ?? []).map(item => h(TaskRow, {
+            key: item.id,
+            title: `${item.code === '' ? '' : `${item.code} `}${item.title}`,
+            hint: `倒退 ${item.backward} 次 · 现在在「${(state.statuses.find(entry => entry.id === item.status) ?? {}).label ?? item.status}」`,
+            action: h(Button, { variant: 'ghost', size: 'sm', onClick: () => onOpenTask(item.id) }, '打开'),
+          })),
+        ),
+      )
+  )
   return h('div', { className: PAGE, 'data-analytics-page': '', 'data-analytics-pane': pane, ref: pageRef },
     secondaryError === null ? null : h('div', { className: 'mb-2 text-caption-1-regular text-text-error-primary' }, `部分数据没加载出来：${secondaryError}（负载 / 燃尽 / 成本 / 质量可能是空的或旧的）`),
     /* 筛选行不吸顶：它和下面的页签行曾经都是 sticky top-0，两层同 z 叠在一起，
@@ -290,13 +307,15 @@ export function AnalyticsPage({ state, onOpenTask, onFixPrices }) {
     (() => {
       /* 产品定义要求「先结论、再分区」：这条结论讲的是**整个区间**（不随页签变），
        所以放在页签之上，并显式写明这一点，免得切到「上下文」还以为它在说上下文。 */
+      /* 每条越线项都带一个去向：点一下切到对应分区并回到顶部。
+         以前这里是纯文本 —— 它说「最该看 自动化率 13%」，却带不你去任何地方。 */
       const focus = []
       const coverage = data.cases?.rate ?? null
-      if (alarmHit(coverage, ALARM.coverage)) focus.push(`用例可执行覆盖 ${alarmText(coverage, ALARM.coverage)}（目标 ${ALARM.coverage.target}）`)
-      if (alarmHit(data.rework?.rate, ALARM.rework)) focus.push(`返工率 ${alarmText(data.rework.rate, ALARM.rework)}（目标 ${ALARM.rework.target}）`)
-      if (alarmHit(gate.rate, ALARM.gate)) focus.push(`${ALARM.gate.label} ${alarmText(gate.rate, ALARM.gate)}（目标 ${ALARM.gate.target}）`)
-      if (alarmHit(au.rate, ALARM.automation)) focus.push(`${ALARM.automation.label} ${alarmText(au.rate, ALARM.automation)}（目标 ${ALARM.automation.target}）`)
-      if (dispatchData.weeks.length > 0 && dispatchData.latest < dispatchData.target) focus.push('派单周活 ' + dispatchData.latest + ' 张（目标 ≥' + dispatchData.target + '）')
+      if (alarmHit(coverage, ALARM.coverage)) focus.push({ text: `用例可执行覆盖 ${alarmText(coverage, ALARM.coverage)}（目标 ${ALARM.coverage.target}）`, pane: 'overview', go: '用例缺口' })
+      if (alarmHit(data.rework?.rate, ALARM.rework)) focus.push({ text: `返工率 ${alarmText(data.rework.rate, ALARM.rework)}（目标 ${ALARM.rework.target}）`, pane: 'quality', go: 'AI 质量与返工' })
+      if (alarmHit(gate.rate, ALARM.gate)) focus.push({ text: `${ALARM.gate.label} ${alarmText(gate.rate, ALARM.gate)}（目标 ${ALARM.gate.target}）`, pane: 'rhythm', go: '交付节奏' })
+      if (alarmHit(au.rate, ALARM.automation)) focus.push({ text: `${ALARM.automation.label} ${alarmText(au.rate, ALARM.automation)}（目标 ${ALARM.automation.target}）`, pane: 'overview', go: '自动化率' })
+      if (dispatchData.weeks.length > 0 && dispatchData.latest < dispatchData.target) focus.push({ text: `派单周活 ${dispatchData.latest} 张（目标 ≥${dispatchData.target}）`, pane: 'rhythm', go: '交付节奏' })
       return h('div', {
         'data-analytics-focus': focus.length > 0 ? 'warn' : 'ok',
         className: 'flex min-w-0 flex-wrap items-baseline gap-2 rounded-xl border px-3 py-2 text-body-2-regular '
@@ -304,7 +323,15 @@ export function AnalyticsPage({ state, onOpenTask, onFixPrices }) {
       },
         h('b', { className: 'text-body-2-semibold' }, focus.length > 0 ? '现在最该看' : '关键指标'),
         h('span', { className: HINT, 'data-analytics-focus-scope': '' }, '（整个区间，不随页签变）'),
-        h('span', null, focus.length > 0 ? focus.join(' · ') : '没有触发告警线：门禁、返工、覆盖、自动化率、派单周活都在目标区间内。'))
+        focus.length === 0
+          ? h('span', null, '没有触发告警线：验收通过率、返工、覆盖、自动化率、派单周活都在目标区间内。')
+          : h('span', { className: 'flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-1' }, focus.map((item, index) => h('button', {
+            key: item.text,
+            className: 'rounded-md px-1 text-left underline decoration-dotted underline-offset-2 hover:bg-status-yellow-background/60',
+            'data-focus-goto': item.pane,
+            'aria-label': `${item.text}，去「${item.go}」看`,
+            onClick: () => { setPane(item.pane); if (pageRef.current !== null && pageRef.current !== undefined) pageRef.current.scrollTop = 0 },
+          }, item.text, h('span', { className: HINT }, ` 去「${item.go}」`), index < focus.length - 1 ? h('span', null, '·') : null))))
     })(),
     (() => {
       const tabs = [
@@ -401,8 +428,21 @@ export function AnalyticsPage({ state, onOpenTask, onFixPrices }) {
         h('span', { className: HINT }, 'AI 每周碰到几张卡 · 需求从创建到签字花多久 · 验收第一次就过多少')),
       h('div', { className: PANEL_BODY },
         h('div', { className: FOOT }, `派单周活：本周 ${dispatchData.latest} 张卡有 AI 评论 · 目标 ${dispatchData.target} · 近 8 周均值 ${dispatchData.average.toFixed(1)}${dispatchData.meetsTarget ? '（达标）' : ''}`),
-        h('div', { className: FOOT },
-          '近 8 周：' + (dispatchData.weeks ?? []).map(item => `${new Date(item.week).toLocaleDateString('zh-CN', { month: '2-digit', day: '2-digit' })} ${item.cards}`).join(' · ')),
+        /* 以前是一串「10/05 0 · 10/12 0 · …」，8 个数字挤成一行看不清趋势；这里用页内已有的 BarRow。 */
+        (() => {
+          const weeks = dispatchData.weeks ?? []
+          if (weeks.length === 0) return h('div', { className: HINT }, '还没有派单记录。')
+          const peak = Math.max(1, ...weeks.map(item => Number(item.cards) || 0))
+          const fmt = week => new Date(week).toLocaleDateString('zh-CN', { month: '2-digit', day: '2-digit' })
+          return h('div', { className: 'flex min-w-0 flex-col gap-1', 'data-dispatch-weeks': '' },
+            weeks.map(item => h(BarRow, {
+              key: String(item.week),
+              label: fmt(item.week),
+              ratio: (Number(item.cards) || 0) / peak,
+              display: String(item.cards ?? 0),
+              title: `${fmt(item.week)} 那周：${item.cards ?? 0} 张卡有 AI 评论`,
+            })))
+        })(),
         gate.rate === null
           ? h('div', { className: HINT }, '验收一次通过率：还没有走到验收的卡。')
           : h('div', { className: FOOT }, `被打回过 ${gate.cards - gate.firstPass} 张（分母 ${gate.cards} 张到过待验收）${gate.bounced.length > 0 ? '：' + gate.bounced.map(item => item.code || item.id).join('、') : ''}`),
@@ -543,6 +583,7 @@ export function AnalyticsPage({ state, onOpenTask, onFixPrices }) {
           h('div', { className: KV }, h('span', {}, '已合并'), h('b', {}, `${data.ai.merged}`)),
         ),
       ),
+      renderReworkPanel(),
     ),
     /* 团队负载与燃尽讲的是「节奏」，不是 AI 质量：跟周期分布、每列停留放一起。 */
     h('div', { className: GRID, 'data-analytics-panel': 'rhythm', 'data-rhythm-load': '' },
@@ -641,20 +682,6 @@ export function AnalyticsPage({ state, onOpenTask, onFixPrices }) {
               h('div', { className: HINT },
                 `${costs.budget.runs}/${costs.budget.budgetRuns} 次 · ${costs.budget.hours}/${costs.budget.budgetHours} 小时 · ${costs.budget.hint}`),
             ),
-        ),
-      ),
-      h('div', { className: 'xl:col-span-8' },
-        h(TaskList, {
-          title: '返工最多的卡',
-          aside: `评审打回 ${data.rework.reviewRework} 次 · 测试打回 ${data.rework.testRework} 次`,
-          empty: '没有卡倒退过，挺好。',
-        },
-          (data.rework.worst ?? []).map(item => h(TaskRow, {
-            key: item.id,
-            title: `${item.code === '' ? '' : `${item.code} `}${item.title}`,
-            hint: `倒退 ${item.backward} 次 · 现在在「${(state.statuses.find(entry => entry.id === item.status) ?? {}).label ?? item.status}」`,
-            action: h(Button, { variant: 'ghost', size: 'sm', onClick: () => onOpenTask(item.id) }, '打开'),
-          })),
         ),
       ),
     ),
