@@ -1562,7 +1562,9 @@ function installKeyboardActivation() {
     const TOPBAR_SUB = 'truncate text-caption-1-regular tabular-nums text-text-tertiary'
     const TOPBAR_ACTIONS = 'ml-auto flex flex-none flex-wrap items-center gap-2 max-[920px]:ml-0'
     const HEAD_TABS = 'flex flex-wrap items-center gap-3 pb-1 max-[760px]:gap-2'
-    const BODY = 'flex min-h-0 flex-1 flex-col gap-4 overflow-auto p-6'
+    /* 设置页以前是 p-6 撑满：2560 下内容宽 2025px、底色停在 #fafafa，切页签时左基线跳 8px。
+       现在与其它页同一套外壳：限宽 1440 居中、页面底色 secondary、padding 16。 */
+    const BODY = 'flex min-h-0 flex-1 flex-col gap-4 overflow-auto p-4 [&>*]:mx-auto [&>*]:w-full [&>*]:max-w-[1440px]'
     const HEAD_STAT = 'text-caption-1-regular text-text-tertiary max-[760px]:hidden'
     const SEG_GROUP = 'inline-flex items-center gap-1 rounded-lg border border-separator-border bg-background-secondary-default p-1'
     const MENU_SHELL = 'absolute right-0 top-[calc(100%+6px)] z-[80] min-w-[232px] rounded-xl border border-separator-border bg-background-primary-default p-1 shadow-lg'

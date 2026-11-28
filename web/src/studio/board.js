@@ -23,13 +23,15 @@ const TOOLBAR = 'flex flex-none flex-wrap items-center gap-2 border-b border-sep
    用 arbitrary 的 flex 简写，避免 w-[282px] 与 flex-1 同时在场时谁赢说不清。 */
 const COLUMN_BASE = 'flex flex-col overflow-hidden rounded-2xl border border-separator-border bg-background-secondary-default data-[drag-over="1"]:border-accent-500 data-[drag-over="1"]:bg-accent-50'
 const COLUMN_FIXED = 'w-auto min-w-[200px] max-w-[360px] flex-[1_1_200px]'
-const COLUMN_FIT = 'min-w-[160px] max-w-none flex-[1_1_0]'
-const COLUMN_HEAD = 'flex flex-none items-center gap-2 border-b border-separator-border bg-background-primary-default px-3 py-2'
+const COLUMN_FIT = 'min-w-[152px] max-w-none flex-[1_1_0]'
+/* px-4：列头文字与列内卡片同一条左轨（以前 305 vs 312）。 */
+const COLUMN_HEAD = 'flex flex-none items-center gap-2 border-b border-separator-border bg-background-primary-default px-4 py-2'
 const COLUMN_TITLE = 'min-w-0 truncate text-body-2-semibold text-text-primary'
-const COLUMN_COUNT = 'ml-auto min-w-6 shrink-0 rounded-full bg-background-secondary-default px-2 text-center text-caption-1-medium tabular-nums text-text-secondary data-[zero="1"]:opacity-50 data-[over="1"]:bg-status-rose-background data-[over="1"]:text-status-rose-text'
+const COLUMN_COUNT = 'ml-auto min-w-6 shrink-0 rounded-full border border-separator-border bg-background-secondary-default px-2 text-center text-caption-1-medium tabular-nums text-text-secondary data-[zero="1"]:text-text-tertiary data-[over="1"]:border-transparent data-[over="1"]:bg-status-rose-background data-[over="1"]:text-status-rose-text'
 const COLUMN_OWNER = 'flex-none truncate px-3 pb-2 text-caption-1-regular text-text-tertiary'
 const COLUMN_BODY = 'flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto p-2'
-const BOARD_ROW = 'flex min-h-0 flex-1 items-stretch gap-3 overflow-x-auto overflow-y-hidden p-3'
+/* p-4：其余页面左轨在 296（页面 p-4），看板列网格以前是 292，跨页会跳 4px。 */
+const BOARD_ROW = 'flex min-h-0 flex-1 items-stretch gap-2 overflow-x-auto overflow-y-hidden p-4'
 const HINT = 'text-caption-1-regular text-text-tertiary'
 const LABEL_ROW = 'flex cursor-pointer items-center gap-1 text-caption-1-regular text-text-secondary'
 const LABEL_ROW_WARN = 'flex cursor-pointer items-center gap-1 text-caption-1-regular text-text-error-primary'
@@ -66,6 +68,9 @@ function Board({ state, onOpen, onMove, onWip, onCreate, initialProject = '' }) 
   const [iterationFilter, setIterationFilter] = React.useState('')
   const [serviceFilter, setServiceFilter] = React.useState('')
   const [requirementFilter, setRequirementFilter] = React.useState('')
+  /* 空列**不**默认收起：收起后就没法把卡拖进空列（探针 ⑥c 当场抓到 target=false）。
+     真正的问题不是列多，而是列太宽：8 列 ×160 + 7×12 = 1364px > 可见 1296px，首屏唯一有卡的列被裁到 87px。
+     已把列宽收到 152、gap 收到 8（合计 1272px），8 列都能进首屏，空列仍可拖入。 */
   const [hideEmpty, setHideEmpty] = React.useState(false)
   // 列多时默认给可读列宽、横向滚；打开这个把列压到一屏看全（记在本地）
   /* 横向滚动的边缘阴影：列多时让人一眼看出「右边还有列」。 */

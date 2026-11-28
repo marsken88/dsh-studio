@@ -11,6 +11,7 @@ import { Button } from '../../boardui/index'
 import { fmtTime } from '../format.js'
 import { EmptyState } from '../../boardui/empty-state'
 import { ProgressTrack } from '../../components/base/progress/progress'
+import { PAGE } from './layout.js'
 
 const SURFACE = 'flex min-w-0 flex-col gap-3 rounded-xl border border-separator-border bg-background-primary-default p-4'
 const STAT_LABEL = 'text-caption-1-regular text-text-tertiary'
@@ -110,7 +111,7 @@ export function createProjectsPage({ h, React, api }) {
     const unassigned = metrics.unassigned
     const hasUnassigned = unassigned !== null && unassigned !== undefined && unassigned.total > 0
 
-    return h('div', { className: 'flex flex-col gap-4 p-4', 'data-projects-page': '' },
+    return h('div', { className: PAGE, 'data-projects-page': '' },
       /* 项目页以前只能看、不能建：新建/编辑入口藏在设置里，人找不到。 */
       h('div', { className: 'flex flex-wrap items-center justify-between gap-2' },
         h('div', { className: 'flex min-w-0 flex-col gap-1' },

@@ -411,7 +411,8 @@
   --color-chart-agents-bar-active: var(--color-purple-400);
 
   /* Button gradients */
-  --gradient-button-primary-default:  linear-gradient(180deg, var(--color-accent-500)    0%, var(--color-accent-600)    100%);
+  /* 白字压在 accent-500 上只有 3.76:1（hover 3.14）—— 全站主行动不达 AA。起点提到 accent-600（5.25:1）。 */
+  --gradient-button-primary-default:  linear-gradient(180deg, var(--color-accent-600)    0%, var(--color-accent-700)    100%);
   --gradient-button-primary-hover:    linear-gradient(180deg, var(--color-accent-400)    0%, var(--color-accent-500)    100%);
   --gradient-button-primary-active:   linear-gradient(180deg, var(--color-accent-600)    0%, var(--color-accent-700)    100%);
   --gradient-button-primary-disabled: linear-gradient(180deg, var(--color-neutral-200) 0%, var(--color-neutral-300) 100%);
@@ -572,7 +573,7 @@
   --color-border-table:            var(--color-neutral-800);
   --color-border-button-group:     color-mix(in srgb, var(--color-neutral-600) 60%, transparent);
   --color-border-sidebar-profile-hover: var(--color-neutral-600);
-  --color-separator-border:        var(--color-neutral-600);
+  --color-separator-border:        var(--color-neutral-500);
   --color-separator-border-strong: color-mix(in srgb, var(--color-neutral-700) 60%, transparent);
 
   /* Figma's dark table status pairs. */
